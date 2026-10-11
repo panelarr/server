@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -21,8 +22,11 @@ import (
 	"github.com/panelarr/server/internal/auth"
 	"github.com/panelarr/server/internal/buildinfo"
 	"github.com/panelarr/server/internal/config"
+	"github.com/panelarr/server/internal/imagecache"
 	"github.com/panelarr/server/internal/logging"
+	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/metrics"
+	"github.com/panelarr/server/internal/secret"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/users"
 )
@@ -136,15 +140,28 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	usersSvc := users.NewService(st, authSvc, logging.Component(log, "users"))
 	go authSvc.RunCleanup(ctx, time.Hour)
 
+	box := secret.NewBox(cfg.SecretKey, filepath.Join(cfg.ConfigDir, "secret.key"))
+	metaSvc := meta.NewService(st, box, meta.Conn{URL: cfg.MetaURL, APIKey: cfg.MetaAPIKey}, logging.Component(log, "meta"))
+	if err := metaSvc.Load(ctx); err != nil {
+		// The server still starts: degraded, and an admin can reconnect.
+		log.Error("metadata service connection", "component", "meta", "err", err)
+	}
+	images := imagecache.New(filepath.Join(cfg.ConfigDir, "cache", "images"))
+
 	handler, err := api.NewHandler(api.Deps{
 		Log:          logging.Component(log, "api"),
 		Metrics:      m,
 		MetricsOnAPI: cfg.Metrics.Listen == "",
 		Checks: []api.Check{
 			{Name: "database", Required: true, Run: st.Pool.Ping},
+			// The library needs the metadata service, but reading what's
+			// downloaded doesn't: without it the server is degraded.
+			{Name: "meta", Run: metaSvc.ReadyCheck},
 		},
 		Auth:           authSvc,
 		Users:          usersSvc,
+		Meta:           metaSvc,
+		Images:         images,
 		SecureCookies:  cfg.SecureCookies(),
 		TrustedProxies: cfg.TrustedProxies,
 	})

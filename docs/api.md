@@ -20,6 +20,10 @@ Every operation in the spec declares who may call it (`x-panelarr-access`: `publ
 
 Until the first account exists, every endpoint except `GET /system/info`, `GET /setup` and `POST /setup/admin` answers `409 setup_required`. `GET /system/info` tells clients whether setup is needed (`setup_required`).
 
+## The catalogue
+
+`/catalog/search`, `/catalog/browse` and `/catalog/entries/{id}` show the metadata service's catalogue, limited to the caller's content-rating ceiling (entries above it answer `404` like missing ones). Covers come from `/catalog/entries/{id}/cover`, served by Panelarr, never from the metadata sites. Text comes in the `lang` parameter's language, else the `Accept-Language` header's.
+
 ## Validation
 
 Requests are checked against the spec before they reach a handler: wrong types, missing fields, unknown enum values, lengths and patterns answer `400 invalid_request` with one `errors` entry per field.

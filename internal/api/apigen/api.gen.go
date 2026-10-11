@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -41,6 +42,27 @@ func (e ApiKeyScope) Valid() bool {
 	case ApiKeyScopeRead:
 		return true
 	case ApiKeyScopeWrite:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CatalogDescriptionFormat.
+const (
+	CatalogDescriptionFormatHtml     CatalogDescriptionFormat = "html"
+	CatalogDescriptionFormatMarkdown CatalogDescriptionFormat = "markdown"
+	CatalogDescriptionFormatPlain    CatalogDescriptionFormat = "plain"
+)
+
+// Valid indicates whether the value is a known member of the CatalogDescriptionFormat enum.
+func (e CatalogDescriptionFormat) Valid() bool {
+	switch e {
+	case CatalogDescriptionFormatHtml:
+		return true
+	case CatalogDescriptionFormatMarkdown:
+		return true
+	case CatalogDescriptionFormatPlain:
 		return true
 	default:
 		return false
@@ -83,6 +105,33 @@ func (e ContentRating) Valid() bool {
 	case ContentRatingSafe:
 		return true
 	case ContentRatingSuggestive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EntryContentRating.
+const (
+	EntryContentRatingErotic       EntryContentRating = "erotic"
+	EntryContentRatingPornographic EntryContentRating = "pornographic"
+	EntryContentRatingSafe         EntryContentRating = "safe"
+	EntryContentRatingSuggestive   EntryContentRating = "suggestive"
+	EntryContentRatingUnknown      EntryContentRating = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the EntryContentRating enum.
+func (e EntryContentRating) Valid() bool {
+	switch e {
+	case EntryContentRatingErotic:
+		return true
+	case EntryContentRatingPornographic:
+		return true
+	case EntryContentRatingSafe:
+		return true
+	case EntryContentRatingSuggestive:
+		return true
+	case EntryContentRatingUnknown:
 		return true
 	default:
 		return false
@@ -146,6 +195,24 @@ func (e Role) Valid() bool {
 	}
 }
 
+// Defines values for RunMetaSyncRequestKind.
+const (
+	RunMetaSyncRequestKindDelta RunMetaSyncRequestKind = "delta"
+	RunMetaSyncRequestKindDump  RunMetaSyncRequestKind = "dump"
+)
+
+// Valid indicates whether the value is a known member of the RunMetaSyncRequestKind enum.
+func (e RunMetaSyncRequestKind) Valid() bool {
+	switch e {
+	case RunMetaSyncRequestKindDelta:
+		return true
+	case RunMetaSyncRequestKindDump:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SystemInfoName.
 const (
 	SystemInfoNamePanelarr SystemInfoName = "panelarr"
@@ -155,6 +222,96 @@ const (
 func (e SystemInfoName) Valid() bool {
 	switch e {
 	case SystemInfoNamePanelarr:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CatalogSort.
+const (
+	CatalogSortPopularity CatalogSort = "popularity"
+	CatalogSortRating     CatalogSort = "rating"
+	CatalogSortRelevance  CatalogSort = "relevance"
+	CatalogSortTitle      CatalogSort = "title"
+	CatalogSortUpdated    CatalogSort = "updated"
+	CatalogSortYear       CatalogSort = "year"
+)
+
+// Valid indicates whether the value is a known member of the CatalogSort enum.
+func (e CatalogSort) Valid() bool {
+	switch e {
+	case CatalogSortPopularity:
+		return true
+	case CatalogSortRating:
+		return true
+	case CatalogSortRelevance:
+		return true
+	case CatalogSortTitle:
+		return true
+	case CatalogSortUpdated:
+		return true
+	case CatalogSortYear:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BrowseCatalogParamsSort.
+const (
+	BrowseCatalogParamsSortPopularity BrowseCatalogParamsSort = "popularity"
+	BrowseCatalogParamsSortRating     BrowseCatalogParamsSort = "rating"
+	BrowseCatalogParamsSortRelevance  BrowseCatalogParamsSort = "relevance"
+	BrowseCatalogParamsSortTitle      BrowseCatalogParamsSort = "title"
+	BrowseCatalogParamsSortUpdated    BrowseCatalogParamsSort = "updated"
+	BrowseCatalogParamsSortYear       BrowseCatalogParamsSort = "year"
+)
+
+// Valid indicates whether the value is a known member of the BrowseCatalogParamsSort enum.
+func (e BrowseCatalogParamsSort) Valid() bool {
+	switch e {
+	case BrowseCatalogParamsSortPopularity:
+		return true
+	case BrowseCatalogParamsSortRating:
+		return true
+	case BrowseCatalogParamsSortRelevance:
+		return true
+	case BrowseCatalogParamsSortTitle:
+		return true
+	case BrowseCatalogParamsSortUpdated:
+		return true
+	case BrowseCatalogParamsSortYear:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SearchCatalogParamsSort.
+const (
+	SearchCatalogParamsSortPopularity SearchCatalogParamsSort = "popularity"
+	SearchCatalogParamsSortRating     SearchCatalogParamsSort = "rating"
+	SearchCatalogParamsSortRelevance  SearchCatalogParamsSort = "relevance"
+	SearchCatalogParamsSortTitle      SearchCatalogParamsSort = "title"
+	SearchCatalogParamsSortUpdated    SearchCatalogParamsSort = "updated"
+	SearchCatalogParamsSortYear       SearchCatalogParamsSort = "year"
+)
+
+// Valid indicates whether the value is a known member of the SearchCatalogParamsSort enum.
+func (e SearchCatalogParamsSort) Valid() bool {
+	switch e {
+	case SearchCatalogParamsSortPopularity:
+		return true
+	case SearchCatalogParamsSortRating:
+		return true
+	case SearchCatalogParamsSortRelevance:
+		return true
+	case SearchCatalogParamsSortTitle:
+		return true
+	case SearchCatalogParamsSortUpdated:
+		return true
+	case SearchCatalogParamsSortYear:
 		return true
 	default:
 		return false
@@ -201,6 +358,153 @@ type ApiKeyList struct {
 
 // ApiKeyScope defines model for ApiKeyScope.
 type ApiKeyScope string
+
+// Attribution Where data comes from and under which terms. Show it next to the data.
+type Attribution struct {
+	License    *string `json:"license,omitempty"`
+	LicenseUrl *string `json:"license_url,omitempty"`
+	Notice     *string `json:"notice,omitempty"`
+	Provider   string  `json:"provider"`
+	Url        *string `json:"url,omitempty"`
+}
+
+// CatalogCover defines model for CatalogCover.
+type CatalogCover struct {
+	// Blurhash A placeholder to show while the image loads.
+	Blurhash  *string `json:"blurhash,omitempty"`
+	Height    *int    `json:"height,omitempty"`
+	Thumbhash *string `json:"thumbhash,omitempty"`
+
+	// Url The server's URL for the image, relative to the server, e.g. "/api/v1/catalog/entries/{id}/cover".
+	Url   string `json:"url"`
+	Width *int   `json:"width,omitempty"`
+}
+
+// CatalogCredit defines model for CatalogCredit.
+type CatalogCredit struct {
+	Name     string  `json:"name"`
+	PersonId *string `json:"person_id,omitempty"`
+
+	// Role author, artist, writer, illustrator, original_creator, …
+	Role string `json:"role"`
+}
+
+// CatalogDescription defines model for CatalogDescription.
+type CatalogDescription struct {
+	// Format HTML comes from the provider; sanitise it before showing.
+	Format   CatalogDescriptionFormat `json:"format"`
+	Language *string                  `json:"language,omitempty"`
+	Text     string                   `json:"text"`
+}
+
+// CatalogDescriptionFormat HTML comes from the provider; sanitise it before showing.
+type CatalogDescriptionFormat string
+
+// CatalogEntry defines model for CatalogEntry.
+type CatalogEntry struct {
+	Attribution      []Attribution        `json:"attribution"`
+	ContentRating    EntryContentRating   `json:"content_rating"`
+	Cover            *CatalogCover        `json:"cover,omitempty"`
+	Credits          []CatalogCredit      `json:"credits"`
+	Descriptions     []CatalogDescription `json:"descriptions"`
+	EndYear          *int                 `json:"end_year,omitempty"`
+	ExternalIds      []CatalogExternalId  `json:"external_ids"`
+	Genres           []string             `json:"genres"`
+	Id               string               `json:"id"`
+	Links            []CatalogLink        `json:"links"`
+	OriginalLanguage *string              `json:"original_language,omitempty"`
+	Status           *string              `json:"status,omitempty"`
+	Tags             []CatalogTag         `json:"tags"`
+	Title            string               `json:"title"`
+	Titles           []CatalogTitle       `json:"titles"`
+	Type             *string              `json:"type,omitempty"`
+
+	// Year The year it started.
+	Year *int `json:"year,omitempty"`
+}
+
+// CatalogEntrySummary defines model for CatalogEntrySummary.
+type CatalogEntrySummary struct {
+	Attribution      []Attribution      `json:"attribution"`
+	ContentRating    EntryContentRating `json:"content_rating"`
+	Cover            *CatalogCover      `json:"cover,omitempty"`
+	Genres           []string           `json:"genres"`
+	Id               string             `json:"id"`
+	OriginalLanguage *string            `json:"original_language,omitempty"`
+
+	// Rating Average score from 0 to 10, when known.
+	Rating *float32 `json:"rating,omitempty"`
+
+	// Status releasing, completed, hiatus, cancelled, upcoming or unknown. Absent when unknown.
+	Status *string `json:"status,omitempty"`
+
+	// Title The title in the requested language when known.
+	Title string `json:"title"`
+
+	// Type e.g. manga, manhwa, manhua, webtoon, comic, light_novel. Absent when unknown; the list may grow.
+	Type *string `json:"type,omitempty"`
+	Year *int    `json:"year,omitempty"`
+}
+
+// CatalogExternalId defines model for CatalogExternalId.
+type CatalogExternalId struct {
+	Id       string  `json:"id"`
+	Provider string  `json:"provider"`
+	Url      *string `json:"url,omitempty"`
+}
+
+// CatalogLink defines model for CatalogLink.
+type CatalogLink struct {
+	Title *string `json:"title,omitempty"`
+	Type  string  `json:"type"`
+	Url   string  `json:"url"`
+}
+
+// CatalogPage defines model for CatalogPage.
+type CatalogPage struct {
+	Entries       []CatalogEntrySummary `json:"entries"`
+	NextPageToken string                `json:"next_page_token"`
+
+	// NoProviders The metadata service has no provider, so the catalogue is empty.
+	NoProviders bool `json:"no_providers"`
+
+	// TotalSize The number of matches, when the catalogue knows it.
+	TotalSize *int64 `json:"total_size,omitempty"`
+}
+
+// CatalogSearchHit defines model for CatalogSearchHit.
+type CatalogSearchHit struct {
+	Entry CatalogEntrySummary `json:"entry"`
+
+	// Matched The title or name that matched, when it isn't the shown title.
+	Matched *string `json:"matched,omitempty"`
+}
+
+// CatalogSearchPage defines model for CatalogSearchPage.
+type CatalogSearchPage struct {
+	Hits          []CatalogSearchHit `json:"hits"`
+	NextPageToken string             `json:"next_page_token"`
+	NoProviders   bool               `json:"no_providers"`
+	TotalSize     *int64             `json:"total_size,omitempty"`
+}
+
+// CatalogTag defines model for CatalogTag.
+type CatalogTag struct {
+	Genre   bool   `json:"genre"`
+	Name    string `json:"name"`
+	Spoiler bool   `json:"spoiler"`
+}
+
+// CatalogTitle defines model for CatalogTitle.
+type CatalogTitle struct {
+	// Kind official, native, romanized, alternative, unofficial or unknown.
+	Kind string `json:"kind"`
+
+	// Language BCP 47, e.g. "ja", "ja-Latn", "en".
+	Language *string `json:"language,omitempty"`
+	Primary  bool    `json:"primary"`
+	Text     string  `json:"text"`
+}
 
 // ChangePasswordRequest defines model for ChangePasswordRequest.
 type ChangePasswordRequest struct {
@@ -278,6 +582,9 @@ type CreateUserRequest struct {
 
 // DisplayName defines model for DisplayName.
 type DisplayName = string
+
+// EntryContentRating defines model for EntryContentRating.
+type EntryContentRating string
 
 // FieldError defines model for FieldError.
 type FieldError struct {
@@ -391,6 +698,49 @@ type Me struct {
 // MeAuthMethod defines model for Me.Auth.Method.
 type MeAuthMethod string
 
+// MetaCheck defines model for MetaCheck.
+type MetaCheck struct {
+	AdminScope bool      `json:"admin_scope"`
+	CheckedAt  time.Time `json:"checked_at"`
+	Configured bool      `json:"configured"`
+	KeyValid   bool      `json:"key_valid"`
+
+	// Problem What to do, when not ready.
+	Problem   *string        `json:"problem,omitempty"`
+	Providers []MetaProvider `json:"providers"`
+	Reachable bool           `json:"reachable"`
+
+	// Ready Reachable, an admin key, and a provider with entries.
+	Ready bool `json:"ready"`
+}
+
+// MetaConnection defines model for MetaConnection.
+type MetaConnection struct {
+	Check MetaCheck `json:"check"`
+
+	// ManagedByEnv The connection comes from PANELARR_META_URL and can't be changed here.
+	ManagedByEnv bool `json:"managed_by_env"`
+
+	// Url Empty when not connected. The key is never shown.
+	Url *string `json:"url,omitempty"`
+}
+
+// MetaProvider defines model for MetaProvider.
+type MetaProvider struct {
+	// Health ok, degraded, down or unknown.
+	Health  string  `json:"health"`
+	Id      string  `json:"id"`
+	Message *string `json:"message,omitempty"`
+
+	// Records Records the provider has delivered so far.
+	Records int64 `json:"records"`
+}
+
+// MetaSyncStarted defines model for MetaSyncStarted.
+type MetaSyncStarted struct {
+	RunId string `json:"run_id"`
+}
+
 // Password 8 to 256 characters.
 type Password = string
 
@@ -428,6 +778,15 @@ type Problem struct {
 // Role Admins may do everything; users what their grants allow.
 type Role string
 
+// RunMetaSyncRequest defines model for RunMetaSyncRequest.
+type RunMetaSyncRequest struct {
+	// Kind The sync kind the provider supports, "dump" (full import, the default) or "delta".
+	Kind *RunMetaSyncRequestKind `json:"kind,omitempty"`
+}
+
+// RunMetaSyncRequestKind The sync kind the provider supports, "dump" (full import, the default) or "delta".
+type RunMetaSyncRequestKind string
+
 // Session defines model for Session.
 type Session struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -446,6 +805,15 @@ type SessionList struct {
 	Sessions []Session `json:"sessions"`
 }
 
+// SetMetaConnectionRequest defines model for SetMetaConnectionRequest.
+type SetMetaConnectionRequest struct {
+	// ApiKey A key with the admin scope. Leave out to keep the stored one.
+	ApiKey *string `json:"api_key,omitempty"`
+
+	// Url The service's base URL, e.g. "http://meta:8901".
+	Url string `json:"url"`
+}
+
 // SetupStatus defines model for SetupStatus.
 type SetupStatus struct {
 	// AdminCreated The first account exists.
@@ -454,6 +822,12 @@ type SetupStatus struct {
 	// Completed An admin finished the wizard.
 	Completed   bool       `json:"completed"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
+
+	// MetaConfigured The metadata service is connected.
+	MetaConfigured bool `json:"meta_configured"`
+
+	// MetaReady The metadata service is usable (see `GET /system/meta` for details).
+	MetaReady bool `json:"meta_ready"`
 }
 
 // SystemHealth defines model for SystemHealth.
@@ -527,14 +901,112 @@ type UserList struct {
 // Username Letters, digits, `.`, `_` and `-`, starting with a letter or digit. Case-insensitively unique.
 type Username = string
 
+// CatalogGenre defines model for CatalogGenre.
+type CatalogGenre = []string
+
+// CatalogPageSize defines model for CatalogPageSize.
+type CatalogPageSize = int
+
+// CatalogSort defines model for CatalogSort.
+type CatalogSort string
+
+// CatalogStatus defines model for CatalogStatus.
+type CatalogStatus = []string
+
+// CatalogType defines model for CatalogType.
+type CatalogType = []string
+
+// EntryId defines model for EntryId.
+type EntryId = string
+
 // Id defines model for Id.
 type Id = openapi_types.UUID
+
+// Lang defines model for Lang.
+type Lang = string
 
 // PageSize defines model for PageSize.
 type PageSize = int
 
 // PageToken defines model for PageToken.
 type PageToken = string
+
+// Reverse defines model for Reverse.
+type Reverse = bool
+
+// YearFrom defines model for YearFrom.
+type YearFrom = int
+
+// YearTo defines model for YearTo.
+type YearTo = int
+
+// BrowseCatalogParams defines parameters for BrowseCatalog.
+type BrowseCatalogParams struct {
+	// Type Only these types, e.g. manga, manhwa, manhua, webtoon, comic, light_novel.
+	Type *CatalogType `form:"type,omitempty" json:"type,omitempty"`
+
+	// Status Only these statuses, e.g. releasing, completed, hiatus, cancelled, upcoming.
+	Status *CatalogStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Genre Only entries with all of these genres.
+	Genre    *CatalogGenre            `form:"genre,omitempty" json:"genre,omitempty"`
+	YearFrom *YearFrom                `form:"year_from,omitempty" json:"year_from,omitempty"`
+	YearTo   *YearTo                  `form:"year_to,omitempty" json:"year_to,omitempty"`
+	Sort     *BrowseCatalogParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
+
+	// Reverse Reverse the sort order.
+	Reverse *Reverse `form:"reverse,omitempty" json:"reverse,omitempty"`
+
+	// Lang Preferred language for titles and descriptions (BCP 47, e.g. "en", "ja-Latn"). Default from the Accept-Language header.
+	Lang *Lang `form:"lang,omitempty" json:"lang,omitempty"`
+
+	// PageSize Entries per page, 1 to 100. Default 30.
+	PageSize *CatalogPageSize `form:"page_size,omitempty" json:"page_size,omitempty"`
+
+	// PageToken The `next_page_token` of the previous page.
+	PageToken *PageToken `form:"page_token,omitempty" json:"page_token,omitempty"`
+}
+
+// BrowseCatalogParamsSort defines parameters for BrowseCatalog.
+type BrowseCatalogParamsSort string
+
+// GetCatalogEntryParams defines parameters for GetCatalogEntry.
+type GetCatalogEntryParams struct {
+	// Lang Preferred language for titles and descriptions (BCP 47, e.g. "en", "ja-Latn"). Default from the Accept-Language header.
+	Lang *Lang `form:"lang,omitempty" json:"lang,omitempty"`
+}
+
+// SearchCatalogParams defines parameters for SearchCatalog.
+type SearchCatalogParams struct {
+	Q string `form:"q" json:"q"`
+
+	// Type Only these types, e.g. manga, manhwa, manhua, webtoon, comic, light_novel.
+	Type *CatalogType `form:"type,omitempty" json:"type,omitempty"`
+
+	// Status Only these statuses, e.g. releasing, completed, hiatus, cancelled, upcoming.
+	Status *CatalogStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Genre Only entries with all of these genres.
+	Genre    *CatalogGenre            `form:"genre,omitempty" json:"genre,omitempty"`
+	YearFrom *YearFrom                `form:"year_from,omitempty" json:"year_from,omitempty"`
+	YearTo   *YearTo                  `form:"year_to,omitempty" json:"year_to,omitempty"`
+	Sort     *SearchCatalogParamsSort `form:"sort,omitempty" json:"sort,omitempty"`
+
+	// Reverse Reverse the sort order.
+	Reverse *Reverse `form:"reverse,omitempty" json:"reverse,omitempty"`
+
+	// Lang Preferred language for titles and descriptions (BCP 47, e.g. "en", "ja-Latn"). Default from the Accept-Language header.
+	Lang *Lang `form:"lang,omitempty" json:"lang,omitempty"`
+
+	// PageSize Entries per page, 1 to 100. Default 30.
+	PageSize *CatalogPageSize `form:"page_size,omitempty" json:"page_size,omitempty"`
+
+	// PageToken The `next_page_token` of the previous page.
+	PageToken *PageToken `form:"page_token,omitempty" json:"page_token,omitempty"`
+}
+
+// SearchCatalogParamsSort defines parameters for SearchCatalog.
+type SearchCatalogParamsSort string
 
 // ListUsersParams defines parameters for ListUsers.
 type ListUsersParams struct {
@@ -569,6 +1041,12 @@ type ChangeMyPasswordJSONRequestBody = ChangePasswordRequest
 // CreateSetupAdminJSONRequestBody defines body for CreateSetupAdmin for application/json ContentType.
 type CreateSetupAdminJSONRequestBody = CreateSetupAdminRequest
 
+// SetMetaConnectionJSONRequestBody defines body for SetMetaConnection for application/json ContentType.
+type SetMetaConnectionJSONRequestBody = SetMetaConnectionRequest
+
+// RunMetaProviderSyncJSONRequestBody defines body for RunMetaProviderSync for application/json ContentType.
+type RunMetaProviderSyncJSONRequestBody = RunMetaSyncRequest
+
 // CreateUserJSONRequestBody defines body for CreateUser for application/json ContentType.
 type CreateUserJSONRequestBody = CreateUserRequest
 
@@ -589,6 +1067,18 @@ type ServerInterface interface {
 	// Logout Sign out (session only)
 	// (POST /auth/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
+	// BrowseCatalog Browse the catalogue
+	// (GET /catalog/browse)
+	BrowseCatalog(w http.ResponseWriter, r *http.Request, params BrowseCatalogParams)
+	// GetCatalogEntry One catalogue entry in full
+	// (GET /catalog/entries/{entry_id})
+	GetCatalogEntry(w http.ResponseWriter, r *http.Request, entryId EntryId, params GetCatalogEntryParams)
+	// GetCatalogEntryCover An entry's cover image
+	// (GET /catalog/entries/{entry_id}/cover)
+	GetCatalogEntryCover(w http.ResponseWriter, r *http.Request, entryId EntryId)
+	// SearchCatalog Search the catalogue by title
+	// (GET /catalog/search)
+	SearchCatalog(w http.ResponseWriter, r *http.Request, params SearchCatalogParams)
 	// ListInvites List open invites
 	// (GET /invites)
 	ListInvites(w http.ResponseWriter, r *http.Request)
@@ -637,6 +1127,18 @@ type ServerInterface interface {
 	// GetSystemInfo Server name, version and setup state
 	// (GET /system/info)
 	GetSystemInfo(w http.ResponseWriter, r *http.Request)
+	// GetMetaConnection The metadata service connection and its state
+	// (GET /system/meta)
+	GetMetaConnection(w http.ResponseWriter, r *http.Request)
+	// SetMetaConnection Connect the metadata service
+	// (PUT /system/meta)
+	SetMetaConnection(w http.ResponseWriter, r *http.Request)
+	// CheckMetaConnection Check the metadata service again now
+	// (POST /system/meta/check)
+	CheckMetaConnection(w http.ResponseWriter, r *http.Request)
+	// RunMetaProviderSync Start a sync of a metadata provider
+	// (POST /system/meta/providers/{provider}/sync)
+	RunMetaProviderSync(w http.ResponseWriter, r *http.Request, provider string)
 	// ListUsers List users
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request, params ListUsersParams)
@@ -679,6 +1181,30 @@ func (_ Unimplemented) Login(w http.ResponseWriter, r *http.Request) {
 // Logout Sign out (session only)
 // (POST /auth/logout)
 func (_ Unimplemented) Logout(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// BrowseCatalog Browse the catalogue
+// (GET /catalog/browse)
+func (_ Unimplemented) BrowseCatalog(w http.ResponseWriter, r *http.Request, params BrowseCatalogParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCatalogEntry One catalogue entry in full
+// (GET /catalog/entries/{entry_id})
+func (_ Unimplemented) GetCatalogEntry(w http.ResponseWriter, r *http.Request, entryId EntryId, params GetCatalogEntryParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCatalogEntryCover An entry's cover image
+// (GET /catalog/entries/{entry_id}/cover)
+func (_ Unimplemented) GetCatalogEntryCover(w http.ResponseWriter, r *http.Request, entryId EntryId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SearchCatalog Search the catalogue by title
+// (GET /catalog/search)
+func (_ Unimplemented) SearchCatalog(w http.ResponseWriter, r *http.Request, params SearchCatalogParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -778,6 +1304,30 @@ func (_ Unimplemented) GetSystemInfo(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetMetaConnection The metadata service connection and its state
+// (GET /system/meta)
+func (_ Unimplemented) GetMetaConnection(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetMetaConnection Connect the metadata service
+// (PUT /system/meta)
+func (_ Unimplemented) SetMetaConnection(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CheckMetaConnection Check the metadata service again now
+// (POST /system/meta/check)
+func (_ Unimplemented) CheckMetaConnection(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RunMetaProviderSync Start a sync of a metadata provider
+// (POST /system/meta/providers/{provider}/sync)
+func (_ Unimplemented) RunMetaProviderSync(w http.ResponseWriter, r *http.Request, provider string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListUsers List users
 // (GET /users)
 func (_ Unimplemented) ListUsers(w http.ResponseWriter, r *http.Request, params ListUsersParams) {
@@ -864,6 +1414,387 @@ func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// BrowseCatalog operation middleware
+func (siw *ServerInterfaceWrapper) BrowseCatalog(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params BrowseCatalogParams
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", r.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "type"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "type", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "genre" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "genre", r.URL.Query(), &params.Genre, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "genre"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "genre", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "year_from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "year_from", r.URL.Query(), &params.YearFrom, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "year_from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "year_from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "year_to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "year_to", r.URL.Query(), &params.YearTo, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "year_to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "year_to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "sort" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sort", r.URL.Query(), &params.Sort, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sort"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sort", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "reverse" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "reverse", r.URL.Query(), &params.Reverse, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "reverse"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "reverse", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "lang" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "lang", r.URL.Query(), &params.Lang, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "lang"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lang", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "page_size" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_size", r.URL.Query(), &params.PageSize, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_size"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_size", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "page_token" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_token", r.URL.Query(), &params.PageToken, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_token"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_token", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.BrowseCatalog(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCatalogEntry operation middleware
+func (siw *ServerInterfaceWrapper) GetCatalogEntry(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "entry_id" -------------
+	var entryId EntryId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "entry_id", chi.URLParam(r, "entry_id"), &entryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "entry_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetCatalogEntryParams
+
+	// ------------- Optional query parameter "lang" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "lang", r.URL.Query(), &params.Lang, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "lang"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lang", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCatalogEntry(w, r, entryId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCatalogEntryCover operation middleware
+func (siw *ServerInterfaceWrapper) GetCatalogEntryCover(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "entry_id" -------------
+	var entryId EntryId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "entry_id", chi.URLParam(r, "entry_id"), &entryId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "entry_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCatalogEntryCover(w, r, entryId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SearchCatalog operation middleware
+func (siw *ServerInterfaceWrapper) SearchCatalog(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SearchCatalogParams
+
+	// ------------- Required query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", r.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "type"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "type", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "genre" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "genre", r.URL.Query(), &params.Genre, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "genre"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "genre", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "year_from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "year_from", r.URL.Query(), &params.YearFrom, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "year_from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "year_from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "year_to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "year_to", r.URL.Query(), &params.YearTo, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "year_to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "year_to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "sort" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sort", r.URL.Query(), &params.Sort, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sort"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sort", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "reverse" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "reverse", r.URL.Query(), &params.Reverse, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "reverse"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "reverse", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "lang" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "lang", r.URL.Query(), &params.Lang, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "lang"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lang", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "page_size" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_size", r.URL.Query(), &params.PageSize, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_size"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_size", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "page_token" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_token", r.URL.Query(), &params.PageToken, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page_token"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page_token", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SearchCatalog(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1124,6 +2055,74 @@ func (siw *ServerInterfaceWrapper) GetSystemInfo(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetSystemInfo(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMetaConnection operation middleware
+func (siw *ServerInterfaceWrapper) GetMetaConnection(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMetaConnection(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetMetaConnection operation middleware
+func (siw *ServerInterfaceWrapper) SetMetaConnection(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetMetaConnection(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CheckMetaConnection operation middleware
+func (siw *ServerInterfaceWrapper) CheckMetaConnection(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckMetaConnection(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RunMetaProviderSync operation middleware
+func (siw *ServerInterfaceWrapper) RunMetaProviderSync(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "provider" -------------
+	var provider string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", chi.URLParam(r, "provider"), &provider, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provider", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunMetaProviderSync(w, r, provider)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1459,6 +2458,30 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/invites/{id}", wrapper.DeleteInvite)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/system/meta", wrapper.GetMetaConnection)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/system/meta", wrapper.SetMetaConnection)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/system/meta/check", wrapper.CheckMetaConnection)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/system/meta/providers/{provider}/sync", wrapper.RunMetaProviderSync)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/catalog/search", wrapper.SearchCatalog)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/catalog/browse", wrapper.BrowseCatalog)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/catalog/entries/{entry_id}", wrapper.GetCatalogEntry)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/catalog/entries/{entry_id}/cover", wrapper.GetCatalogEntryCover)
+	})
 
 	return r
 }
@@ -1603,6 +2626,178 @@ type LogoutdefaultApplicationProblemPlusJSONResponse struct {
 }
 
 func (response LogoutdefaultApplicationProblemPlusJSONResponse) VisitLogoutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BrowseCatalogRequestObject struct {
+	Params BrowseCatalogParams
+}
+
+type BrowseCatalogResponseObject interface {
+	VisitBrowseCatalogResponse(w http.ResponseWriter) error
+}
+
+type BrowseCatalog200JSONResponse CatalogPage
+
+func (response BrowseCatalog200JSONResponse) VisitBrowseCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BrowseCatalogdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response BrowseCatalogdefaultApplicationProblemPlusJSONResponse) VisitBrowseCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCatalogEntryRequestObject struct {
+	EntryId EntryId `json:"entry_id"`
+	Params  GetCatalogEntryParams
+}
+
+type GetCatalogEntryResponseObject interface {
+	VisitGetCatalogEntryResponse(w http.ResponseWriter) error
+}
+
+type GetCatalogEntry200JSONResponse CatalogEntry
+
+func (response GetCatalogEntry200JSONResponse) VisitGetCatalogEntryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCatalogEntrydefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response GetCatalogEntrydefaultApplicationProblemPlusJSONResponse) VisitGetCatalogEntryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCatalogEntryCoverRequestObject struct {
+	EntryId EntryId `json:"entry_id"`
+}
+
+type GetCatalogEntryCoverResponseObject interface {
+	VisitGetCatalogEntryCoverResponse(w http.ResponseWriter) error
+}
+
+type GetCatalogEntryCover200ResponseHeaders struct {
+	CacheControl *string
+}
+
+type GetCatalogEntryCover200ImageResponse struct {
+	Body          io.Reader
+	Headers       GetCatalogEntryCover200ResponseHeaders
+	ContentType   string
+	ContentLength int64
+}
+
+func (response GetCatalogEntryCover200ImageResponse) VisitGetCatalogEntryCoverResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", response.ContentType)
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type GetCatalogEntryCoverdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response GetCatalogEntryCoverdefaultApplicationProblemPlusJSONResponse) VisitGetCatalogEntryCoverResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SearchCatalogRequestObject struct {
+	Params SearchCatalogParams
+}
+
+type SearchCatalogResponseObject interface {
+	VisitSearchCatalogResponse(w http.ResponseWriter) error
+}
+
+type SearchCatalog200JSONResponse CatalogSearchPage
+
+func (response SearchCatalog200JSONResponse) VisitSearchCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SearchCatalogdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response SearchCatalogdefaultApplicationProblemPlusJSONResponse) VisitSearchCatalogResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -2206,6 +3401,161 @@ func (response GetSystemInfodefaultApplicationProblemPlusJSONResponse) VisitGetS
 	return err
 }
 
+type GetMetaConnectionRequestObject struct {
+}
+
+type GetMetaConnectionResponseObject interface {
+	VisitGetMetaConnectionResponse(w http.ResponseWriter) error
+}
+
+type GetMetaConnection200JSONResponse MetaConnection
+
+func (response GetMetaConnection200JSONResponse) VisitGetMetaConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMetaConnectiondefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response GetMetaConnectiondefaultApplicationProblemPlusJSONResponse) VisitGetMetaConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMetaConnectionRequestObject struct {
+	Body *SetMetaConnectionJSONRequestBody
+}
+
+type SetMetaConnectionResponseObject interface {
+	VisitSetMetaConnectionResponse(w http.ResponseWriter) error
+}
+
+type SetMetaConnection200JSONResponse MetaConnection
+
+func (response SetMetaConnection200JSONResponse) VisitSetMetaConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMetaConnectiondefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response SetMetaConnectiondefaultApplicationProblemPlusJSONResponse) VisitSetMetaConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckMetaConnectionRequestObject struct {
+}
+
+type CheckMetaConnectionResponseObject interface {
+	VisitCheckMetaConnectionResponse(w http.ResponseWriter) error
+}
+
+type CheckMetaConnection200JSONResponse MetaConnection
+
+func (response CheckMetaConnection200JSONResponse) VisitCheckMetaConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckMetaConnectiondefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response CheckMetaConnectiondefaultApplicationProblemPlusJSONResponse) VisitCheckMetaConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunMetaProviderSyncRequestObject struct {
+	Provider string `json:"provider"`
+	Body     *RunMetaProviderSyncJSONRequestBody
+}
+
+type RunMetaProviderSyncResponseObject interface {
+	VisitRunMetaProviderSyncResponse(w http.ResponseWriter) error
+}
+
+type RunMetaProviderSync202JSONResponse MetaSyncStarted
+
+func (response RunMetaProviderSync202JSONResponse) VisitRunMetaProviderSyncResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunMetaProviderSyncdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response RunMetaProviderSyncdefaultApplicationProblemPlusJSONResponse) VisitRunMetaProviderSyncResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListUsersRequestObject struct {
 	Params ListUsersParams
 }
@@ -2410,6 +3760,18 @@ type StrictServerInterface interface {
 	// Logout Sign out (session only)
 	// (POST /auth/logout)
 	Logout(ctx context.Context, request LogoutRequestObject) (LogoutResponseObject, error)
+	// BrowseCatalog Browse the catalogue
+	// (GET /catalog/browse)
+	BrowseCatalog(ctx context.Context, request BrowseCatalogRequestObject) (BrowseCatalogResponseObject, error)
+	// GetCatalogEntry One catalogue entry in full
+	// (GET /catalog/entries/{entry_id})
+	GetCatalogEntry(ctx context.Context, request GetCatalogEntryRequestObject) (GetCatalogEntryResponseObject, error)
+	// GetCatalogEntryCover An entry's cover image
+	// (GET /catalog/entries/{entry_id}/cover)
+	GetCatalogEntryCover(ctx context.Context, request GetCatalogEntryCoverRequestObject) (GetCatalogEntryCoverResponseObject, error)
+	// SearchCatalog Search the catalogue by title
+	// (GET /catalog/search)
+	SearchCatalog(ctx context.Context, request SearchCatalogRequestObject) (SearchCatalogResponseObject, error)
 	// ListInvites List open invites
 	// (GET /invites)
 	ListInvites(ctx context.Context, request ListInvitesRequestObject) (ListInvitesResponseObject, error)
@@ -2458,6 +3820,18 @@ type StrictServerInterface interface {
 	// GetSystemInfo Server name, version and setup state
 	// (GET /system/info)
 	GetSystemInfo(ctx context.Context, request GetSystemInfoRequestObject) (GetSystemInfoResponseObject, error)
+	// GetMetaConnection The metadata service connection and its state
+	// (GET /system/meta)
+	GetMetaConnection(ctx context.Context, request GetMetaConnectionRequestObject) (GetMetaConnectionResponseObject, error)
+	// SetMetaConnection Connect the metadata service
+	// (PUT /system/meta)
+	SetMetaConnection(ctx context.Context, request SetMetaConnectionRequestObject) (SetMetaConnectionResponseObject, error)
+	// CheckMetaConnection Check the metadata service again now
+	// (POST /system/meta/check)
+	CheckMetaConnection(ctx context.Context, request CheckMetaConnectionRequestObject) (CheckMetaConnectionResponseObject, error)
+	// RunMetaProviderSync Start a sync of a metadata provider
+	// (POST /system/meta/providers/{provider}/sync)
+	RunMetaProviderSync(ctx context.Context, request RunMetaProviderSyncRequestObject) (RunMetaProviderSyncResponseObject, error)
 	// ListUsers List users
 	// (GET /users)
 	ListUsers(ctx context.Context, request ListUsersRequestObject) (ListUsersResponseObject, error)
@@ -2624,6 +3998,111 @@ func (sh *strictHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(LogoutResponseObject); ok {
 		if err := validResponse.VisitLogoutResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// BrowseCatalog operation middleware
+func (sh *strictHandler) BrowseCatalog(w http.ResponseWriter, r *http.Request, params BrowseCatalogParams) {
+	var request BrowseCatalogRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.BrowseCatalog(ctx, request.(BrowseCatalogRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "BrowseCatalog")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(BrowseCatalogResponseObject); ok {
+		if err := validResponse.VisitBrowseCatalogResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetCatalogEntry operation middleware
+func (sh *strictHandler) GetCatalogEntry(w http.ResponseWriter, r *http.Request, entryId EntryId, params GetCatalogEntryParams) {
+	var request GetCatalogEntryRequestObject
+
+	request.EntryId = entryId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCatalogEntry(ctx, request.(GetCatalogEntryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCatalogEntry")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCatalogEntryResponseObject); ok {
+		if err := validResponse.VisitGetCatalogEntryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetCatalogEntryCover operation middleware
+func (sh *strictHandler) GetCatalogEntryCover(w http.ResponseWriter, r *http.Request, entryId EntryId) {
+	var request GetCatalogEntryCoverRequestObject
+
+	request.EntryId = entryId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCatalogEntryCover(ctx, request.(GetCatalogEntryCoverRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCatalogEntryCover")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCatalogEntryCoverResponseObject); ok {
+		if err := validResponse.VisitGetCatalogEntryCoverResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SearchCatalog operation middleware
+func (sh *strictHandler) SearchCatalog(w http.ResponseWriter, r *http.Request, params SearchCatalogParams) {
+	var request SearchCatalogRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SearchCatalog(ctx, request.(SearchCatalogRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SearchCatalog")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SearchCatalogResponseObject); ok {
+		if err := validResponse.VisitSearchCatalogResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -3056,6 +4535,121 @@ func (sh *strictHandler) GetSystemInfo(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// GetMetaConnection operation middleware
+func (sh *strictHandler) GetMetaConnection(w http.ResponseWriter, r *http.Request) {
+	var request GetMetaConnectionRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMetaConnection(ctx, request.(GetMetaConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMetaConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMetaConnectionResponseObject); ok {
+		if err := validResponse.VisitGetMetaConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetMetaConnection operation middleware
+func (sh *strictHandler) SetMetaConnection(w http.ResponseWriter, r *http.Request) {
+	var request SetMetaConnectionRequestObject
+
+	var body SetMetaConnectionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetMetaConnection(ctx, request.(SetMetaConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetMetaConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetMetaConnectionResponseObject); ok {
+		if err := validResponse.VisitSetMetaConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CheckMetaConnection operation middleware
+func (sh *strictHandler) CheckMetaConnection(w http.ResponseWriter, r *http.Request) {
+	var request CheckMetaConnectionRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CheckMetaConnection(ctx, request.(CheckMetaConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CheckMetaConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CheckMetaConnectionResponseObject); ok {
+		if err := validResponse.VisitCheckMetaConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RunMetaProviderSync operation middleware
+func (sh *strictHandler) RunMetaProviderSync(w http.ResponseWriter, r *http.Request, provider string) {
+	var request RunMetaProviderSyncRequestObject
+
+	request.Provider = provider
+
+	var body RunMetaProviderSyncJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RunMetaProviderSync(ctx, request.(RunMetaProviderSyncRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RunMetaProviderSync")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RunMetaProviderSyncResponseObject); ok {
+		if err := validResponse.VisitRunMetaProviderSyncResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListUsers operation middleware
 func (sh *strictHandler) ListUsers(w http.ResponseWriter, r *http.Request, params ListUsersParams) {
 	var request ListUsersRequestObject
@@ -3203,99 +4797,147 @@ func (sh *strictHandler) UpdateUser(w http.ResponseWriter, r *http.Request, id I
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"eaRk6wOZPG9fqB+Z3H24+68BAA==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

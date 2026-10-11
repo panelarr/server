@@ -36,6 +36,7 @@ const (
 	clientIPKey ctxKey = iota + 100
 	responseWriterKey
 	userAgentKey
+	acceptLanguageKey
 )
 
 // ClientIP returns the request's client address.
@@ -112,6 +113,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), clientIPKey, clientIP(r, s.deps.TrustedProxies))
 		ctx = context.WithValue(ctx, responseWriterKey, w)
 		ctx = context.WithValue(ctx, userAgentKey, r.UserAgent())
+		ctx = context.WithValue(ctx, acceptLanguageKey, r.Header.Get("Accept-Language"))
 		if r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 		}
@@ -145,27 +147,32 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 }
 
 // authorize enforces an operation's policy from the spec, then validates
-// the request against the spec. It runs after routing, before the request
-// body is decoded.
-func (s *Server) authorize(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		rc := chi.RouteContext(ctx)
-		pol := s.policies.lookup(r.Method, rc.RoutePattern())
-		if pol == nil {
-			writeError(s.deps.Log)(w, r, errors.New("api: no policy for "+r.Method+" "+rc.RoutePattern()))
-			return
-		}
-		if prob := s.checkAccess(r, pol); prob != nil {
-			writeProblem(w, r, prob)
-			return
-		}
-		if err := validateRequest(r, pol, rc); err != nil {
-			writeProblem(w, r, validationProblem(err))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+// the request against the spec. It runs on the API subrouter and finds the
+// route itself, so it decides before the generated code parses parameters
+// or the body: an unauthorised caller learns nothing about them.
+func (s *Server) authorize(routes chi.Routes) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rc := chi.NewRouteContext()
+			pattern := routes.Find(rc, r.Method, strings.TrimPrefix(r.URL.Path, BasePath))
+			pol := s.policies.lookup(r.Method, BasePath+pattern)
+			if pattern == "" || pol == nil {
+				// Not an operation (404, 405, the spec document): routing
+				// answers.
+				next.ServeHTTP(w, r)
+				return
+			}
+			if prob := s.checkAccess(r, pol); prob != nil {
+				writeProblem(w, r, prob)
+				return
+			}
+			if err := validateRequest(r, pol, rc); err != nil {
+				writeProblem(w, r, validationProblem(err))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func (s *Server) checkAccess(r *http.Request, pol *policy) *Problem {

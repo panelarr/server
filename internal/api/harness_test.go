@@ -12,12 +12,16 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/netip"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/panelarr/server/internal/api/apigen"
 	"github.com/panelarr/server/internal/auth"
+	"github.com/panelarr/server/internal/imagecache"
+	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/metrics"
+	"github.com/panelarr/server/internal/secret"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/store/storetest"
 	"github.com/panelarr/server/internal/users"
@@ -31,6 +35,7 @@ type harness struct {
 	st      *store.Store
 	auth    *auth.Service
 	users   *users.Service
+	meta    *meta.Service
 	metrics *metrics.Metrics
 	srv     *httptest.Server
 }
@@ -48,11 +53,17 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	st := storetest.New(t)
 	a := auth.NewService(st, auth.NewHasher(fastArgon2, 4), nil)
 	u := users.NewService(st, a, nil)
+	m := meta.NewService(st, secret.NewBox("", filepath.Join(t.TempDir(), "secret.key")), meta.Conn{}, nil)
 	deps := Deps{
 		Log:    slog.New(slog.DiscardHandler),
 		Auth:   a,
 		Users:  u,
-		Checks: []Check{{Name: "database", Required: true, Run: st.Pool.Ping}},
+		Meta:   m,
+		Images: imagecache.New(t.TempDir()),
+		Checks: []Check{
+			{Name: "database", Required: true, Run: st.Pool.Ping},
+			{Name: "meta", Run: m.ReadyCheck},
+		},
 		// The test client connects from loopback; trust nothing, so the
 		// peer address is the client address.
 		TrustedProxies: nil,
@@ -66,7 +77,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	}
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &harness{t: t, st: st, auth: a, users: u, metrics: deps.Metrics, srv: srv}
+	return &harness{t: t, st: st, auth: a, users: u, meta: m, metrics: deps.Metrics, srv: srv}
 }
 
 // client is an API client that keeps cookies, sends the CSRF token it was

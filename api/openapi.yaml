@@ -62,6 +62,10 @@ tags:
     description: Managing users (admins).
   - name: invites
     description: Invite links for new users (admins).
+  - name: meta
+    description: The connection to the metadata service (admins).
+  - name: catalog
+    description: Searching and browsing the metadata catalogue, to find works to add.
 
 paths:
   /system/info:
@@ -538,6 +542,204 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /system/meta:
+    get:
+      operationId: getMetaConnection
+      tags: [meta]
+      summary: The metadata service connection and its state
+      description: Panelarr needs the metadata service for its library. Until it is reachable, has an admin key and a provider with entries, the server is degraded and nothing can be added; `check.problem` says what to do.
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The connection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaConnection"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: setMetaConnection
+      tags: [meta]
+      summary: Connect the metadata service
+      description: |
+        Tests the URL and key first. They are saved when the service is
+        reachable and the key has the admin scope, even if no provider has
+        data yet (the check says so). Otherwise nothing is saved and the
+        answer is `422` with code `meta_check_failed` and what to fix. When
+        the connection comes from `PANELARR_META_URL`, it can't be changed
+        here (`409`, code `managed_by_env`).
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetMetaConnectionRequest"
+      responses:
+        "200":
+          description: Saved; the check result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaConnection"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/check:
+    post:
+      operationId: checkMetaConnection
+      tags: [meta]
+      summary: Check the metadata service again now
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: A fresh check.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaConnection"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/providers/{provider}/sync:
+    post:
+      operationId: runMetaProviderSync
+      tags: [meta]
+      summary: Start a sync of a metadata provider
+      description: Starts a sync in the metadata service and returns at once. A first full import can take a while; check the connection to see entries arrive.
+      x-panelarr-access: admin
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunMetaSyncRequest"
+      responses:
+        "202":
+          description: Started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaSyncStarted"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /catalog/search:
+    get:
+      operationId: searchCatalog
+      tags: [catalog]
+      summary: Search the catalogue by title
+      description: Searches every title (all languages and romanizations). Only entries within the caller's content-rating ceiling are returned. While the metadata service is unavailable this answers `503` with code `meta_unavailable`.
+      x-panelarr-access: user
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - $ref: "#/components/parameters/CatalogType"
+        - $ref: "#/components/parameters/CatalogStatus"
+        - $ref: "#/components/parameters/CatalogGenre"
+        - $ref: "#/components/parameters/YearFrom"
+        - $ref: "#/components/parameters/YearTo"
+        - $ref: "#/components/parameters/CatalogSort"
+        - $ref: "#/components/parameters/Reverse"
+        - $ref: "#/components/parameters/Lang"
+        - $ref: "#/components/parameters/CatalogPageSize"
+        - $ref: "#/components/parameters/PageToken"
+      responses:
+        "200":
+          description: Matching entries, best first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogSearchPage"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /catalog/browse:
+    get:
+      operationId: browseCatalog
+      tags: [catalog]
+      summary: Browse the catalogue
+      description: Discovery without search text, with filters and a sort. Only entries within the caller's content-rating ceiling are returned.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/CatalogType"
+        - $ref: "#/components/parameters/CatalogStatus"
+        - $ref: "#/components/parameters/CatalogGenre"
+        - $ref: "#/components/parameters/YearFrom"
+        - $ref: "#/components/parameters/YearTo"
+        - $ref: "#/components/parameters/CatalogSort"
+        - $ref: "#/components/parameters/Reverse"
+        - $ref: "#/components/parameters/Lang"
+        - $ref: "#/components/parameters/CatalogPageSize"
+        - $ref: "#/components/parameters/PageToken"
+      responses:
+        "200":
+          description: A page of entries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogPage"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /catalog/entries/{entry_id}:
+    get:
+      operationId: getCatalogEntry
+      tags: [catalog]
+      summary: One catalogue entry in full
+      description: Entries above the caller's content-rating ceiling answer `404` like missing ones.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+        - $ref: "#/components/parameters/Lang"
+      responses:
+        "200":
+          description: The entry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogEntry"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /catalog/entries/{entry_id}/cover:
+    get:
+      operationId: getCatalogEntryCover
+      tags: [catalog]
+      summary: An entry's cover image
+      description: Served by the server from its cache, so browsers never contact metadata sites. `404` when the entry has no cover or the caller may not see it.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+      responses:
+        "200":
+          description: The image.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -556,6 +758,94 @@ components:
       description: A personal API key as a bearer token.
 
   parameters:
+    EntryId:
+      name: entry_id
+      in: path
+      required: true
+      description: The metadata service's entry ID.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 100
+    Lang:
+      name: lang
+      in: query
+      description: Preferred language for titles and descriptions (BCP 47, e.g. "en", "ja-Latn"). Default from the Accept-Language header.
+      schema:
+        type: string
+        maxLength: 35
+        pattern: "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$"
+    CatalogType:
+      name: type
+      in: query
+      description: Only these types, e.g. manga, manhwa, manhua, webtoon, comic, light_novel.
+      style: form
+      explode: true
+      schema:
+        type: array
+        maxItems: 20
+        items:
+          type: string
+          pattern: "^[a-z_]{1,40}$"
+    CatalogStatus:
+      name: status
+      in: query
+      description: Only these statuses, e.g. releasing, completed, hiatus, cancelled, upcoming.
+      style: form
+      explode: true
+      schema:
+        type: array
+        maxItems: 10
+        items:
+          type: string
+          pattern: "^[a-z_]{1,40}$"
+    CatalogGenre:
+      name: genre
+      in: query
+      description: Only entries with all of these genres.
+      style: form
+      explode: true
+      schema:
+        type: array
+        maxItems: 20
+        items:
+          type: string
+          minLength: 1
+          maxLength: 100
+    YearFrom:
+      name: year_from
+      in: query
+      schema:
+        type: integer
+        minimum: 1800
+        maximum: 3000
+    YearTo:
+      name: year_to
+      in: query
+      schema:
+        type: integer
+        minimum: 1800
+        maximum: 3000
+    CatalogSort:
+      name: sort
+      in: query
+      schema:
+        type: string
+        enum: [relevance, popularity, rating, updated, year, title]
+    Reverse:
+      name: reverse
+      in: query
+      description: Reverse the sort order.
+      schema:
+        type: boolean
+    CatalogPageSize:
+      name: page_size
+      in: query
+      description: Entries per page, 1 to 100. Default 30.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
     Id:
       name: id
       in: path
@@ -588,6 +878,317 @@ components:
             $ref: "#/components/schemas/Problem"
 
   schemas:
+    MetaProvider:
+      type: object
+      required: [id, health, records]
+      properties:
+        id:
+          type: string
+        health:
+          type: string
+          description: ok, degraded, down or unknown.
+        message:
+          type: string
+        records:
+          type: integer
+          format: int64
+          description: Records the provider has delivered so far.
+    MetaCheck:
+      type: object
+      required: [configured, reachable, key_valid, admin_scope, ready, providers, checked_at]
+      properties:
+        configured:
+          type: boolean
+        reachable:
+          type: boolean
+        key_valid:
+          type: boolean
+        admin_scope:
+          type: boolean
+        ready:
+          type: boolean
+          description: Reachable, an admin key, and a provider with entries.
+        problem:
+          type: string
+          description: What to do, when not ready.
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetaProvider"
+        checked_at:
+          type: string
+          format: date-time
+    MetaConnection:
+      type: object
+      required: [managed_by_env, check]
+      properties:
+        url:
+          type: string
+          description: Empty when not connected. The key is never shown.
+        managed_by_env:
+          type: boolean
+          description: The connection comes from PANELARR_META_URL and can't be changed here.
+        check:
+          $ref: "#/components/schemas/MetaCheck"
+    SetMetaConnectionRequest:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          description: The service's base URL, e.g. "http://meta:8901".
+          minLength: 1
+          maxLength: 500
+        api_key:
+          type: string
+          description: A key with the admin scope. Leave out to keep the stored one.
+          maxLength: 500
+    RunMetaSyncRequest:
+      type: object
+      properties:
+        kind:
+          type: string
+          description: The sync kind the provider supports, "dump" (full import, the default) or "delta".
+          enum: [dump, delta]
+    MetaSyncStarted:
+      type: object
+      required: [run_id]
+      properties:
+        run_id:
+          type: string
+
+    Attribution:
+      type: object
+      required: [provider]
+      description: Where data comes from and under which terms. Show it next to the data.
+      properties:
+        provider:
+          type: string
+        url:
+          type: string
+        license:
+          type: string
+        license_url:
+          type: string
+        notice:
+          type: string
+    CatalogCover:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          description: The server's URL for the image, relative to the server, e.g. "/api/v1/catalog/entries/{id}/cover".
+        width:
+          type: integer
+        height:
+          type: integer
+        blurhash:
+          type: string
+          description: A placeholder to show while the image loads.
+        thumbhash:
+          type: string
+    EntryContentRating:
+      type: string
+      enum: [safe, suggestive, erotic, pornographic, unknown]
+    CatalogEntrySummary:
+      type: object
+      required: [id, title, content_rating, genres, attribution]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+          description: The title in the requested language when known.
+        type:
+          type: string
+          description: e.g. manga, manhwa, manhua, webtoon, comic, light_novel. Absent when unknown; the list may grow.
+        status:
+          type: string
+          description: releasing, completed, hiatus, cancelled, upcoming or unknown. Absent when unknown.
+        content_rating:
+          $ref: "#/components/schemas/EntryContentRating"
+        year:
+          type: integer
+        original_language:
+          type: string
+        cover:
+          $ref: "#/components/schemas/CatalogCover"
+        genres:
+          type: array
+          items:
+            type: string
+        rating:
+          type: number
+          description: Average score from 0 to 10, when known.
+        attribution:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attribution"
+    CatalogPage:
+      type: object
+      required: [entries, next_page_token, no_providers]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogEntrySummary"
+        next_page_token:
+          type: string
+        total_size:
+          type: integer
+          format: int64
+          description: The number of matches, when the catalogue knows it.
+        no_providers:
+          type: boolean
+          description: The metadata service has no provider, so the catalogue is empty.
+    CatalogSearchHit:
+      type: object
+      required: [entry]
+      properties:
+        entry:
+          $ref: "#/components/schemas/CatalogEntrySummary"
+        matched:
+          type: string
+          description: The title or name that matched, when it isn't the shown title.
+    CatalogSearchPage:
+      type: object
+      required: [hits, next_page_token, no_providers]
+      properties:
+        hits:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogSearchHit"
+        next_page_token:
+          type: string
+        total_size:
+          type: integer
+          format: int64
+        no_providers:
+          type: boolean
+    CatalogTitle:
+      type: object
+      required: [text, kind, primary]
+      properties:
+        text:
+          type: string
+        language:
+          type: string
+          description: BCP 47, e.g. "ja", "ja-Latn", "en".
+        kind:
+          type: string
+          description: official, native, romanized, alternative, unofficial or unknown.
+        primary:
+          type: boolean
+    CatalogDescription:
+      type: object
+      required: [text, format]
+      properties:
+        text:
+          type: string
+        language:
+          type: string
+        format:
+          type: string
+          enum: [plain, markdown, html]
+          description: HTML comes from the provider; sanitise it before showing.
+    CatalogCredit:
+      type: object
+      required: [name, role]
+      properties:
+        name:
+          type: string
+        role:
+          type: string
+          description: author, artist, writer, illustrator, original_creator, …
+        person_id:
+          type: string
+    CatalogTag:
+      type: object
+      required: [name, genre, spoiler]
+      properties:
+        name:
+          type: string
+        genre:
+          type: boolean
+        spoiler:
+          type: boolean
+    CatalogExternalId:
+      type: object
+      required: [provider, id]
+      properties:
+        provider:
+          type: string
+        id:
+          type: string
+        url:
+          type: string
+    CatalogLink:
+      type: object
+      required: [type, url]
+      properties:
+        type:
+          type: string
+        url:
+          type: string
+        title:
+          type: string
+    CatalogEntry:
+      type: object
+      required: [id, title, content_rating, titles, descriptions, credits, genres, tags, external_ids, links, attribution]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        content_rating:
+          $ref: "#/components/schemas/EntryContentRating"
+        original_language:
+          type: string
+        year:
+          type: integer
+          description: The year it started.
+        end_year:
+          type: integer
+        cover:
+          $ref: "#/components/schemas/CatalogCover"
+        titles:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogTitle"
+        descriptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogDescription"
+        credits:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogCredit"
+        genres:
+          type: array
+          items:
+            type: string
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogTag"
+        external_ids:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogExternalId"
+        links:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogLink"
+        attribution:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attribution"
+
     Problem:
       type: object
       description: RFC 9457 problem details.
@@ -684,11 +1285,17 @@ components:
 
     SetupStatus:
       type: object
-      required: [admin_created, completed]
+      required: [admin_created, meta_configured, meta_ready, completed]
       properties:
         admin_created:
           type: boolean
           description: The first account exists.
+        meta_configured:
+          type: boolean
+          description: The metadata service is connected.
+        meta_ready:
+          type: boolean
+          description: The metadata service is usable (see `GET /system/meta` for details).
         completed:
           type: boolean
           description: An admin finished the wizard.

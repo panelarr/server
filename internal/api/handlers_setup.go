@@ -10,8 +10,13 @@ import (
 	"github.com/panelarr/server/internal/users"
 )
 
-func toSetup(st users.SetupStatus) apigen.SetupStatus {
-	return apigen.SetupStatus{AdminCreated: st.AdminCreated, Completed: st.CompletedAt != nil, CompletedAt: st.CompletedAt}
+func (s *Server) toSetup(ctx context.Context, st users.SetupStatus) apigen.SetupStatus {
+	out := apigen.SetupStatus{AdminCreated: st.AdminCreated, Completed: st.CompletedAt != nil, CompletedAt: st.CompletedAt}
+	if _, err := s.deps.Meta.Client(); err == nil {
+		out.MetaConfigured = true
+		out.MetaReady = s.deps.Meta.Check(ctx, false).Ready
+	}
+	return out
 }
 
 // GetSetup reports the first-run wizard's state.
@@ -20,7 +25,7 @@ func (s *Server) GetSetup(ctx context.Context, _ apigen.GetSetupRequestObject) (
 	if err != nil {
 		return nil, err
 	}
-	return apigen.GetSetup200JSONResponse(toSetup(st)), nil
+	return apigen.GetSetup200JSONResponse(s.toSetup(ctx, st)), nil
 }
 
 // CreateSetupAdmin creates the first account and signs it in.
@@ -42,7 +47,7 @@ func (s *Server) CompleteSetup(ctx context.Context, _ apigen.CompleteSetupReques
 	if err != nil {
 		return nil, err
 	}
-	return apigen.CompleteSetup200JSONResponse(toSetup(st)), nil
+	return apigen.CompleteSetup200JSONResponse(s.toSetup(ctx, st)), nil
 }
 
 func (s *Server) clientInfo(ctx context.Context) auth.ClientInfo {

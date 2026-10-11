@@ -15,6 +15,8 @@ import (
 
 	"github.com/panelarr/server/internal/api/apigen"
 	"github.com/panelarr/server/internal/auth"
+	"github.com/panelarr/server/internal/imagecache"
+	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/metrics"
 	"github.com/panelarr/server/internal/users"
 )
@@ -32,8 +34,10 @@ type Deps struct {
 	// Checks are the readiness dependencies, e.g. the database.
 	Checks []Check
 
-	Auth  *auth.Service
-	Users *users.Service
+	Auth   *auth.Service
+	Users  *users.Service
+	Meta   *meta.Service
+	Images *imagecache.Cache
 
 	// SecureCookies marks session cookies Secure (https deployments).
 	SecureCookies bool
@@ -58,8 +62,8 @@ func NewHandler(deps Deps) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	if deps.Auth == nil || deps.Users == nil {
-		return nil, fmt.Errorf("api: the auth and users services are required")
+	if deps.Auth == nil || deps.Users == nil || deps.Meta == nil || deps.Images == nil {
+		return nil, fmt.Errorf("api: the auth, users, meta and image services are required")
 	}
 	s := &Server{deps: deps, policies: pols}
 
@@ -74,6 +78,7 @@ func NewHandler(deps Deps) (http.Handler, error) {
 			r.Get("/metrics", s.serveMetrics)
 		}
 		r.Route(BasePath, func(r chi.Router) {
+			r.Use(s.authorize(r))
 			r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 				writeProblem(w, r, NewProblem(http.StatusNotFound, CodeNotFound, "no such endpoint"))
 			})
@@ -87,7 +92,6 @@ func NewHandler(deps Deps) (http.Handler, error) {
 			})
 			apigen.HandlerWithOptions(strict, apigen.ChiServerOptions{
 				BaseRouter:       r,
-				Middlewares:      []apigen.MiddlewareFunc{s.authorize},
 				ErrorHandlerFunc: writeBadRequest,
 			})
 		})

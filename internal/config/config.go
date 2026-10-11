@@ -45,6 +45,11 @@ type Config struct {
 	// session list). Default: loopback and private networks, where reverse
 	// proxies usually run.
 	TrustedProxies []netip.Prefix
+	// Meta, when its URL is set, is the metadata service connection; it
+	// then can't be changed in the app. Empty: an admin connects it in the
+	// first-run wizard.
+	MetaURL    string
+	MetaAPIKey string
 	// Log configures logging.
 	Log Log
 	// Metrics configures the Prometheus endpoint.
@@ -82,6 +87,8 @@ const (
 	EnvMetricsListen  = "PANELARR_METRICS_LISTEN"
 	EnvSecretKey      = "PANELARR_SECRET_KEY"
 	EnvTrustedProxies = "PANELARR_TRUSTED_PROXIES"
+	EnvMetaURL        = "PANELARR_META_URL"
+	EnvMetaAPIKey     = "PANELARR_META_KEY" //nolint:gosec // a variable name, not a credential
 )
 
 // DefaultTrustedProxies are loopback and private networks.
@@ -134,8 +141,10 @@ func (f *Flags) Load(getenv func(string) string) (Config, error) {
 			Format: strings.ToLower(pick(f.logFormat, EnvLogFormat, "json")),
 			Level:  strings.ToLower(pick(f.logLevel, EnvLogLevel, "info")),
 		},
-		Metrics:   Metrics{Listen: pick(f.metricsListen, EnvMetricsListen, "")},
-		SecretKey: strings.TrimSpace(getenv(EnvSecretKey)),
+		Metrics:    Metrics{Listen: pick(f.metricsListen, EnvMetricsListen, "")},
+		SecretKey:  strings.TrimSpace(getenv(EnvSecretKey)),
+		MetaURL:    strings.TrimRight(strings.TrimSpace(getenv(EnvMetaURL)), "/"),
+		MetaAPIKey: strings.TrimSpace(getenv(EnvMetaAPIKey)),
 	}
 	proxies, err := parsePrefixes(pick(f.trustedProxies, EnvTrustedProxies, DefaultTrustedProxies))
 	if err != nil {
@@ -173,6 +182,12 @@ func (c Config) Validate() error {
 		u, err := url.Parse(c.BaseURL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			errs = append(errs, fmt.Errorf("%s: %q is not an http(s) URL", EnvBaseURL, c.BaseURL))
+		}
+	}
+	if c.MetaURL != "" {
+		u, err := url.Parse(c.MetaURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			errs = append(errs, fmt.Errorf("%s: %q is not an http(s) URL", EnvMetaURL, c.MetaURL))
 		}
 	}
 	if c.Log.Format != "json" && c.Log.Format != "text" {

@@ -12,6 +12,14 @@ make check   # format check, vet, lint, govulncheck and tests: run this before e
 make help    # lists every target
 ```
 
+### Sibling modules
+
+Until the Panelarr metadata service and the source API are published as versioned Go modules, `go.mod` points at local clones next to this one (`replace github.com/panelarr/meta => ../meta`). Clone them side by side:
+
+```sh
+git clone https://github.com/panelarr/meta ../meta
+```
+
 ### Tests and PostgreSQL
 
 Tests run against a real PostgreSQL, never a substitute. By default they start a `postgres` container with testcontainers. To use a server you already run, point `PANELARR_TEST_DATABASE_URL` at it. The role needs `CREATEDB` (and nothing more): each test creates and drops its own database.

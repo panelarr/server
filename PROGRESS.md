@@ -4,7 +4,7 @@ The plan for the server's first version, in slices. Each slice works end to end,
 
 - [x] **0. Scaffold:** Go module, `make` targets, lint, CI, release config, repo docs. `panelarr serve | migrate | healthcheck | version`; env and flag config; JSON/text logs; Prometheus metrics on a private listener (off by default); `/healthz` and `/readyz` with required and optional checks; PostgreSQL with goose, sqlc and pgx; spec-first REST API (`api/openapi.yaml`, oapi-codegen strict server) with RFC 9457 problem errors and a breaking-change check.
 - [x] **1. Accounts and setup:** users (argon2id), roles admin and user, grants (`may_add`, `may_download`, `may_manage_matches`, allowed sources, content-rating ceiling); cookie sessions with CSRF protection; scoped personal API keys (hashed, shown once); rate-limited login; first-run gate (the first account becomes the admin); users admin; invite links; secrets encryption (used from slice 2); authorization from the spec with a test matrix over every operation; request validation against the spec; detailed health for admins; metrics via a `metrics:read` key.
-- [ ] **2. Metadata service:** connection and setup-wizard check (reachable, admin key, a provider with entries); degraded while it's down; catalogue search, browse and details through the server, filtered by the user's ceiling; cover proxy and cache.
+- [x] **2. Metadata service:** connection over gRPC (admin key encrypted; or fixed by `PANELARR_META_URL`/`PANELARR_META_KEY`) and the wizard's check (reachable, key valid, admin scope, a provider with entries), with what to do when not ready and a "start sync" action; degraded (not down) while it isn't ready; catalogue search, browse and details through the server, filtered by the user's ceiling (unrated entries shown unless hidden); covers fetched and cached by the server (no SVG); authorization now runs before the generated code parses parameters.
 - [ ] **3. Source plugins (remote):** register endpoints, plugin config from its schema, sync sources and their health, per-source visibility; browse, search and series preview through the server; optional wizard step.
 - [ ] **4. Jobs and events:** PostgreSQL job queue (lease, retries with back-off, per-source concurrency and rate limits, de-duplication); named jobs and runs API; per-user filtered server-sent events.
 - [ ] **5. Works, libraries and matching:** add from the catalogue (one shared work per entry, one library entry per user); match job over every allowed source by main and alternative titles; auto-attach and candidates with evidence; fix match (attach, detach, re-run, paste URL); add from a source's browse page.
@@ -26,4 +26,4 @@ Settled for now, cheap to change:
 
 ## Next
 
-Slice 2: the metadata service connection and catalogue.
+Slice 3: source plugins (remote endpoints).

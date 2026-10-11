@@ -12,6 +12,8 @@ Panelarr follows the *arr* convention: only what the server needs before it can 
 | `PANELARR_LOG_FORMAT` | `--log-format` | `json` | `json` (one object per line) or `text`. |
 | `PANELARR_LOG_LEVEL` | `--log-level` | `info` | `debug`, `info`, `warn` or `error`. |
 | `PANELARR_SECRET_KEY` | | (empty) | Key that encrypts stored secrets (service and plugin keys, storage credentials): base64 of 32 bytes, e.g. `openssl rand -base64 32`. Empty: a key file `secret.key` in the config directory, created on first use. Back it up with the database: without it, stored secrets can't be read. |
+| `PANELARR_META_URL` | | (empty) | The metadata service, e.g. `http://meta:8901`. Set it (with `PANELARR_META_KEY`) to fix the connection in the environment; leave it empty to connect the service in the first-run wizard instead. |
+| `PANELARR_META_KEY` | | (empty) | An API key of the metadata service with the `admin` scope. |
 | `PANELARR_TRUSTED_PROXIES` | `--trusted-proxies` | loopback and private networks | Comma-separated networks (or addresses) of reverse proxies whose `X-Forwarded-For` header is believed, or `none`. The client address is used for login limits and the session list. |
 | `PANELARR_METRICS_ENABLED` | `--metrics` | `false` | Serve Prometheus metrics. |
 | `PANELARR_METRICS_LISTEN` | `--metrics-listen` | (empty) | Address of a separate metrics listener, e.g. `127.0.0.1:9464`. Empty: `/metrics` is served on the API port, only to API keys with the `metrics:read` scope. |
@@ -31,6 +33,14 @@ Every line carries `time`, `level`, `msg`, `service` (`server`) and, where it ap
 | `GET /api/v1/system/health` | Detailed health for admins: every component, whether it's required, its latency and its error. |
 
 `panelarr healthcheck` probes `/healthz` for container health checks in images without a shell.
+
+## The metadata service
+
+Panelarr's library needs the metadata service: every work is created from one of its entries. The server talks to it over gRPC with an admin-scoped key (stored encrypted). Until the service is reachable and has a provider with entries, the server reports `degraded` (still ready) and catalogue calls answer `503 meta_unavailable`; reading what's already downloaded keeps working. Admins see what's missing at `GET /api/v1/system/meta`.
+
+Entries without a known content rating are shown to users by default. To hide them, set the instance setting `catalog.hide_unknown_ratings` to `true` (an admin page follows).
+
+Covers are fetched by the server and cached under `<config>/cache/images` (safe to delete).
 
 ## Accounts
 

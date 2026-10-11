@@ -39,6 +39,7 @@ Startup settings come from `PANELARR_*` environment variables or flags; everythi
 | `PANELARR_BASE_URL` | | public URL |
 | `PANELARR_LOG_FORMAT` / `PANELARR_LOG_LEVEL` | `json` / `info` | logging |
 | `PANELARR_SECRET_KEY` | key file in config | encrypts stored secrets |
+| `PANELARR_META_URL` / `PANELARR_META_KEY` | (wizard) | the metadata service, if not connected in the app |
 | `PANELARR_TRUSTED_PROXIES` | private networks | reverse proxies allowed to set `X-Forwarded-For` |
 | `PANELARR_METRICS_ENABLED` / `PANELARR_METRICS_LISTEN` | off | Prometheus metrics, on a separate listener or behind a `metrics:read` key |
 

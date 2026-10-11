@@ -30,7 +30,7 @@ SELECT user_id FROM library_entries WHERE work_id = $1;
 -- name: ListLibrary :many
 -- A user's library by title, after a (sort_title, id) cursor. Content
 -- filters run in Go (they depend on the user's grants).
-SELECT sqlc.embed(works), library_entries.added_at
+SELECT sqlc.embed(works), library_entries.added_at, library_entries.auto_download
 FROM library_entries JOIN works ON works.id = library_entries.work_id
 WHERE library_entries.user_id = @user_id
   AND (sqlc.narg(query)::text IS NULL OR works.title ILIKE '%' || sqlc.narg(query) || '%')

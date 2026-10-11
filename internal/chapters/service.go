@@ -46,6 +46,13 @@ type Service struct {
 	limits *limits.Registry
 	hub    *events.Hub
 	log    *slog.Logger
+	onNew  func(ctx context.Context, workID uuid.UUID, chapterIDs []uuid.UUID)
+}
+
+// OnNewChapters sets what happens when a work gains chapters (e.g.
+// automatic downloads).
+func (s *Service) OnNewChapters(f func(ctx context.Context, workID uuid.UUID, chapterIDs []uuid.UUID)) {
+	s.onNew = f
 }
 
 // NewService returns the service and registers its task kind on q.
@@ -157,6 +164,12 @@ func (s *Service) handleUpdateSeries(ctx context.Context, t *queue.Task) (any, e
 		return nil, err
 	}
 	err = s.st.InTx(ctx, func(q *db.Queries, _ pgx.Tx) error {
+		// Writes to a work's chapters take the work's lock first, so they
+		// run one at a time per work (rebuilding the unified list locks the
+		// same rows in another order).
+		if err := q.LockWork(ctx, se.WorkID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
 		keys := make([]string, 0, len(list))
 		for i, c := range list {
 			params := db.UpsertSourceChapterParams{
@@ -225,9 +238,9 @@ func variantOf(r db.WorkVariantsRow) Variant {
 // returns how many chapters are new.
 func (s *Service) Unify(ctx context.Context, workID uuid.UUID) (int, error) {
 	langs := s.languages(ctx)
-	added := 0
+	var added []uuid.UUID
 	err := s.st.InTx(ctx, func(q *db.Queries, _ pgx.Tx) error {
-		added = 0
+		added = added[:0]
 		if err := q.LockWork(ctx, workID); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
@@ -278,7 +291,7 @@ func (s *Service) Unify(ctx context.Context, workID uuid.UUID) (int, error) {
 				if err != nil {
 					return err
 				}
-				added++
+				added = append(added, cur.ID)
 			} else if err := q.UpdateChapter(ctx, db.UpdateChapterParams{
 				ID: cur.ID, Volume: g.Volume(), Title: choice.Variant.Name, PreferredVariantID: preferred,
 				Reason: choice.Reason, Available: true,
@@ -307,8 +320,11 @@ func (s *Service) Unify(ctx context.Context, workID uuid.UUID) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	s.publish(ctx, workID, added)
-	return added, nil
+	s.publish(ctx, workID, len(added))
+	if len(added) > 0 && s.onNew != nil {
+		s.onNew(ctx, workID, added)
+	}
+	return len(added), nil
 }
 
 func (s *Service) publish(ctx context.Context, workID uuid.UUID, added int) {

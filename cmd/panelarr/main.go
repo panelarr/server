@@ -23,6 +23,7 @@ import (
 	"github.com/panelarr/server/internal/buildinfo"
 	"github.com/panelarr/server/internal/chapters"
 	"github.com/panelarr/server/internal/config"
+	"github.com/panelarr/server/internal/downloads"
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/imagecache"
 	"github.com/panelarr/server/internal/jobs"
@@ -35,6 +36,7 @@ import (
 	"github.com/panelarr/server/internal/queue"
 	"github.com/panelarr/server/internal/reader"
 	"github.com/panelarr/server/internal/secret"
+	"github.com/panelarr/server/internal/storage"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/users"
 )
@@ -177,6 +179,13 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	chs := chapters.NewService(st, host, q, lim, hub, logging.Component(log, "chapters"))
 	lib.SetChapterHooks(chs)
 	rdr := reader.NewService(st, host, lib, chs, lim, hub, logging.Component(log, "reader"))
+	storages := storage.NewManager(st, box, logging.Component(log, "storage"))
+	if err := storages.EnsureDefault(ctx, filepath.Join(cfg.DataDir, "library")); err != nil {
+		return err
+	}
+	dl := downloads.NewService(st, host, storages, metaSvc, q, lim, hub, filepath.Join(cfg.DataDir, ".tmp"), logging.Component(log, "downloads"))
+	rdr.SetFiles(dl)
+	chs.OnNewChapters(dl.NewChapters)
 	jm := jobs.NewManager(st, hub, m, logging.Component(log, "jobs"))
 	registerJobs(jm, st, authSvc, host, lib, chs)
 	if err := jm.Start(ctx); err != nil {
@@ -219,6 +228,8 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		Library:        lib,
 		Chapters:       chs,
 		Reader:         rdr,
+		Downloads:      dl,
+		Storages:       storages,
 		SecureCookies:  cfg.SecureCookies(),
 		TrustedProxies: cfg.TrustedProxies,
 	})

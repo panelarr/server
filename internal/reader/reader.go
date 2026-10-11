@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"slices"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/panelarr/server/internal/chapters"
+	"github.com/panelarr/server/internal/downloads"
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/library"
 	"github.com/panelarr/server/internal/limits"
@@ -50,6 +52,31 @@ type Service struct {
 	hub      *events.Hub
 	log      *slog.Logger
 	pages    pageCache
+	files    Files
+}
+
+// Files opens downloaded chapters.
+type Files interface {
+	Open(ctx context.Context, chapterID uuid.UUID) (*downloads.File, error)
+}
+
+// SetFiles lets the reader serve downloaded chapters from their files.
+func (s *Service) SetFiles(f Files) { s.files = f }
+
+// openFile opens a chapter's downloaded file, or returns nil (also when
+// its storage can't be reached right now: then the source serves it).
+func (s *Service) openFile(ctx context.Context, chapterID uuid.UUID) *downloads.File {
+	if s.files == nil {
+		return nil
+	}
+	f, err := s.files.Open(ctx, chapterID)
+	if err != nil {
+		if !errors.Is(err, downloads.ErrNotStored) {
+			s.log.WarnContext(ctx, "open downloaded chapter", "chapter", chapterID, "err", err)
+		}
+		return nil
+	}
+	return f
 }
 
 // NewService returns the reader service.
@@ -155,18 +182,44 @@ func (s *Service) sourcePages(ctx context.Context, v library.Viewer, vv chapters
 	return out, nil
 }
 
-// Pages returns what the reader shows for a chapter.
+// Pages returns what the reader shows for a chapter: from its downloaded
+// file when there is one (unless a copy is asked for), else from a source.
 func (s *Service) Pages(ctx context.Context, v library.Viewer, chapterID uuid.UUID, variantID *uuid.UUID) (Pages, error) {
-	d, vv, err := s.chapterFor(ctx, v, chapterID, variantID)
-	if err != nil {
-		return Pages{}, err
+	var out Pages
+	if variantID == nil {
+		f, d, err := s.fileFor(ctx, v, chapterID)
+		if err != nil {
+			return Pages{}, err
+		}
+		if f != nil {
+			defer f.Close()
+			out = Pages{WorkID: d.WorkID, Chapter: d.Chapter, Origin: OriginFile, Pages: make([]Page, f.Archive.Pages())}
+			for i := range out.Pages {
+				out.Pages[i] = Page{Index: i}
+			}
+			for _, vv := range d.All {
+				if f.FromVariantID.Valid && vv.ID == f.FromVariantID.UUID {
+					out.Variant = vv
+				}
+			}
+			if out.Variant.ID == uuid.Nil && d.Chosen != nil {
+				out.Variant = *d.Chosen
+			}
+		}
 	}
-	pages, err := s.sourcePages(ctx, v, vv)
-	if err != nil {
-		return Pages{}, err
+	if out.Origin == "" {
+		d, vv, err := s.chapterFor(ctx, v, chapterID, variantID)
+		if err != nil {
+			return Pages{}, err
+		}
+		pages, err := s.sourcePages(ctx, v, vv)
+		if err != nil {
+			return Pages{}, err
+		}
+		out = Pages{WorkID: d.WorkID, Chapter: d.Chapter, Variant: vv, Origin: OriginSource, Pages: pages}
 	}
-	out := Pages{WorkID: d.WorkID, Chapter: d.Chapter, Variant: vv, Origin: OriginSource, Pages: pages}
-	out.Prev, out.Next, err = s.neighbours(ctx, d.WorkID, chapterID, v.UserID)
+	var err error
+	out.Prev, out.Next, err = s.neighbours(ctx, out.WorkID, chapterID, v.UserID)
 	if err != nil {
 		return Pages{}, err
 	}
@@ -206,11 +259,61 @@ func (s *Service) neighbours(ctx context.Context, workID, chapterID, userID uuid
 	return prev, next, nil
 }
 
+// fileFor opens a chapter's downloaded file if v may read the chapter.
+func (s *Service) fileFor(ctx context.Context, v library.Viewer, chapterID uuid.UUID) (*downloads.File, chapters.Detail, error) {
+	ch, err := s.st.GetChapter(ctx, chapterID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, chapters.Detail{}, ErrNotFound
+	}
+	if err != nil {
+		return nil, chapters.Detail{}, err
+	}
+	if _, err := s.library.Get(ctx, v, ch.WorkID); err != nil {
+		if errors.Is(err, library.ErrNotFound) {
+			return nil, chapters.Detail{}, ErrNotFound
+		}
+		return nil, chapters.Detail{}, err
+	}
+	f := s.openFile(ctx, chapterID)
+	if f == nil {
+		return nil, chapters.Detail{}, nil
+	}
+	d, err := s.chapters.Get(ctx, ch.WorkID, chapterID, v.UserID)
+	if err != nil {
+		_ = f.Close()
+		return nil, chapters.Detail{}, err
+	}
+	return f, d, nil
+}
+
 // MaxPageBytes caps one page image.
 const MaxPageBytes = plugins.MaxImageBytes
 
-// Page fetches one page image of a chapter's copy.
+// Page returns one page image: from the downloaded file when there is one
+// (unless a copy is asked for), else through the copy's source.
 func (s *Service) Page(ctx context.Context, v library.Viewer, chapterID uuid.UUID, variantID *uuid.UUID, index int) (string, []byte, error) {
+	if variantID == nil {
+		f, _, err := s.fileFor(ctx, v, chapterID)
+		if err != nil {
+			return "", nil, err
+		}
+		if f != nil {
+			defer f.Close()
+			if index < 0 || index >= f.Archive.Pages() {
+				return "", nil, ErrPageNotFound
+			}
+			ct, rc, _, err := f.Archive.Page(index)
+			if err != nil {
+				return "", nil, err
+			}
+			defer rc.Close()
+			data, err := io.ReadAll(io.LimitReader(rc, MaxPageBytes+1))
+			if err != nil {
+				return "", nil, err
+			}
+			return ct, data, nil
+		}
+	}
 	_, vv, err := s.chapterFor(ctx, v, chapterID, variantID)
 	if err != nil {
 		return "", nil, err

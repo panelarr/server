@@ -16,7 +16,7 @@ import (
 const addLibraryEntry = `-- name: AddLibraryEntry :one
 INSERT INTO library_entries (user_id, work_id) VALUES ($1, $2)
 ON CONFLICT DO NOTHING
-RETURNING user_id, work_id, added_at, seen_at
+RETURNING user_id, work_id, added_at, seen_at, auto_download
 `
 
 type AddLibraryEntryParams struct {
@@ -32,6 +32,7 @@ func (q *Queries) AddLibraryEntry(ctx context.Context, arg AddLibraryEntryParams
 		&i.WorkID,
 		&i.AddedAt,
 		&i.SeenAt,
+		&i.AutoDownload,
 	)
 	return i, err
 }
@@ -211,7 +212,7 @@ func (q *Queries) FollowedWorksBySync(ctx context.Context, lim int32) ([]Work, e
 }
 
 const getLibraryEntry = `-- name: GetLibraryEntry :one
-SELECT user_id, work_id, added_at, seen_at FROM library_entries WHERE user_id = $1 AND work_id = $2
+SELECT user_id, work_id, added_at, seen_at, auto_download FROM library_entries WHERE user_id = $1 AND work_id = $2
 `
 
 type GetLibraryEntryParams struct {
@@ -227,6 +228,7 @@ func (q *Queries) GetLibraryEntry(ctx context.Context, arg GetLibraryEntryParams
 		&i.WorkID,
 		&i.AddedAt,
 		&i.SeenAt,
+		&i.AutoDownload,
 	)
 	return i, err
 }
@@ -334,7 +336,7 @@ func (q *Queries) LibraryUserIDs(ctx context.Context, workID uuid.UUID) ([]uuid.
 }
 
 const listLibrary = `-- name: ListLibrary :many
-SELECT works.id, works.meta_entry_id, works.title, works.sort_title, works.type, works.status, works.content_rating, works.year, works.original_language, works.cover_url, works.meta_synced_at, works.created_at, works.updated_at, library_entries.added_at
+SELECT works.id, works.meta_entry_id, works.title, works.sort_title, works.type, works.status, works.content_rating, works.year, works.original_language, works.cover_url, works.meta_synced_at, works.created_at, works.updated_at, library_entries.added_at, library_entries.auto_download
 FROM library_entries JOIN works ON works.id = library_entries.work_id
 WHERE library_entries.user_id = $1
   AND ($2::text IS NULL OR works.title ILIKE '%' || $2 || '%')
@@ -352,8 +354,9 @@ type ListLibraryParams struct {
 }
 
 type ListLibraryRow struct {
-	Work    Work
-	AddedAt time.Time
+	Work         Work
+	AddedAt      time.Time
+	AutoDownload bool
 }
 
 // A user's library by title, after a (sort_title, id) cursor. Content
@@ -388,6 +391,7 @@ func (q *Queries) ListLibrary(ctx context.Context, arg ListLibraryParams) ([]Lis
 			&i.Work.CreatedAt,
 			&i.Work.UpdatedAt,
 			&i.AddedAt,
+			&i.AutoDownload,
 		); err != nil {
 			return nil, err
 		}

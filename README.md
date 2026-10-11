@@ -49,6 +49,7 @@ Startup settings come from `PANELARR_*` environment variables or flags; everythi
 - [Configuration](docs/configuration.md): settings, logs, health, migrations
 - [Works and matching](docs/matching.md): one work per actual work, matched to the sources
 - [Reader API](docs/reader.md): pages, progress, settings
+- [Downloads and storage](docs/downloads.md): CBZ files in a shared library, local or S3
 - [Architecture](docs/architecture.md): how the code is laid out
 - [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md)
 

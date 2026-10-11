@@ -58,14 +58,14 @@ func (s *Server) GetChapterPages(ctx context.Context, req apigen.GetChapterPages
 	chosen := p.Chapter
 	chosen.Chosen = &p.Variant
 	out := apigen.GetChapterPages200JSONResponse{
-		WorkId: p.WorkID, Chapter: toUnified(chosen, visible), Variant: toVariant(p.Variant),
+		WorkId: p.WorkID, Chapter: toUnified(chosen, visible, p.Origin == reader.OriginFile), Variant: toVariant(p.Variant),
 		Origin: apigen.ChapterPagesOrigin(p.Origin), Pages: make([]apigen.ReaderPage, len(p.Pages)),
 		PrevChapterId: p.Prev, NextChapterId: p.Next,
 	}
 	// Page links name the copy unless it is the chosen one, so a pinned
 	// or changed choice can't swap copies in the middle of reading.
 	var variant *uuid.UUID
-	if req.Params.VariantId != nil || p.Chapter.Chosen == nil || p.Chapter.Chosen.ID != p.Variant.ID {
+	if p.Origin == reader.OriginSource && (req.Params.VariantId != nil || p.Chapter.Chosen == nil || p.Chapter.Chosen.ID != p.Variant.ID) {
 		variant = &p.Variant.ID
 	}
 	for i, pg := range p.Pages {

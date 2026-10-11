@@ -80,6 +80,10 @@ tags:
     description: Works' unified chapters and update checks.
   - name: reader
     description: Pages, progress, history and reader settings.
+  - name: downloads
+    description: Downloading chapters into the shared library.
+  - name: storage
+    description: Where downloads are stored (admins).
 
 paths:
   /system/info:
@@ -2021,6 +2025,215 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /storages:
+    get:
+      operationId: listStorages
+      tags: [storage]
+      summary: Storage endpoints for downloads
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: Storages, the default first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createStorage
+      tags: [storage]
+      summary: Add a storage
+      description: The server writes, reads and deletes a probe first; a storage that fails answers `422` with code `storage_check_failed` and the reason.
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStorageRequest"
+      responses:
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageInfo"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /storages/{storage_id}:
+    parameters:
+      - $ref: "#/components/parameters/StorageId"
+    patch:
+      operationId: updateStorage
+      tags: [storage]
+      summary: Change a storage, or make it the default
+      description: New settings are checked first. Making a storage the default sends new downloads there; existing files stay where they are (move them with a task).
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateStorageRequest"
+      responses:
+        "200":
+          description: The storage.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageInfo"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteStorage
+      tags: [storage]
+      summary: Remove an empty storage
+      description: "`409` with code `storage_in_use` while files are on it, or `storage_default` for the default."
+      x-panelarr-access: admin
+      responses:
+        "204":
+          description: Removed.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /storages/{storage_id}/test:
+    post:
+      operationId: testStorage
+      tags: [storage]
+      summary: Check a storage now
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/StorageId"
+      responses:
+        "200":
+          description: The result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageTest"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /storages/{storage_id}/move:
+    post:
+      operationId: moveStorage
+      tags: [storage]
+      summary: Move every file to another storage
+      description: Runs as a task (with progress); files stay readable throughout.
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/StorageId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveStorageRequest"
+      responses:
+        "202":
+          description: Queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRef"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}/downloads:
+    post:
+      operationId: downloadChapters
+      tags: [downloads]
+      summary: Download chapters of a work
+      description: |
+        Give `chapter_ids`, or `scope`: `all` or `unread` (chapters you
+        haven't finished). Chapters downloaded or queued already (by
+        anyone) aren't queued again; files are stored once for everyone.
+        Needs `may_download`.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DownloadChaptersRequest"
+      responses:
+        "202":
+          description: What was queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DownloadsQueued"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /downloads:
+    get:
+      operationId: listDownloads
+      tags: [downloads]
+      summary: Download queue and history
+      description: Your downloads (admins see everyone's with `all=true`), newest first, with live progress over the event stream (`task.progress`, `chapter.downloaded`). Admins cancel, retry and pause through the task endpoints.
+      x-panelarr-access: user
+      parameters:
+        - name: all
+          in: query
+          schema:
+            type: boolean
+        - name: state
+          in: query
+          schema:
+            $ref: "#/components/schemas/TaskState"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/PageToken"
+      responses:
+        "200":
+          description: A page of downloads.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DownloadPage"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /library/{work_id}/auto-download:
+    put:
+      operationId: setAutoDownload
+      tags: [downloads]
+      summary: Download new chapters of a work automatically
+      description: New chapters found by update checks are queued for download. Needs `may_download`.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutoDownloadRequest"
+      responses:
+        "204":
+          description: Saved.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /chapters/{chapter_id}/file:
+    delete:
+      operationId: deleteChapterFile
+      tags: [downloads]
+      summary: Delete a chapter's downloaded file
+      description: Files are only deleted by admins; removing works from libraries never deletes them.
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/ChapterId"
+      responses:
+        "204":
+          description: Deleted.
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -2039,6 +2252,13 @@ components:
       description: A personal API key as a bearer token.
 
   parameters:
+    StorageId:
+      name: storage_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9_-]{0,39}$"
     VariantIdQuery:
       name: variant_id
       in: query
@@ -2242,6 +2462,171 @@ components:
             $ref: "#/components/schemas/Problem"
 
   schemas:
+    StorageInfo:
+      type: object
+      required: [id, name, kind, default, has_secret, files]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [local, s3]
+        default:
+          type: boolean
+        root:
+          type: string
+          description: Local storages' directory.
+        endpoint:
+          type: string
+        region:
+          type: string
+        bucket:
+          type: string
+        prefix:
+          type: string
+        path_style:
+          type: boolean
+        access_key:
+          type: string
+        has_secret:
+          type: boolean
+          description: A secret key is stored (never shown).
+        files:
+          type: integer
+          format: int64
+    StorageList:
+      type: object
+      required: [storages]
+      properties:
+        storages:
+          type: array
+          items:
+            $ref: "#/components/schemas/StorageInfo"
+    StorageSettings:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        root:
+          type: string
+          maxLength: 1000
+          description: Local storages; an absolute path.
+        endpoint:
+          type: string
+          maxLength: 500
+          description: S3, e.g. "https://s3.example.com".
+        region:
+          type: string
+          maxLength: 100
+        bucket:
+          type: string
+          maxLength: 100
+        prefix:
+          type: string
+          maxLength: 200
+        path_style:
+          type: boolean
+        access_key:
+          type: string
+          maxLength: 200
+        secret_key:
+          type: string
+          maxLength: 500
+          description: Leave out to keep the stored one.
+    CreateStorageRequest:
+      allOf:
+        - $ref: "#/components/schemas/StorageSettings"
+        - type: object
+          required: [id, name, kind]
+          properties:
+            id:
+              type: string
+              pattern: "^[a-z0-9][a-z0-9_-]{0,39}$"
+            kind:
+              type: string
+              enum: [local, s3]
+    UpdateStorageRequest:
+      allOf:
+        - $ref: "#/components/schemas/StorageSettings"
+        - type: object
+          properties:
+            default:
+              type: boolean
+              description: true makes it the default storage.
+    StorageTest:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        error:
+          type: string
+    MoveStorageRequest:
+      type: object
+      required: [to]
+      properties:
+        to:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]{0,39}$"
+    DownloadChaptersRequest:
+      type: object
+      properties:
+        chapter_ids:
+          type: array
+          maxItems: 5000
+          items:
+            type: string
+            format: uuid
+        scope:
+          type: string
+          enum: [all, unread]
+    DownloadsQueued:
+      type: object
+      required: [queued, downloaded, unavailable]
+      properties:
+        queued:
+          type: integer
+        downloaded:
+          type: integer
+          description: Already downloaded; nothing to do.
+        unavailable:
+          type: integer
+          description: No source lists them.
+    DownloadItem:
+      type: object
+      required: [task, work_id, work_title, chapter_title]
+      properties:
+        task:
+          $ref: "#/components/schemas/Task"
+        work_id:
+          type: string
+          format: uuid
+        work_title:
+          type: string
+        chapter_number:
+          type: number
+        chapter_title:
+          type: string
+    DownloadPage:
+      type: object
+      required: [items, next_page_token]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DownloadItem"
+        next_page_token:
+          type: string
+    AutoDownloadRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+
     ReaderPage:
       type: object
       required: [index, url]
@@ -2424,7 +2809,7 @@ components:
           enum: [ok, failing, unknown]
     UnifiedChapter:
       type: object
-      required: [id, title, extra, available, new, variants, reason, pinned, created_at]
+      required: [id, title, extra, available, new, variants, reason, pinned, downloaded, created_at]
       properties:
         id:
           type: string
@@ -2451,6 +2836,9 @@ components:
           description: Why the chosen copy won.
         pinned:
           type: boolean
+        downloaded:
+          type: boolean
+          description: Stored in the library (read from the file).
         chosen:
           $ref: "#/components/schemas/ChapterVariant"
         created_at:
@@ -2560,8 +2948,11 @@ components:
           description: Sources a series is attached on.
     LibraryEntry:
       type: object
-      required: [work, added_at, new_chapters]
+      required: [work, added_at, new_chapters, auto_download]
       properties:
+        auto_download:
+          type: boolean
+          description: New chapters are downloaded automatically.
         work:
           $ref: "#/components/schemas/WorkSummary"
         added_at:

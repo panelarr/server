@@ -237,9 +237,10 @@ func (s *Service) attachedSources(ctx context.Context, ids []uuid.UUID) (map[uui
 
 // Entry is a work in a user's library.
 type Entry struct {
-	Work     db.Work
-	AddedAt  time.Time
-	Attached int
+	Work         db.Work
+	AddedAt      time.Time
+	Attached     int
+	AutoDownload bool
 }
 
 // LibraryPage is one page of a library.
@@ -290,7 +291,7 @@ func (s *Service) List(ctx context.Context, v Viewer, query string, after *Curso
 				out.Next = &Cursor{SortTitle: out.Entries[limit-1].Work.SortTitle, ID: out.Entries[limit-1].Work.ID}
 				return out, nil
 			}
-			out.Entries = append(out.Entries, Entry{Work: r.Work, AddedAt: r.AddedAt, Attached: len(attached[r.Work.ID])})
+			out.Entries = append(out.Entries, Entry{Work: r.Work, AddedAt: r.AddedAt, Attached: len(attached[r.Work.ID]), AutoDownload: r.AutoDownload})
 		}
 		if len(rows) <= limit {
 			return out, nil

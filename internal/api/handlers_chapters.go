@@ -52,10 +52,11 @@ func toVariant(v chapters.VariantView) apigen.ChapterVariant {
 
 // toUnified shows a chapter; its chosen copy only when it is on a source
 // the caller may use.
-func toUnified(c chapters.Chapter, visible map[string]bool) apigen.UnifiedChapter {
+func toUnified(c chapters.Chapter, visible map[string]bool, downloaded bool) apigen.UnifiedChapter {
 	out := apigen.UnifiedChapter{
 		Id: c.ID, Volume: nonEmpty(c.Volume), Title: c.Title, Extra: c.Number == nil, Available: c.Available,
 		New: c.New, Variants: c.Variants, Reason: c.Reason, Pinned: c.PinnedVariantID.Valid, CreatedAt: c.CreatedAt,
+		Downloaded: downloaded,
 	}
 	if c.Number != nil {
 		out.Number = ptr(float32(*c.Number))
@@ -81,9 +82,13 @@ func (s *Server) ListWorkChapters(ctx context.Context, req apigen.ListWorkChapte
 	if err != nil {
 		return nil, err
 	}
+	have, err := s.deps.Downloads.Downloaded(ctx, req.WorkId)
+	if err != nil {
+		return nil, err
+	}
 	out := apigen.ListWorkChapters200JSONResponse{Chapters: make([]apigen.UnifiedChapter, len(list))}
 	for i, c := range list {
-		out.Chapters[i] = toUnified(c, visible)
+		out.Chapters[i] = toUnified(c, visible, have[c.ID])
 	}
 	if req.Params.Order != nil && *req.Params.Order == apigen.ListWorkChaptersParamsOrderDesc {
 		slices.Reverse(out.Chapters)
@@ -96,7 +101,11 @@ func (s *Server) chapterDetail(ctx context.Context, d chapters.Detail) (apigen.C
 	if err != nil {
 		return apigen.ChapterDetail{}, err
 	}
-	out := apigen.ChapterDetail{Chapter: toUnified(d.Chapter, visible), Variants: []apigen.ChapterVariant{}}
+	have, err := s.deps.Downloads.Downloaded(ctx, d.WorkID)
+	if err != nil {
+		return apigen.ChapterDetail{}, err
+	}
+	out := apigen.ChapterDetail{Chapter: toUnified(d.Chapter, visible, have[d.ID]), Variants: []apigen.ChapterVariant{}}
 	for _, v := range d.All {
 		if visible[v.SourceID] {
 			out.Variants = append(out.Variants, toVariant(v))

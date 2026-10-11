@@ -21,6 +21,7 @@ import (
 	"github.com/panelarr/server/internal/api/apigen"
 	"github.com/panelarr/server/internal/auth"
 	"github.com/panelarr/server/internal/chapters"
+	"github.com/panelarr/server/internal/downloads"
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/imagecache"
 	"github.com/panelarr/server/internal/jobs"
@@ -31,6 +32,7 @@ import (
 	"github.com/panelarr/server/internal/queue"
 	"github.com/panelarr/server/internal/reader"
 	"github.com/panelarr/server/internal/secret"
+	"github.com/panelarr/server/internal/storage"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/store/storetest"
 	"github.com/panelarr/server/internal/users"
@@ -50,6 +52,7 @@ type harness struct {
 	jobs    *jobs.Manager
 	hub     *events.Hub
 	srv     *httptest.Server
+	dataDir string
 	// release lets the demo job finish.
 	release chan struct{}
 }
@@ -87,6 +90,15 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	lib := library.NewService(st, m, host, q, nil, hub, nil)
 	chs := chapters.NewService(st, host, q, nil, hub, nil)
 	lib.SetChapterHooks(chs)
+	rdr := reader.NewService(st, host, lib, chs, nil, hub, nil)
+	storages := storage.NewManager(st, box, nil)
+	dataDir := t.TempDir()
+	if err := storages.EnsureDefault(context.Background(), filepath.Join(dataDir, "library")); err != nil {
+		t.Fatal(err)
+	}
+	dl := downloads.NewService(st, host, storages, m, q, nil, hub, filepath.Join(dataDir, ".tmp"), nil)
+	rdr.SetFiles(dl)
+	chs.OnNewChapters(dl.NewChapters)
 	jm := jobs.NewManager(st, hub, nil, nil)
 	release := make(chan struct{})
 	jm.Register(jobs.Definition{
@@ -110,20 +122,22 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	go func() { defer close(qDone); _ = q.Run(runCtx) }()
 	t.Cleanup(func() { stop(); <-qDone; jm.Wait() })
 	deps := Deps{
-		Log:      slog.New(slog.DiscardHandler),
-		Auth:     a,
-		Users:    u,
-		Meta:     m,
-		Images:   imagecache.New(t.TempDir()),
-		Plugins:  host,
-		Signer:   imagecache.NewSigner([]byte("test signing key")),
-		Jobs:     jm,
-		Queue:    q,
-		Hub:      hub,
-		Store:    st,
-		Library:  lib,
-		Chapters: chs,
-		Reader:   reader.NewService(st, host, lib, chs, nil, hub, nil),
+		Log:       slog.New(slog.DiscardHandler),
+		Auth:      a,
+		Users:     u,
+		Meta:      m,
+		Images:    imagecache.New(t.TempDir()),
+		Plugins:   host,
+		Signer:    imagecache.NewSigner([]byte("test signing key")),
+		Jobs:      jm,
+		Queue:     q,
+		Hub:       hub,
+		Store:     st,
+		Library:   lib,
+		Chapters:  chs,
+		Reader:    rdr,
+		Downloads: dl,
+		Storages:  storages,
 		Checks: []Check{
 			{Name: "database", Required: true, Run: st.Pool.Ping},
 			{Name: "meta", Run: m.ReadyCheck},
@@ -142,7 +156,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	}
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &harness{t: t, st: st, auth: a, users: u, meta: m, metrics: deps.Metrics, queue: q, jobs: jm, hub: hub, srv: srv, release: release}
+	return &harness{t: t, st: st, auth: a, users: u, meta: m, metrics: deps.Metrics, queue: q, jobs: jm, hub: hub, srv: srv, release: release, dataDir: dataDir}
 }
 
 // client is an API client that keeps cookies, sends the CSRF token it was

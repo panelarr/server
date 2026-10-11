@@ -16,6 +16,7 @@ import (
 	"github.com/panelarr/server/internal/api/apigen"
 	"github.com/panelarr/server/internal/auth"
 	"github.com/panelarr/server/internal/chapters"
+	"github.com/panelarr/server/internal/downloads"
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/imagecache"
 	"github.com/panelarr/server/internal/jobs"
@@ -25,6 +26,7 @@ import (
 	"github.com/panelarr/server/internal/plugins"
 	"github.com/panelarr/server/internal/queue"
 	"github.com/panelarr/server/internal/reader"
+	"github.com/panelarr/server/internal/storage"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/users"
 )
@@ -53,10 +55,12 @@ type Deps struct {
 	Queue  *queue.Queue
 	Hub    *events.Hub
 	// Store answers list queries that need no service logic.
-	Store    *store.Store
-	Library  *library.Service
-	Chapters *chapters.Service
-	Reader   *reader.Service
+	Store     *store.Store
+	Library   *library.Service
+	Chapters  *chapters.Service
+	Reader    *reader.Service
+	Downloads *downloads.Service
+	Storages  *storage.Manager
 
 	// SecureCookies marks session cookies Secure (https deployments).
 	SecureCookies bool
@@ -82,7 +86,8 @@ func NewHandler(deps Deps) (http.Handler, error) {
 		return nil, err
 	}
 	if deps.Auth == nil || deps.Users == nil || deps.Meta == nil || deps.Images == nil || deps.Plugins == nil || deps.Signer == nil ||
-		deps.Jobs == nil || deps.Queue == nil || deps.Hub == nil || deps.Store == nil || deps.Library == nil || deps.Chapters == nil || deps.Reader == nil {
+		deps.Jobs == nil || deps.Queue == nil || deps.Hub == nil || deps.Store == nil || deps.Library == nil || deps.Chapters == nil || deps.Reader == nil ||
+		deps.Downloads == nil || deps.Storages == nil {
 		return nil, fmt.Errorf("api: every service dependency is required")
 	}
 	s := &Server{deps: deps, policies: pols}

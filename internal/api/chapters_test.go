@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/panelarr/source-api/sdk/plugintest"
 
 	"github.com/panelarr/server/internal/api/apigen"
+	"github.com/panelarr/server/internal/store/db"
 )
 
 // waitChapters polls a work's chapters until ok accepts them.
@@ -23,6 +25,10 @@ func waitChapters(t *testing.T, c *client, workID string, ok func([]apigen.Unifi
 			return list.Chapters
 		}
 		if time.Now().After(deadline) {
+			tasks, _ := c.h.st.ListTasks(context.Background(), db.ListTasksParams{Lim: 50})
+			for _, tk := range tasks {
+				t.Logf("task %s %s attempts=%d run_after=%s err=%q payload=%s", tk.Kind, tk.State, tk.Attempts, time.Until(tk.RunAfter).Round(time.Second), tk.LastError, tk.Payload)
+			}
 			t.Fatalf("chapters never settled: %+v", list.Chapters)
 		}
 		time.Sleep(30 * time.Millisecond)

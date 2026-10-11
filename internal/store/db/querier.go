@@ -19,14 +19,18 @@ type Querier interface {
 	AttachedSeriesOfFollowedWorks(ctx context.Context) ([]SourceSeries, error)
 	AttachedSourceIDsByWork(ctx context.Context, workIds []uuid.UUID) ([]AttachedSourceIDsByWorkRow, error)
 	AttachedSourceSeries(ctx context.Context, workID uuid.UUID) ([]SourceSeries, error)
+	AutoDownloadUsers(ctx context.Context, workID uuid.UUID) ([]uuid.UUID, error)
 	CancelQueuedTask(ctx context.Context, id uuid.UUID) (Task, error)
+	ChapterFileByKey(ctx context.Context, arg ChapterFileByKeyParams) (ChapterFile, error)
 	ChapterVariants(ctx context.Context, chapterID uuid.UUID) ([]ChapterVariantsRow, error)
 	// Due tasks of the given kinds, best first, locked for this transaction;
 	// the caller picks the ones its limits allow and marks them running.
 	ClaimCandidates(ctx context.Context, arg ClaimCandidatesParams) ([]Task, error)
+	ClearDefaultStorage(ctx context.Context) error
 	CountAttachedByWork(ctx context.Context, workIds []uuid.UUID) ([]CountAttachedByWorkRow, error)
 	CountChaptersByWork(ctx context.Context, arg CountChaptersByWorkParams) ([]CountChaptersByWorkRow, error)
 	CountEnabledAdmins(ctx context.Context) (int64, error)
+	CountFilesByStorage(ctx context.Context, storageID string) (int64, error)
 	CountSourcesByPlugin(ctx context.Context) ([]CountSourcesByPluginRow, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
@@ -34,7 +38,9 @@ type Querier interface {
 	CreateJobRun(ctx context.Context, arg CreateJobRunParams) (JobRun, error)
 	CreatePlugin(ctx context.Context, arg CreatePluginParams) (Plugin, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	CreateStorage(ctx context.Context, arg CreateStorageParams) (Storage, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteChapterFile(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	DeleteInvite(ctx context.Context, id uuid.UUID) (int64, error)
 	DeletePlugin(ctx context.Context, id string) (int64, error)
@@ -42,6 +48,7 @@ type Querier interface {
 	DeleteReaderSettings(ctx context.Context, arg DeleteReaderSettingsParams) (int64, error)
 	DeleteSession(ctx context.Context, id uuid.UUID) error
 	DeleteSetting(ctx context.Context, key string) error
+	DeleteStorage(ctx context.Context, id string) (int64, error)
 	DeleteUser(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteUserAPIKey(ctx context.Context, arg DeleteUserAPIKeyParams) (int64, error)
 	DeleteUserSession(ctx context.Context, arg DeleteUserSessionParams) (int64, error)
@@ -49,16 +56,20 @@ type Querier interface {
 	DeleteUserSessionsExcept(ctx context.Context, arg DeleteUserSessionsExceptParams) error
 	// Before attaching another series of the same source.
 	DemoteAttached(ctx context.Context, arg DemoteAttachedParams) error
+	DownloadedChapterIDs(ctx context.Context, workID uuid.UUID) ([]uuid.UUID, error)
 	// Candidates of a source are replaced on every matching run.
 	DropCandidates(ctx context.Context, arg DropCandidatesParams) error
 	ExtendTaskLease(ctx context.Context, arg ExtendTaskLeaseParams) error
 	FailInterruptedJobRuns(ctx context.Context) (int64, error)
+	FilesOnStorage(ctx context.Context, arg FilesOnStorageParams) ([]ChapterFile, error)
 	FinishJobRun(ctx context.Context, arg FinishJobRunParams) (JobRun, error)
 	FinishTask(ctx context.Context, arg FinishTaskParams) (Task, error)
 	// Works someone follows, least recently refreshed first.
 	FollowedWorksBySync(ctx context.Context, lim int32) ([]Work, error)
 	GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKeyByHashRow, error)
 	GetChapter(ctx context.Context, id uuid.UUID) (Chapter, error)
+	GetChapterFile(ctx context.Context, chapterID uuid.UUID) (ChapterFile, error)
+	GetDefaultStorage(ctx context.Context) (Storage, error)
 	GetJobRun(ctx context.Context, id uuid.UUID) (JobRun, error)
 	GetLibraryEntry(ctx context.Context, arg GetLibraryEntryParams) (LibraryEntry, error)
 	GetLiveTaskByDedupeKey(ctx context.Context, dedupeKey string) (Task, error)
@@ -71,6 +82,7 @@ type Querier interface {
 	GetSetting(ctx context.Context, key string) ([]byte, error)
 	GetSource(ctx context.Context, id string) (GetSourceRow, error)
 	GetSourceSeries(ctx context.Context, id uuid.UUID) (SourceSeries, error)
+	GetStorage(ctx context.Context, id string) (Storage, error)
 	GetTask(ctx context.Context, id uuid.UUID) (Task, error)
 	GetUser(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
@@ -82,12 +94,16 @@ type Querier interface {
 	// retry waits out its back-off).
 	HurryTask(ctx context.Context, arg HurryTaskParams) (Task, error)
 	InsertChapter(ctx context.Context, arg InsertChapterParams) (Chapter, error)
+	InsertChapterFile(ctx context.Context, arg InsertChapterFileParams) (ChapterFile, error)
 	// Returns no row when a live task with the same dedupe key exists.
 	InsertTask(ctx context.Context, arg InsertTaskParams) (Task, error)
 	LastJobRuns(ctx context.Context) ([]JobRun, error)
 	LibraryUserIDs(ctx context.Context, workID uuid.UUID) ([]uuid.UUID, error)
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ApiKey, error)
 	ListChapters(ctx context.Context, workID uuid.UUID) ([]Chapter, error)
+	// Download tasks with their chapter and work, newest first; users see the
+	// ones they asked for, admins all.
+	ListDownloadTasks(ctx context.Context, arg ListDownloadTasksParams) ([]ListDownloadTasksRow, error)
 	ListJobRuns(ctx context.Context, arg ListJobRunsParams) ([]JobRun, error)
 	// A user's library by title, after a (sort_title, id) cursor. Content
 	// filters run in Go (they depend on the user's grants).
@@ -100,6 +116,7 @@ type Querier interface {
 	ListSourceChaptersBySeries(ctx context.Context, sourceSeriesID uuid.UUID) ([]SourceChapter, error)
 	ListSourceSeries(ctx context.Context, workID uuid.UUID) ([]SourceSeries, error)
 	ListSources(ctx context.Context) ([]ListSourcesRow, error)
+	ListStorages(ctx context.Context) ([]Storage, error)
 	ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
 	ListWorkSourceMatches(ctx context.Context, workID uuid.UUID) ([]WorkSourceMatch, error)
@@ -111,6 +128,7 @@ type Querier interface {
 	MarkLibrarySeen(ctx context.Context, arg MarkLibrarySeenParams) (int64, error)
 	MarkSourceChaptersAbsent(ctx context.Context, arg MarkSourceChaptersAbsentParams) error
 	MarkSourcesAbsent(ctx context.Context, arg MarkSourcesAbsentParams) error
+	MoveChapterFile(ctx context.Context, arg MoveChapterFileParams) error
 	// Chapters found after each library entry was last seen.
 	NewChaptersForUser(ctx context.Context, arg NewChaptersForUserParams) ([]NewChaptersForUserRow, error)
 	PruneFinishedTasks(ctx context.Context, before *time.Time) (int64, error)
@@ -125,7 +143,9 @@ type Querier interface {
 	// Retry by hand: a failed or cancelled task runs again with fresh attempts.
 	RequeueTask(ctx context.Context, id uuid.UUID) (Task, error)
 	RetryTaskLater(ctx context.Context, arg RetryTaskLaterParams) (Task, error)
+	SetAutoDownload(ctx context.Context, arg SetAutoDownloadParams) (int64, error)
 	SetChapterPin(ctx context.Context, arg SetChapterPinParams) error
+	SetDefaultStorage(ctx context.Context, id string) (int64, error)
 	SetJobRunProgress(ctx context.Context, arg SetJobRunProgressParams) error
 	SetPluginConfig(ctx context.Context, arg SetPluginConfigParams) error
 	SetPluginState(ctx context.Context, arg SetPluginStateParams) (Plugin, error)
@@ -144,6 +164,7 @@ type Querier interface {
 	UnclaimTask(ctx context.Context, id uuid.UUID) (Task, error)
 	UpdateChapter(ctx context.Context, arg UpdateChapterParams) error
 	UpdatePlugin(ctx context.Context, arg UpdatePluginParams) (Plugin, error)
+	UpdateStorage(ctx context.Context, arg UpdateStorageParams) (Storage, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpdateWorkDisplay(ctx context.Context, arg UpdateWorkDisplayParams) (Work, error)
 	UpsertProgress(ctx context.Context, arg UpsertProgressParams) (Progress, error)

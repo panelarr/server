@@ -37,6 +37,18 @@ type Chapter struct {
 	UpdatedAt          time.Time
 }
 
+type ChapterFile struct {
+	ID            uuid.UUID
+	ChapterID     uuid.UUID
+	StorageID     string
+	Key           string
+	Pages         int32
+	Bytes         int64
+	Sha256        string
+	FromVariantID uuid.NullUUID
+	CreatedAt     time.Time
+}
+
 type Invite struct {
 	ID        uuid.UUID
 	TokenHash []byte
@@ -66,10 +78,11 @@ type JobRun struct {
 }
 
 type LibraryEntry struct {
-	UserID  uuid.UUID
-	WorkID  uuid.UUID
-	AddedAt time.Time
-	SeenAt  time.Time
+	UserID       uuid.UUID
+	WorkID       uuid.UUID
+	AddedAt      time.Time
+	SeenAt       time.Time
+	AutoDownload bool
 }
 
 type Plugin struct {
@@ -176,6 +189,17 @@ type SourceSeries struct {
 	UpdatedAt  time.Time
 	CheckedAt  *time.Time
 	CheckError string
+}
+
+type Storage struct {
+	ID        string
+	Name      string
+	Kind      string
+	Config    []byte
+	Secret    string
+	IsDefault bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type Task struct {

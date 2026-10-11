@@ -7,7 +7,7 @@ Panelarr follows the *arr* convention: only what the server needs before it can 
 | `PANELARR_DB` | `--db` | (required) | PostgreSQL URL, e.g. `postgres://panelarr:secret@db:5432/panelarr`. The role needs to own its database (or have `CREATE` on it); no superuser. |
 | `PANELARR_LISTEN` | `--listen` | `:8900` | HTTP listen address. |
 | `PANELARR_CONFIG` | `--config-dir` | `<user config dir>/panelarr` | Directory for the server's own files: the encryption key for stored secrets, caches, logs. Use `/config` in containers. |
-| `PANELARR_DATA` | `--data-dir` | `<config dir>/data` | Default library location for downloads. Use `/data` in containers. |
+| `PANELARR_DATA` | `--data-dir` | `<config dir>/data` | The default storage's directory (`<data>/library`, created on first start) and temporary files of downloads in progress (`<data>/.tmp`). Use `/data` in containers. |
 | `PANELARR_BASE_URL` | `--base-url` | (empty) | Public URL, e.g. `https://panelarr.example.com`. With `https`, session cookies are marked `Secure`. |
 | `PANELARR_LOG_FORMAT` | `--log-format` | `json` | `json` (one object per line) or `text`. |
 | `PANELARR_LOG_LEVEL` | `--log-level` | `info` | `debug`, `info`, `warn` or `error`. |

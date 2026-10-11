@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, test, build
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Tests run as an ordinary role that may only create databases, the same
+      # rights the server gets in production. Each test creates and drops its own database.
+      PANELARR_TEST_DATABASE_URL: postgres://panelarr:panelarr@localhost:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Cache tools
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: tools-${{ runner.os }}-${{ hashFiles('Makefile', 'go.mod') }}
+
+      - name: Install tools
+        run: make setup
+
+      - name: Create the test role
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -c "CREATE ROLE panelarr LOGIN CREATEDB PASSWORD 'panelarr'"
+
+      - name: Generated code is up to date
+        run: make gen-check
+
+      - name: Check (format, vet, lint, govulncheck, tests)
+        run: make check
+
+      - name: Build
+        run: make build
+
+  api-breaking:
+    name: API breaking changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install tools
+        run: make setup
+
+      - name: Compare api/openapi.yaml with the base branch
+        run: make api-breaking API_BASE=origin/${{ github.base_ref }}

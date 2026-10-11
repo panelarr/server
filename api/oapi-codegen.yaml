@@ -1,0 +1,11 @@
+# Generates the API models and a strict, typed chi server from openapi.yaml.
+# Run `make gen`; the output is committed.
+package: apigen
+output: internal/api/apigen/api.gen.go
+generate:
+  models: true
+  chi-server: true
+  strict-server: true
+  embedded-spec: true
+output-options:
+  nullable-type: false

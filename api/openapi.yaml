@@ -1,0 +1,103 @@
+openapi: 3.1.0
+info:
+  title: Panelarr API
+  version: 1.0.0-dev
+  summary: The public client API of the Panelarr server.
+  description: |
+    Everything the Panelarr web app does goes through this API, and any other
+    client may use it too. Paths are relative to `/api/v1`. Breaking changes
+    need a new major path (`/api/v2`); CI checks every change against the
+    published spec.
+
+    **Errors** use RFC 9457 problem details (`application/problem+json`) with
+    a stable, machine-readable `code`.
+
+    **Lists** are cursor-paginated: pass `page_token` from the previous
+    response's `next_page_token`; an empty token means the last page.
+  license:
+    name: GPL-3.0-or-later
+    identifier: GPL-3.0-or-later
+servers:
+  - url: /api/v1
+tags:
+  - name: system
+    description: Server information and health.
+paths:
+  /system/info:
+    get:
+      operationId: getSystemInfo
+      tags: [system]
+      summary: Server name and version
+      description: Needs no authentication, so clients can recognise a Panelarr server before signing in.
+      security: []
+      responses:
+        "200":
+          description: Server information.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemInfo"
+        default:
+          $ref: "#/components/responses/Problem"
+components:
+  responses:
+    Problem:
+      description: An error, as RFC 9457 problem details.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          description: A URI reference that identifies the problem type; "about:blank" when only the status applies.
+          examples: ["about:blank"]
+        title:
+          type: string
+          description: A short, human-readable summary of the problem type.
+        status:
+          type: integer
+          description: The HTTP status code.
+        detail:
+          type: string
+          description: What went wrong in this occurrence, for people.
+        instance:
+          type: string
+          description: The request path.
+        code:
+          type: string
+          description: A stable, machine-readable error code, e.g. "not_found", "invalid_request", "setup_required".
+          pattern: "^[a-z][a-z0-9_]*$"
+        request_id:
+          type: string
+          description: The request's ID, also in the X-Request-Id header and the server log.
+        errors:
+          type: array
+          description: Per-field validation errors.
+          items:
+            $ref: "#/components/schemas/FieldError"
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+          description: JSON path of the field, e.g. "grants.allowed_sources[2]".
+        message:
+          type: string
+    SystemInfo:
+      type: object
+      required: [name, version]
+      properties:
+        name:
+          type: string
+          description: Always "panelarr".
+          const: panelarr
+        version:
+          type: string
+          description: The server version, e.g. "0.3.1", or "dev".

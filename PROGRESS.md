@@ -1,0 +1,29 @@
+# Progress
+
+The plan for the server's first version, in slices. Each slice works end to end, has tests and ends with `make check` green. The first version covers: accounts and first-run setup, adding a work from the metadata service and matching it on sources, unified chapters, the reader API and downloads.
+
+- [x] **0. Scaffold:** Go module, `make` targets, lint, CI, release config, repo docs. `panelarr serve | migrate | healthcheck | version`; env and flag config; JSON/text logs; Prometheus metrics on a private listener (off by default); `/healthz` and `/readyz` with required and optional checks; PostgreSQL with goose, sqlc and pgx; spec-first REST API (`api/openapi.yaml`, oapi-codegen strict server) with RFC 9457 problem errors and a breaking-change check.
+- [ ] **1. Accounts and setup:** users (argon2id), roles admin and user, grants (`may_add`, `may_download`, `may_manage_matches`, allowed sources, content-rating ceiling); cookie sessions with CSRF protection; scoped personal API keys (hashed, shown once); rate-limited login; first-run gate (the first account becomes the admin); users admin; invite links; secrets encrypted at rest; authorization test matrix; detailed health for admins; metrics via a `metrics:read` key.
+- [ ] **2. Metadata service:** connection and setup-wizard check (reachable, admin key, a provider with entries); degraded while it's down; catalogue search, browse and details through the server, filtered by the user's ceiling; cover proxy and cache.
+- [ ] **3. Source plugins (remote):** register endpoints, plugin config from its schema, sync sources and their health, per-source visibility; browse, search and series preview through the server; optional wizard step.
+- [ ] **4. Jobs and events:** PostgreSQL job queue (lease, retries with back-off, per-source concurrency and rate limits, de-duplication); named jobs and runs API; per-user filtered server-sent events.
+- [ ] **5. Works, libraries and matching:** add from the catalogue (one shared work per entry, one library entry per user); match job over every allowed source by main and alternative titles; auto-attach and candidates with evidence; fix match (attach, detach, re-run, paste URL); add from a source's browse page.
+- [ ] **6. Unified chapters and update checks:** canonical chapters across sources with a chosen variant and the reason; pins and per-work source priority; scheduled and manual update checks; per-user "new" badges.
+- [ ] **7. Reader API:** page lists and page streaming (from the archive or proxied from the source); progress and history; next chapter; reader settings per user (global, per source, per series) and UI preferences.
+- [ ] **8. Storage and downloads:** storage endpoints (local and S3-compatible); CBZ + ComicInfo writer; de-duplicated download queue; downloads API with live progress; "download new chapters"; reader serves archives from any storage.
+- [ ] **9. Hardening and packaging:** authorization review, docs, embedded web app, container image (to be agreed first).
+
+## Working assumptions
+
+Settled for now, cheap to change:
+
+- Matching auto-attaches on an exact normalized title (any language) plus an author overlap; everything else becomes a candidate. Thresholds are settings.
+- Variant choice: preferred languages first, then healthy sources, per-work source priority, preferred scanlators, latest upload. Settings, not code.
+- Chapters group by normalized number; the volume is an attribute. Chapters without a number stay per source.
+- Storage: local and S3-compatible first; several named storages with one default.
+- Content ratings use the metadata service's scale; source ratings map onto it; "unknown" is shown unless an admin hides it.
+- The sibling modules (`source-api`, `meta`) are used through `replace` directives to local clones until they are published.
+
+## Next
+
+Slice 1: accounts and setup.

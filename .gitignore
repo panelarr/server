@@ -1,0 +1,20 @@
+# Tools and build output
+/bin/
+/dist/
+coverage.out
+*.test
+
+# Local config and data. Never commit downloaded chapters or images.
+.env
+*.local.yaml
+/config/
+/data/
+*.cbz
+
+# Go workspace files are local only
+go.work
+go.work.sum
+
+.DS_Store
+.idea/
+.vscode/

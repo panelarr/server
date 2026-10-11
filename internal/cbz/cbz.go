@@ -169,8 +169,9 @@ func Open(r io.ReaderAt, size int64) (*Archive, error) {
 		if f.FileInfo().IsDir() || strings.HasPrefix(path.Base(f.Name), ".") {
 			continue
 		}
-		if mime.TypeByExtension(path.Ext(f.Name)) == "" || !strings.HasPrefix(mime.TypeByExtension(path.Ext(f.Name)), "image/") {
-			continue
+		ct := mime.TypeByExtension(path.Ext(f.Name))
+		if !strings.HasPrefix(ct, "image/") || strings.HasPrefix(ct, "image/svg") {
+			continue // not a page (SVG can carry scripts)
 		}
 		a.pages = append(a.pages, f)
 	}

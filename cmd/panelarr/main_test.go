@@ -87,6 +87,13 @@ func TestServeEndToEnd(t *testing.T) {
 	if code, _ := get(t, base+"/metrics"); code == 200 {
 		t.Fatal("metrics are open on the API port")
 	}
+	// The web app answers every other path; the API keeps its own 404s.
+	if code, body := get(t, base+"/library/anything"); code != 200 || !strings.Contains(body, "<title>Panelarr</title>") {
+		t.Fatalf("web app %d %s", code, body)
+	}
+	if code, body := get(t, base+"/api/v1/nope"); code != 404 || !strings.Contains(body, `"code":"not_found"`) {
+		t.Fatalf("api 404 %d %s", code, body)
+	}
 
 	cancel()
 	if err := <-done; err != nil {

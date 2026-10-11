@@ -39,6 +39,7 @@ import (
 	"github.com/panelarr/server/internal/storage"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/users"
+	"github.com/panelarr/server/internal/webui"
 )
 
 const usage = `panelarr: the Panelarr server
@@ -204,6 +205,14 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		jm.Wait()
 	}()
 
+	webFiles, err := webui.Files(cfg.WebDir)
+	if err != nil {
+		return fmt.Errorf("%s: %w", config.EnvWebDir, err)
+	}
+	if webui.IsPlaceholder(webFiles) {
+		log.Warn("this build has no web app: the API works, the browser gets a placeholder page")
+	}
+
 	handler, err := api.NewHandler(api.Deps{
 		Log:          logging.Component(log, "api"),
 		Metrics:      m,
@@ -232,6 +241,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		Storages:       storages,
 		SecureCookies:  cfg.SecureCookies(),
 		TrustedProxies: cfg.TrustedProxies,
+		Web:            webui.Handler(webFiles),
 	})
 	if err != nil {
 		return err

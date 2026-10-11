@@ -54,6 +54,20 @@ func withRequestID(next http.Handler) http.Handler {
 	})
 }
 
+// apiHeaders lock down everything the API sends (JSON, images, events):
+// never sniffed into another type, never rendered as a page that runs
+// code, never framed, never leaking the URL as a referrer.
+func apiHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("X-Frame-Options", "DENY")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // observe logs each request and records its metrics. Routes are labelled
 // by their pattern, never the raw path, so labels stay bounded.
 func observe(log *slog.Logger, m *metrics.Metrics) func(http.Handler) http.Handler {

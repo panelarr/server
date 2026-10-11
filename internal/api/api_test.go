@@ -231,3 +231,16 @@ func TestClientIP(t *testing.T) {
 		}
 	}
 }
+
+func TestAPISecurityHeaders(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	c := h.client()
+	for _, path := range []string{"/api/v1/system/info", "/api/v1/nope", "/healthz"} {
+		res := c.do(http.MethodGet, path, nil)
+		if res.header.Get("X-Content-Type-Options") != "nosniff" || !strings.Contains(res.header.Get("Content-Security-Policy"), "default-src 'none'") ||
+			res.header.Get("X-Frame-Options") != "DENY" {
+			t.Errorf("%s: headers %v", path, res.header)
+		}
+	}
+}

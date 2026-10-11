@@ -50,6 +50,9 @@ type Config struct {
 	// first-run wizard.
 	MetaURL    string
 	MetaAPIKey string
+	// WebDir serves the web app from a directory (a local build) instead of
+	// the one embedded in the binary. For development.
+	WebDir string
 	// Log configures logging.
 	Log Log
 	// Metrics configures the Prometheus endpoint.
@@ -89,6 +92,7 @@ const (
 	EnvTrustedProxies = "PANELARR_TRUSTED_PROXIES"
 	EnvMetaURL        = "PANELARR_META_URL"
 	EnvMetaAPIKey     = "PANELARR_META_KEY" //nolint:gosec // a variable name, not a credential
+	EnvWebDir         = "PANELARR_WEB_DIR"
 )
 
 // DefaultTrustedProxies are loopback and private networks.
@@ -145,6 +149,7 @@ func (f *Flags) Load(getenv func(string) string) (Config, error) {
 		SecretKey:  strings.TrimSpace(getenv(EnvSecretKey)),
 		MetaURL:    strings.TrimRight(strings.TrimSpace(getenv(EnvMetaURL)), "/"),
 		MetaAPIKey: strings.TrimSpace(getenv(EnvMetaAPIKey)),
+		WebDir:     strings.TrimSpace(getenv(EnvWebDir)),
 	}
 	proxies, err := parsePrefixes(pick(f.trustedProxies, EnvTrustedProxies, DefaultTrustedProxies))
 	if err != nil {

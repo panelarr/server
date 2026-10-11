@@ -11,7 +11,10 @@ The plan for the server's first version, in slices. Each slice works end to end,
 - [x] **6. Unified chapters and update checks:** each attached series' chapters kept as listed (per-source tab); canonical chapters by normalized number (numbers read from names when missing; volume by majority; unnumbered chapters kept as extras); a chosen copy per chapter with the reason (pin, preferred languages, healthy source, series priority, newest upload); chapters no source lists stay but unavailable; checks per series as tasks within source limits (scheduled every 6 hours with jitter, on demand, and when a series is attached); per-user "new" badges and events; works refreshed from the catalogue daily (merged entries logged).
 - [x] **7. Reader API:** page lists and page images through the source's plugin (chosen copy, a named copy, or the first copy the user may use; source rate limits apply; page lists cached briefly); previous/next chapter in unified order; progress per user (last page marks read, synced to other devices by event), bulk read/unread, "continue" point, history; reader settings at global, source and work level (merged) and app preferences as client-owned JSON. Queued work asked for again comes forward (no waiting out a retry back-off).
 - [x] **8. Storage and downloads:** storage endpoints (local, S3-compatible; checked by a probe; default; encrypted secret; moving files between storages as a task; guarded removal); CBZ writer (stored pages, ComicInfo.xml, SHA-256, atomic, nothing partial left) with a naming template safe for SMB/NTFS; one download task per chapter, de-duplicated across users, within each source's limits; "download new chapters" per library entry; downloads list (own / all) with live progress; admin file deletion; the reader serves downloaded chapters from their file on any storage (ranged reads) and falls back to the source. Fixed a deadlock between concurrent chapter checks of one work (writes now take the work's lock).
-- [ ] **9. Hardening and packaging:** authorization review, docs, embedded web app, container image (to be agreed first).
+- [ ] **9. Hardening and packaging:**
+  - [x] embedded web app per the web app's contract (root SPA fallback except API, feeds, assets, probes and metrics; immutable assets; its security headers; `make web` for a pinned release with checksum, `make web-local`, `PANELARR_WEB_DIR`);
+  - [x] authorization and security review: every endpoint is covered by the matrix; API responses get `nosniff`, a `default-src 'none'` CSP and no framing; page images limited to raster types (no SVG from plugins or archives);
+  - [ ] container image and compose example (asked; waiting for a yes).
 
 ## Working assumptions
 
@@ -26,4 +29,4 @@ Settled for now, cheap to change:
 
 ## Next
 
-Slice 9: hardening and packaging (the embedded web app; a container image only after asking).
+The container image, once agreed. Then the first version is complete.

@@ -38,6 +38,10 @@ make test
 
 The API is versioned: within `/api/v1`, changes must not break existing clients (adding optional fields or endpoints is fine; removing or renaming is not). CI runs `make api-breaking` on every PR to compare the spec with the base branch.
 
+### The web app
+
+The web app lives in its own repository. `make web-local` embeds a local build (`WEB_DIR`, default `../web/dist`); `make web WEB_VERSION=x.y.z` embeds a released one (its checksum is verified). The embedded files are not committed. During development, `PANELARR_WEB_DIR=../web/dist` serves a build without rebuilding the server.
+
 ### Database changes
 
 Migrations are plain SQL files in `internal/store/migrations` (goose). Queries live in `internal/store/queries` and are compiled to Go by sqlc. After changing either, run `make gen`. Every migration has a working `Down`.

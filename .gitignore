@@ -18,3 +18,7 @@ go.work.sum
 .DS_Store
 .idea/
 .vscode/
+
+# The embedded web app build (make web / make web-local); only .keep is committed.
+/internal/webui/dist/*
+!/internal/webui/dist/.keep

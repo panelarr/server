@@ -18,10 +18,15 @@ VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev
 LDFLAGS  := -s -w -X github.com/panelarr/server/internal/buildinfo.Version=$(VERSION)
 # The spec to compare against for breaking changes.
 API_BASE ?= origin/main
+# The web app release embedded by `make web` (empty: keep what's there).
+WEB_VERSION ?=
+WEB_REPO    ?= panelarr/web
+WEB_DIR     ?= ../web/dist
+WEB_DIST    := internal/webui/dist
 
 GENERATED := internal/store/db internal/api/apigen
 
-.PHONY: help setup build test test-short lint fmt fmt-check vet vuln gen gen-check api-breaking run clean check
+.PHONY: help setup build test test-short lint fmt fmt-check vet vuln gen gen-check api-breaking run clean check web web-local web-clean
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_.-]+:.*## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -71,6 +76,24 @@ api-breaking: ## Fail if api/openapi.yaml breaks clients compared with $(API_BAS
 		git show $(API_BASE):api/openapi.yaml > $(BIN)/openapi.base.yaml && \
 		$(BIN)/oasdiff breaking --fail-on ERR $(BIN)/openapi.base.yaml api/openapi.yaml; \
 	else echo "$(API_BASE) has no api/openapi.yaml yet; nothing to compare"; fi
+
+web: ## Embed the web app release WEB_VERSION (downloaded and checked against its .sha256)
+	@if [ -z "$(WEB_VERSION)" ]; then echo "WEB_VERSION is empty: keeping the current web files"; exit 0; fi; \
+	set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	base=https://github.com/$(WEB_REPO)/releases/download/v$(WEB_VERSION); \
+	curl -fsSL -o "$$tmp/web.tar.gz" "$$base/panelarr-web-$(WEB_VERSION).tar.gz"; \
+	curl -fsSL -o "$$tmp/web.sha256" "$$base/panelarr-web-$(WEB_VERSION).tar.gz.sha256"; \
+	(cd "$$tmp" && echo "$$(cut -d' ' -f1 web.sha256)  web.tar.gz" | shasum -a 256 -c -); \
+	$(MAKE) web-clean; tar -xzf "$$tmp/web.tar.gz" -C $(WEB_DIST); \
+	echo "embedded web $(WEB_VERSION)"
+
+web-local: ## Embed a local web build from WEB_DIR (default ../web/dist)
+	@test -f $(WEB_DIR)/index.html || (echo "no web build in $(WEB_DIR): run make build in the web repo" && exit 1)
+	$(MAKE) web-clean
+	cp -R $(WEB_DIR)/. $(WEB_DIST)/
+
+web-clean: ## Remove the embedded web build (the placeholder page is served)
+	find $(WEB_DIST) -mindepth 1 ! -name .keep -exec rm -rf {} +
 
 run: build ## Run the server locally (needs PANELARR_DB)
 	@echo "Panelarr listening on http://localhost:8900"

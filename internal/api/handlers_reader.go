@@ -22,6 +22,8 @@ func readerError(ctx context.Context, err error) error {
 		return NewProblem(http.StatusNotFound, CodeNotFound, "not found")
 	case errors.Is(err, reader.ErrNoCopy):
 		return NewProblem(http.StatusNotFound, "no_copy", "no copy of this chapter is on a source you may use")
+	case errors.Is(err, reader.ErrNotImage):
+		return NewProblem(http.StatusBadGateway, "source_failed", "the source sent something that isn't a page image")
 	case errors.Is(err, reader.ErrPageNotFound):
 		return NewProblem(http.StatusNotFound, CodeNotFound, "no such page")
 	case errors.Is(err, reader.ErrBadScope):

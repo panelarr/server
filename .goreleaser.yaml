@@ -7,6 +7,8 @@ project_name: panelarr
 before:
   hooks:
     - go mod download
+    # Embeds the pinned web app release (WEB_VERSION in the release workflow).
+    - make web
 
 builds:
   - id: panelarr

@@ -25,6 +25,7 @@ internal/reader/         pages, progress, history, reader settings and preferenc
 internal/storage/        storage backends (local, S3) and their configuration
 internal/cbz/            CBZ archives with ComicInfo.xml
 internal/downloads/      the download task, naming, auto-download, moving files
+internal/webui/          the embedded web app and its routing and headers
 internal/textmatch/      title and name normalization and similarity
 internal/config/         startup settings from env and flags
 internal/logging/        structured logs

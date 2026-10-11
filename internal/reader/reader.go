@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"slices"
 	"sync"
 	"time"
@@ -31,6 +32,7 @@ import (
 
 // Errors callers map to responses.
 var (
+	ErrNotImage     = errors.New("reader: the page isn't a supported image")
 	ErrNotFound     = errors.New("reader: not found")
 	ErrNoCopy       = errors.New("reader: no copy of this chapter on a source you may use")
 	ErrPageNotFound = errors.New("reader: no such page")
@@ -286,6 +288,21 @@ func (s *Service) fileFor(ctx context.Context, v library.Viewer, chapterID uuid.
 	return f, d, nil
 }
 
+// rasterTypes are the page image types served. Anything else (SVG can
+// carry scripts, HTML, …) is refused: pages are served from our origin.
+var rasterTypes = []string{"image/jpeg", "image/png", "image/webp", "image/gif", "image/avif", "image/jxl"}
+
+func checkImage(contentType string) (string, error) {
+	ct, _, _ := mime.ParseMediaType(contentType)
+	if ct == "image/jpg" {
+		ct = "image/jpeg"
+	}
+	if !slices.Contains(rasterTypes, ct) {
+		return "", fmt.Errorf("%w: %q", ErrNotImage, contentType)
+	}
+	return ct, nil
+}
+
 // MaxPageBytes caps one page image.
 const MaxPageBytes = plugins.MaxImageBytes
 
@@ -311,7 +328,8 @@ func (s *Service) Page(ctx context.Context, v library.Viewer, chapterID uuid.UUI
 			if err != nil {
 				return "", nil, err
 			}
-			return ct, data, nil
+			ct, err = checkImage(ct)
+			return ct, data, err
 		}
 	}
 	_, vv, err := s.chapterFor(ctx, v, chapterID, variantID)
@@ -334,7 +352,8 @@ func (s *Service) Page(ctx context.Context, v library.Viewer, chapterID uuid.UUI
 		s.pages.drop(vv.ID)
 		return "", nil, err
 	}
-	return ct, data, nil
+	ct, err = checkImage(ct)
+	return ct, data, err
 }
 
 // SetProgress records where v is in a chapter. Reaching the last page

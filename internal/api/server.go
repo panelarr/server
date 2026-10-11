@@ -66,6 +66,8 @@ type Deps struct {
 	SecureCookies bool
 	// TrustedProxies may set X-Forwarded-For.
 	TrustedProxies []netip.Prefix
+	// Web serves the web app for every path nothing else answers (optional).
+	Web http.Handler
 }
 
 // Server implements the generated strict API interface.
@@ -94,11 +96,14 @@ func NewHandler(deps Deps) (http.Handler, error) {
 
 	r := chi.NewRouter()
 	r.Use(withRequestID, observe(deps.Log, deps.Metrics), recoverer(deps.Log))
-	r.Get("/healthz", healthz)
-	r.Get("/readyz", readyz(deps.Checks))
+	r.With(apiHeaders).Get("/healthz", healthz)
+	r.With(apiHeaders).Get("/readyz", readyz(deps.Checks))
+	if deps.Web != nil {
+		r.NotFound(deps.Web.ServeHTTP)
+	}
 
 	r.Group(func(r chi.Router) {
-		r.Use(s.authenticate)
+		r.Use(apiHeaders, s.authenticate)
 		if deps.Metrics != nil && deps.MetricsOnAPI {
 			r.Get("/metrics", s.serveMetrics)
 		}

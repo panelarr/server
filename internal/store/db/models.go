@@ -22,6 +22,21 @@ type ApiKey struct {
 	ExpiresAt  *time.Time
 }
 
+type Chapter struct {
+	ID                 uuid.UUID
+	WorkID             uuid.UUID
+	Number             *float64
+	ExtraKey           string
+	Volume             string
+	Title              string
+	PreferredVariantID uuid.NullUUID
+	PinnedVariantID    uuid.NullUUID
+	Reason             string
+	Available          bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
 type Invite struct {
 	ID        uuid.UUID
 	TokenHash []byte
@@ -54,6 +69,7 @@ type LibraryEntry struct {
 	UserID  uuid.UUID
 	WorkID  uuid.UUID
 	AddedAt time.Time
+	SeenAt  time.Time
 }
 
 type Plugin struct {
@@ -108,21 +124,41 @@ type Source struct {
 	UpdatedAt       time.Time
 }
 
+type SourceChapter struct {
+	ID             uuid.UUID
+	SourceSeriesID uuid.UUID
+	Key            string
+	Name           string
+	Number         *float64
+	Volume         string
+	Scanlator      string
+	Lang           string
+	Url            string
+	UploadedAt     *time.Time
+	Position       int32
+	Present        bool
+	ChapterID      uuid.NullUUID
+	FirstSeenAt    time.Time
+	LastSeenAt     time.Time
+}
+
 type SourceSeries struct {
-	ID        uuid.UUID
-	WorkID    uuid.UUID
-	SourceID  string
-	Key       string
-	Title     string
-	Url       string
-	CoverRef  string
-	State     string
-	Origin    string
-	Score     float32
-	Evidence  []byte
-	Priority  int32
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID         uuid.UUID
+	WorkID     uuid.UUID
+	SourceID   string
+	Key        string
+	Title      string
+	Url        string
+	CoverRef   string
+	State      string
+	Origin     string
+	Score      float32
+	Evidence   []byte
+	Priority   int32
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	CheckedAt  *time.Time
+	CheckError string
 }
 
 type Task struct {

@@ -16,7 +16,7 @@ import (
 const addLibraryEntry = `-- name: AddLibraryEntry :one
 INSERT INTO library_entries (user_id, work_id) VALUES ($1, $2)
 ON CONFLICT DO NOTHING
-RETURNING user_id, work_id, added_at
+RETURNING user_id, work_id, added_at, seen_at
 `
 
 type AddLibraryEntryParams struct {
@@ -27,7 +27,12 @@ type AddLibraryEntryParams struct {
 func (q *Queries) AddLibraryEntry(ctx context.Context, arg AddLibraryEntryParams) (LibraryEntry, error) {
 	row := q.db.QueryRow(ctx, addLibraryEntry, arg.UserID, arg.WorkID)
 	var i LibraryEntry
-	err := row.Scan(&i.UserID, &i.WorkID, &i.AddedAt)
+	err := row.Scan(
+		&i.UserID,
+		&i.WorkID,
+		&i.AddedAt,
+		&i.SeenAt,
+	)
 	return i, err
 }
 
@@ -62,7 +67,7 @@ func (q *Queries) AttachedSourceIDsByWork(ctx context.Context, workIds []uuid.UU
 }
 
 const attachedSourceSeries = `-- name: AttachedSourceSeries :many
-SELECT id, work_id, source_id, key, title, url, cover_ref, state, origin, score, evidence, priority, created_at, updated_at FROM source_series WHERE work_id = $1 AND state = 'attached' ORDER BY priority DESC, source_id
+SELECT id, work_id, source_id, key, title, url, cover_ref, state, origin, score, evidence, priority, created_at, updated_at, checked_at, check_error FROM source_series WHERE work_id = $1 AND state = 'attached' ORDER BY priority DESC, source_id
 `
 
 func (q *Queries) AttachedSourceSeries(ctx context.Context, workID uuid.UUID) ([]SourceSeries, error) {
@@ -89,6 +94,8 @@ func (q *Queries) AttachedSourceSeries(ctx context.Context, workID uuid.UUID) ([
 			&i.Priority,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CheckedAt,
+			&i.CheckError,
 		); err != nil {
 			return nil, err
 		}
@@ -161,8 +168,50 @@ func (q *Queries) DropCandidates(ctx context.Context, arg DropCandidatesParams) 
 	return err
 }
 
+const followedWorksBySync = `-- name: FollowedWorksBySync :many
+SELECT id, meta_entry_id, title, sort_title, type, status, content_rating, year, original_language, cover_url, meta_synced_at, created_at, updated_at FROM works
+WHERE EXISTS (SELECT 1 FROM library_entries WHERE library_entries.work_id = works.id)
+ORDER BY meta_synced_at
+LIMIT $1
+`
+
+// Works someone follows, least recently refreshed first.
+func (q *Queries) FollowedWorksBySync(ctx context.Context, lim int32) ([]Work, error) {
+	rows, err := q.db.Query(ctx, followedWorksBySync, lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Work{}
+	for rows.Next() {
+		var i Work
+		if err := rows.Scan(
+			&i.ID,
+			&i.MetaEntryID,
+			&i.Title,
+			&i.SortTitle,
+			&i.Type,
+			&i.Status,
+			&i.ContentRating,
+			&i.Year,
+			&i.OriginalLanguage,
+			&i.CoverUrl,
+			&i.MetaSyncedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getLibraryEntry = `-- name: GetLibraryEntry :one
-SELECT user_id, work_id, added_at FROM library_entries WHERE user_id = $1 AND work_id = $2
+SELECT user_id, work_id, added_at, seen_at FROM library_entries WHERE user_id = $1 AND work_id = $2
 `
 
 type GetLibraryEntryParams struct {
@@ -173,12 +222,17 @@ type GetLibraryEntryParams struct {
 func (q *Queries) GetLibraryEntry(ctx context.Context, arg GetLibraryEntryParams) (LibraryEntry, error) {
 	row := q.db.QueryRow(ctx, getLibraryEntry, arg.UserID, arg.WorkID)
 	var i LibraryEntry
-	err := row.Scan(&i.UserID, &i.WorkID, &i.AddedAt)
+	err := row.Scan(
+		&i.UserID,
+		&i.WorkID,
+		&i.AddedAt,
+		&i.SeenAt,
+	)
 	return i, err
 }
 
 const getSourceSeries = `-- name: GetSourceSeries :one
-SELECT id, work_id, source_id, key, title, url, cover_ref, state, origin, score, evidence, priority, created_at, updated_at FROM source_series WHERE id = $1
+SELECT id, work_id, source_id, key, title, url, cover_ref, state, origin, score, evidence, priority, created_at, updated_at, checked_at, check_error FROM source_series WHERE id = $1
 `
 
 func (q *Queries) GetSourceSeries(ctx context.Context, id uuid.UUID) (SourceSeries, error) {
@@ -199,6 +253,8 @@ func (q *Queries) GetSourceSeries(ctx context.Context, id uuid.UUID) (SourceSeri
 		&i.Priority,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CheckedAt,
+		&i.CheckError,
 	)
 	return i, err
 }
@@ -344,7 +400,7 @@ func (q *Queries) ListLibrary(ctx context.Context, arg ListLibraryParams) ([]Lis
 }
 
 const listSourceSeries = `-- name: ListSourceSeries :many
-SELECT id, work_id, source_id, key, title, url, cover_ref, state, origin, score, evidence, priority, created_at, updated_at FROM source_series WHERE work_id = $1 ORDER BY source_id, state, score DESC, id
+SELECT id, work_id, source_id, key, title, url, cover_ref, state, origin, score, evidence, priority, created_at, updated_at, checked_at, check_error FROM source_series WHERE work_id = $1 ORDER BY source_id, state, score DESC, id
 `
 
 func (q *Queries) ListSourceSeries(ctx context.Context, workID uuid.UUID) ([]SourceSeries, error) {
@@ -371,6 +427,8 @@ func (q *Queries) ListSourceSeries(ctx context.Context, workID uuid.UUID) ([]Sou
 			&i.Priority,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CheckedAt,
+			&i.CheckError,
 		); err != nil {
 			return nil, err
 		}
@@ -450,7 +508,7 @@ func (q *Queries) SetSourcePriority(ctx context.Context, arg SetSourcePriorityPa
 
 const setSourceSeriesState = `-- name: SetSourceSeriesState :one
 UPDATE source_series SET state = $1, origin = $2, updated_at = now() WHERE id = $3
-RETURNING id, work_id, source_id, key, title, url, cover_ref, state, origin, score, evidence, priority, created_at, updated_at
+RETURNING id, work_id, source_id, key, title, url, cover_ref, state, origin, score, evidence, priority, created_at, updated_at, checked_at, check_error
 `
 
 type SetSourceSeriesStateParams struct {
@@ -477,6 +535,61 @@ func (q *Queries) SetSourceSeriesState(ctx context.Context, arg SetSourceSeriesS
 		&i.Priority,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CheckedAt,
+		&i.CheckError,
+	)
+	return i, err
+}
+
+const updateWorkDisplay = `-- name: UpdateWorkDisplay :one
+UPDATE works SET meta_entry_id = $1, title = $2, sort_title = $3, type = $4,
+    status = $5, content_rating = $6, year = $7, original_language = $8,
+    cover_url = $9, meta_synced_at = now(), updated_at = now()
+WHERE id = $10
+RETURNING id, meta_entry_id, title, sort_title, type, status, content_rating, year, original_language, cover_url, meta_synced_at, created_at, updated_at
+`
+
+type UpdateWorkDisplayParams struct {
+	MetaEntryID      string
+	Title            string
+	SortTitle        string
+	Type             string
+	Status           string
+	ContentRating    string
+	Year             *int32
+	OriginalLanguage string
+	CoverUrl         string
+	ID               uuid.UUID
+}
+
+func (q *Queries) UpdateWorkDisplay(ctx context.Context, arg UpdateWorkDisplayParams) (Work, error) {
+	row := q.db.QueryRow(ctx, updateWorkDisplay,
+		arg.MetaEntryID,
+		arg.Title,
+		arg.SortTitle,
+		arg.Type,
+		arg.Status,
+		arg.ContentRating,
+		arg.Year,
+		arg.OriginalLanguage,
+		arg.CoverUrl,
+		arg.ID,
+	)
+	var i Work
+	err := row.Scan(
+		&i.ID,
+		&i.MetaEntryID,
+		&i.Title,
+		&i.SortTitle,
+		&i.Type,
+		&i.Status,
+		&i.ContentRating,
+		&i.Year,
+		&i.OriginalLanguage,
+		&i.CoverUrl,
+		&i.MetaSyncedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -487,7 +600,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (work_id, source_id, key) DO UPDATE SET
     title = EXCLUDED.title, url = EXCLUDED.url, cover_ref = EXCLUDED.cover_ref,
     score = EXCLUDED.score, evidence = EXCLUDED.evidence, updated_at = now()
-RETURNING id, work_id, source_id, key, title, url, cover_ref, state, origin, score, evidence, priority, created_at, updated_at
+RETURNING id, work_id, source_id, key, title, url, cover_ref, state, origin, score, evidence, priority, created_at, updated_at, checked_at, check_error
 `
 
 type UpsertSourceSeriesParams struct {
@@ -534,6 +647,8 @@ func (q *Queries) UpsertSourceSeries(ctx context.Context, arg UpsertSourceSeries
 		&i.Priority,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CheckedAt,
+		&i.CheckError,
 	)
 	return i, err
 }

@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
 
@@ -67,7 +68,25 @@ type Service struct {
 	hub    *events.Hub
 	log    *slog.Logger
 	now    func() time.Time
+	hooks  ChapterHooks
 }
+
+// ChapterHooks lets the chapters service follow a work's series.
+type ChapterHooks interface {
+	// SeriesAttached: a series was attached to a work; load its chapters.
+	SeriesAttached(ctx context.Context, se db.SourceSeries)
+	// WorkChanged: a work's series changed (detached, priorities); rebuild
+	// its chapters.
+	WorkChanged(ctx context.Context, workID uuid.UUID)
+}
+
+type noHooks struct{}
+
+func (noHooks) SeriesAttached(context.Context, db.SourceSeries) {}
+func (noHooks) WorkChanged(context.Context, uuid.UUID)          {}
+
+// SetChapterHooks connects the chapters service.
+func (s *Service) SetChapterHooks(h ChapterHooks) { s.hooks = h }
 
 // NewService returns the library service and registers its task kinds on
 // q.
@@ -78,7 +97,7 @@ func NewService(st *store.Store, m *meta.Service, host *plugins.Host, q *queue.Q
 	if lim == nil {
 		lim = limits.NewRegistry()
 	}
-	s := &Service{st: st, meta: m, host: host, queue: q, limits: lim, hub: hub, log: log, now: time.Now}
+	s := &Service{st: st, meta: m, host: host, queue: q, limits: lim, hub: hub, log: log, now: time.Now, hooks: noHooks{}}
 	q.Register(KindMatchWork, queue.Kind{Handler: s.handleMatchWork, Concurrency: 2, MaxAttempts: 3})
 	q.Register(KindMatchSource, queue.Kind{Handler: s.handleMatchSource, Concurrency: 8, MaxAttempts: 4})
 	return s
@@ -391,4 +410,49 @@ func EvidenceOf(se db.SourceSeries) Evidence {
 	var e Evidence
 	_ = json.Unmarshal(se.Evidence, &e)
 	return e
+}
+
+// RefreshFromMeta copies the latest display fields (title, cover, status,
+// rating, …) of up to limit followed works from the metadata service,
+// least recently refreshed first. When the service merged an entry into
+// another, the work follows the new entry, unless another work already
+// has it: then both stay and the conflict is logged (merging works comes
+// later).
+func (s *Service) RefreshFromMeta(ctx context.Context, limit int) (updated, conflicts int, err error) {
+	works, err := s.st.FollowedWorksBySync(ctx, int32(limit)) //nolint:gosec // bounded
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, w := range works {
+		e, err := s.meta.GetEntry(ctx, w.MetaEntryID, "", adminViewer.meta())
+		if err != nil {
+			if errors.Is(err, meta.ErrNotFound) {
+				s.log.WarnContext(ctx, "work's entry is gone from the catalogue", "work", w.ID, "entry", w.MetaEntryID)
+				continue
+			}
+			return updated, conflicts, err
+		}
+		p := workParams(e)
+		up := db.UpdateWorkDisplayParams{
+			ID: w.ID, MetaEntryID: p.MetaEntryID, Title: p.Title, SortTitle: p.SortTitle, Type: p.Type, Status: p.Status,
+			ContentRating: p.ContentRating, Year: p.Year, OriginalLanguage: p.OriginalLanguage, CoverUrl: p.CoverUrl,
+		}
+		_, err = s.st.UpdateWorkDisplay(ctx, up)
+		if isUniqueViolation(err) {
+			conflicts++
+			s.log.WarnContext(ctx, "work's entry was merged into another work's entry", "work", w.ID, "entry", w.MetaEntryID, "merged_into", p.MetaEntryID)
+			up.MetaEntryID = w.MetaEntryID
+			_, err = s.st.UpdateWorkDisplay(ctx, up)
+		}
+		if err != nil {
+			return updated, conflicts, err
+		}
+		updated++
+	}
+	return updated, conflicts, nil
+}
+
+func isUniqueViolation(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "23505"
 }

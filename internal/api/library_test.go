@@ -18,9 +18,10 @@ import (
 )
 
 type libraryFixture struct {
-	h     *harness
-	admin *client
-	user  *client
+	h      *harness
+	admin  *client
+	user   *client
+	plugin *plugintest.Fake
 }
 
 func newLibraryFixture(t *testing.T) libraryFixture {
@@ -46,9 +47,10 @@ func newLibraryFixture(t *testing.T) libraryFixture {
 	add("e1", "The Lantern Keeper", "A. Author")
 	add("e2", "Salt and Iron", "Somebody Else")
 	call[apigen.MetaConnection](admin, http.MethodPut, "/api/v1/system/meta", map[string]string{"url": fake.URL, "api_key": metatest.AdminKey}, 200)
-	call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins", map[string]string{"url": pluginstest.Serve(t, plugintest.New(), "k"), "api_key": "k"}, 201)
+	plug := plugintest.New()
+	call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins", map[string]string{"url": pluginstest.Serve(t, plug, "k"), "api_key": "k"}, 201)
 	user, _ := h.createUser(admin, "reader", nil)
-	return libraryFixture{h: h, admin: admin, user: user}
+	return libraryFixture{h: h, admin: admin, user: user, plugin: plug}
 }
 
 func waitWorkMatched(t *testing.T, c *client, id string) apigen.Work {

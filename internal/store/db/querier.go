@@ -13,13 +13,19 @@ import (
 
 type Querier interface {
 	AddLibraryEntry(ctx context.Context, arg AddLibraryEntryParams) (LibraryEntry, error)
+	AssignVariants(ctx context.Context, arg AssignVariantsParams) error
+	// Attached series of works someone follows: what scheduled update checks
+	// look at.
+	AttachedSeriesOfFollowedWorks(ctx context.Context) ([]SourceSeries, error)
 	AttachedSourceIDsByWork(ctx context.Context, workIds []uuid.UUID) ([]AttachedSourceIDsByWorkRow, error)
 	AttachedSourceSeries(ctx context.Context, workID uuid.UUID) ([]SourceSeries, error)
 	CancelQueuedTask(ctx context.Context, id uuid.UUID) (Task, error)
+	ChapterVariants(ctx context.Context, chapterID uuid.UUID) ([]ChapterVariantsRow, error)
 	// Due tasks of the given kinds, best first, locked for this transaction;
 	// the caller picks the ones its limits allow and marks them running.
 	ClaimCandidates(ctx context.Context, arg ClaimCandidatesParams) ([]Task, error)
 	CountAttachedByWork(ctx context.Context, workIds []uuid.UUID) ([]CountAttachedByWorkRow, error)
+	CountChaptersByWork(ctx context.Context, arg CountChaptersByWorkParams) ([]CountChaptersByWorkRow, error)
 	CountEnabledAdmins(ctx context.Context) (int64, error)
 	CountSourcesByPlugin(ctx context.Context) ([]CountSourcesByPluginRow, error)
 	CountUsers(ctx context.Context) (int64, error)
@@ -47,7 +53,10 @@ type Querier interface {
 	FailInterruptedJobRuns(ctx context.Context) (int64, error)
 	FinishJobRun(ctx context.Context, arg FinishJobRunParams) (JobRun, error)
 	FinishTask(ctx context.Context, arg FinishTaskParams) (Task, error)
+	// Works someone follows, least recently refreshed first.
+	FollowedWorksBySync(ctx context.Context, lim int32) ([]Work, error)
 	GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKeyByHashRow, error)
+	GetChapter(ctx context.Context, id uuid.UUID) (Chapter, error)
 	GetJobRun(ctx context.Context, id uuid.UUID) (JobRun, error)
 	GetLibraryEntry(ctx context.Context, arg GetLibraryEntryParams) (LibraryEntry, error)
 	GetLiveTaskByDedupeKey(ctx context.Context, dedupeKey string) (Task, error)
@@ -64,11 +73,13 @@ type Querier interface {
 	GetUserForUpdate(ctx context.Context, id uuid.UUID) (User, error)
 	GetWork(ctx context.Context, id uuid.UUID) (Work, error)
 	GetWorkByEntry(ctx context.Context, metaEntryID string) (Work, error)
+	InsertChapter(ctx context.Context, arg InsertChapterParams) (Chapter, error)
 	// Returns no row when a live task with the same dedupe key exists.
 	InsertTask(ctx context.Context, arg InsertTaskParams) (Task, error)
 	LastJobRuns(ctx context.Context) ([]JobRun, error)
 	LibraryUserIDs(ctx context.Context, workID uuid.UUID) ([]uuid.UUID, error)
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ApiKey, error)
+	ListChapters(ctx context.Context, workID uuid.UUID) ([]Chapter, error)
 	ListJobRuns(ctx context.Context, arg ListJobRunsParams) ([]JobRun, error)
 	// A user's library by title, after a (sort_title, id) cursor. Content
 	// filters run in Go (they depend on the user's grants).
@@ -77,6 +88,7 @@ type Querier interface {
 	ListPlugins(ctx context.Context) ([]Plugin, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]Session, error)
 	ListSettings(ctx context.Context) ([]Setting, error)
+	ListSourceChaptersBySeries(ctx context.Context, sourceSeriesID uuid.UUID) ([]SourceChapter, error)
 	ListSourceSeries(ctx context.Context, workID uuid.UUID) ([]SourceSeries, error)
 	ListSources(ctx context.Context) ([]ListSourcesRow, error)
 	ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, error)
@@ -85,8 +97,13 @@ type Querier interface {
 	// Serialises changes that check "is there another admin?" or "is this the
 	// first account?" within one transaction.
 	LockAccounts(ctx context.Context) error
+	LockWork(ctx context.Context, id uuid.UUID) error
 	MarkInviteUsed(ctx context.Context, arg MarkInviteUsedParams) error
+	MarkLibrarySeen(ctx context.Context, arg MarkLibrarySeenParams) (int64, error)
+	MarkSourceChaptersAbsent(ctx context.Context, arg MarkSourceChaptersAbsentParams) error
 	MarkSourcesAbsent(ctx context.Context, arg MarkSourcesAbsentParams) error
+	// Chapters found after each library entry was last seen.
+	NewChaptersForUser(ctx context.Context, arg NewChaptersForUserParams) ([]NewChaptersForUserRow, error)
 	PruneFinishedTasks(ctx context.Context, before *time.Time) (int64, error)
 	PruneJobRuns(ctx context.Context, arg PruneJobRunsParams) (int64, error)
 	PutSetting(ctx context.Context, arg PutSettingParams) error
@@ -97,9 +114,11 @@ type Querier interface {
 	// Retry by hand: a failed or cancelled task runs again with fresh attempts.
 	RequeueTask(ctx context.Context, id uuid.UUID) (Task, error)
 	RetryTaskLater(ctx context.Context, arg RetryTaskLaterParams) (Task, error)
+	SetChapterPin(ctx context.Context, arg SetChapterPinParams) error
 	SetJobRunProgress(ctx context.Context, arg SetJobRunProgressParams) error
 	SetPluginConfig(ctx context.Context, arg SetPluginConfigParams) error
 	SetPluginState(ctx context.Context, arg SetPluginStateParams) (Plugin, error)
+	SetSeriesChecked(ctx context.Context, arg SetSeriesCheckedParams) error
 	SetSourceEnabled(ctx context.Context, arg SetSourceEnabledParams) (int64, error)
 	SetSourcePriority(ctx context.Context, arg SetSourcePriorityParams) (int64, error)
 	SetSourceSeriesState(ctx context.Context, arg SetSourceSeriesStateParams) (SourceSeries, error)
@@ -112,14 +131,20 @@ type Querier interface {
 	TouchUserLogin(ctx context.Context, id uuid.UUID) error
 	// Back to the queue without counting the attempt (the server stopped).
 	UnclaimTask(ctx context.Context, id uuid.UUID) (Task, error)
+	UpdateChapter(ctx context.Context, arg UpdateChapterParams) error
 	UpdatePlugin(ctx context.Context, arg UpdatePluginParams) (Plugin, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
+	UpdateWorkDisplay(ctx context.Context, arg UpdateWorkDisplayParams) (Work, error)
 	UpsertSource(ctx context.Context, arg UpsertSourceParams) error
+	UpsertSourceChapter(ctx context.Context, arg UpsertSourceChapterParams) error
 	// Records a series found for a work. An attached or rejected series keeps
 	// its state when matching finds it again.
 	UpsertSourceSeries(ctx context.Context, arg UpsertSourceSeriesParams) (SourceSeries, error)
 	UpsertWork(ctx context.Context, arg UpsertWorkParams) (UpsertWorkRow, error)
 	UpsertWorkSourceMatch(ctx context.Context, arg UpsertWorkSourceMatchParams) error
+	// Present chapters of a work's attached series, with what decides the
+	// preferred variant.
+	WorkVariants(ctx context.Context, workID uuid.UUID) ([]WorkVariantsRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

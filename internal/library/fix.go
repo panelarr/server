@@ -59,6 +59,8 @@ func (s *Service) Attach(ctx context.Context, v Viewer, workID, seriesID uuid.UU
 		return db.SourceSeries{}, err
 	}
 	s.log.InfoContext(ctx, "series attached", "component", "audit", "actor", v.UserID, "work", workID, "series", seriesID)
+	s.hooks.SeriesAttached(ctx, out)
+	s.hooks.WorkChanged(ctx, workID)
 	s.notify(ctx, workID)
 	return out, nil
 }
@@ -81,6 +83,7 @@ func (s *Service) Detach(ctx context.Context, v Viewer, workID, seriesID uuid.UU
 		}
 	}
 	s.log.InfoContext(ctx, "series detached", "component", "audit", "actor", v.UserID, "work", workID, "series", seriesID)
+	s.hooks.WorkChanged(ctx, workID)
 	s.notify(ctx, workID)
 	return out, nil
 }
@@ -93,6 +96,7 @@ func (s *Service) SetPriority(ctx context.Context, v Viewer, workID, seriesID uu
 	if _, err := s.st.SetSourcePriority(ctx, db.SetSourcePriorityParams{ID: seriesID, WorkID: workID, Priority: priority}); err != nil {
 		return db.SourceSeries{}, err
 	}
+	s.hooks.WorkChanged(ctx, workID)
 	s.notify(ctx, workID)
 	return s.st.GetSourceSeries(ctx, seriesID)
 }
@@ -150,6 +154,8 @@ func (s *Service) attachSeries(ctx context.Context, v Viewer, workID uuid.UUID, 
 		return db.SourceSeries{}, err
 	}
 	s.log.InfoContext(ctx, "series attached", "component", "audit", "actor", v.UserID, "work", workID, "source", sourceID)
+	s.hooks.SeriesAttached(ctx, out)
+	s.hooks.WorkChanged(ctx, workID)
 	s.notify(ctx, workID)
 	return out, nil
 }

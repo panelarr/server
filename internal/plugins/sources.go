@@ -216,11 +216,17 @@ func (h *Host) Series(ctx context.Context, v Viewer, id, key string) (*sourcev1.
 
 // Chapters lists a series' chapters as the source reports them.
 func (h *Host) Chapters(ctx context.Context, v Viewer, id, key string) ([]*sourcev1.Chapter, error) {
+	return h.ListChapters(ctx, v, id, key, false)
+}
+
+// ListChapters lists a series' chapters; refresh asks the plugin to skip
+// its cache (update checks).
+func (h *Host) ListChapters(ctx context.Context, v Viewer, id, key string, refresh bool) ([]*sourcev1.Chapter, error) {
 	s, c, err := h.call(ctx, v, id, "")
 	if err != nil {
 		return nil, err
 	}
-	res, err := c.ListChapters(ctx, &sourcev1.ListChaptersRequest{SourceId: s.SourceID, SeriesKey: key})
+	res, err := c.ListChapters(ctx, &sourcev1.ListChaptersRequest{SourceId: s.SourceID, SeriesKey: key, Refresh: refresh})
 	if err != nil {
 		return nil, err
 	}

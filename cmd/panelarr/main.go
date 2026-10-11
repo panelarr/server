@@ -21,6 +21,7 @@ import (
 	"github.com/panelarr/server/internal/api"
 	"github.com/panelarr/server/internal/auth"
 	"github.com/panelarr/server/internal/buildinfo"
+	"github.com/panelarr/server/internal/chapters"
 	"github.com/panelarr/server/internal/config"
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/imagecache"
@@ -172,8 +173,10 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 
 	q := queue.New(st, hub, lim, m, logging.Component(log, "queue"))
 	lib := library.NewService(st, metaSvc, host, q, lim, hub, logging.Component(log, "library"))
+	chs := chapters.NewService(st, host, q, lim, hub, logging.Component(log, "chapters"))
+	lib.SetChapterHooks(chs)
 	jm := jobs.NewManager(st, hub, m, logging.Component(log, "jobs"))
-	registerJobs(jm, st, authSvc, host)
+	registerJobs(jm, st, authSvc, host, lib, chs)
 	if err := jm.Start(ctx); err != nil {
 		return err
 	}
@@ -212,6 +215,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		Hub:            hub,
 		Store:          st,
 		Library:        lib,
+		Chapters:       chs,
 		SecureCookies:  cfg.SecureCookies(),
 		TrustedProxies: cfg.TrustedProxies,
 	})

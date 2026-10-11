@@ -109,9 +109,17 @@ func (s *Server) ListLibrary(ctx context.Context, req apigen.ListLibraryRequestO
 	if err != nil {
 		return nil, err
 	}
+	ids := make([]uuid.UUID, len(page.Entries))
+	for i, e := range page.Entries {
+		ids[i] = e.Work.ID
+	}
+	newCounts, err := s.deps.Chapters.NewCounts(ctx, auth.FromContext(ctx).User.ID, ids)
+	if err != nil {
+		return nil, err
+	}
 	out := apigen.ListLibrary200JSONResponse{Entries: make([]apigen.LibraryEntry, len(page.Entries))}
 	for i, e := range page.Entries {
-		out.Entries[i] = apigen.LibraryEntry{Work: toWorkSummary(e.Work, e.Attached), AddedAt: e.AddedAt}
+		out.Entries[i] = apigen.LibraryEntry{Work: toWorkSummary(e.Work, e.Attached), AddedAt: e.AddedAt, NewChapters: int(newCounts[e.Work.ID])}
 	}
 	if page.Next != nil {
 		out.NextPageToken = encodePageToken(page.Next.SortTitle + "\x00" + page.Next.ID.String())

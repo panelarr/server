@@ -76,6 +76,8 @@ tags:
     description: The task queue (admins).
   - name: library
     description: Your library, works and how they are matched on sources.
+  - name: chapters
+    description: Works' unified chapters and update checks.
 
 paths:
   /system/info:
@@ -1646,6 +1648,136 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /works/{work_id}/chapters:
+    get:
+      operationId: listWorkChapters
+      tags: [chapters]
+      summary: A work's unified chapters
+      description: |
+        One row per chapter across all the work's sources: chapters with the
+        same number on several sources are one chapter, and a chapter
+        missing on one source is filled from another. Each shows the chosen
+        copy (variant) and why (`reason`): `pinned`, `only_source`,
+        `language` (the instance's preferred languages), `healthier_source`,
+        `priority` (the series' priority), `newest_upload` or
+        `first_listed`. Chapters without a number stay per source and come
+        last. `new` marks chapters found since you last marked the work
+        seen.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+        - name: order
+          in: query
+          description: asc (reading order, the default) or desc.
+          schema:
+            type: string
+            enum: [asc, desc]
+      responses:
+        "200":
+          description: The chapters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChapterList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}/chapters/{chapter_id}:
+    get:
+      operationId: getWorkChapter
+      tags: [chapters]
+      summary: One chapter with every copy
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+        - $ref: "#/components/parameters/ChapterId"
+      responses:
+        "200":
+          description: The chapter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChapterDetail"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}/chapters/{chapter_id}/pin:
+    put:
+      operationId: pinChapterVariant
+      tags: [chapters]
+      summary: Choose a chapter's copy by hand
+      description: A pinned copy wins until it disappears from its source. `variant_id` null unpins. Needs `may_manage_matches`.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+        - $ref: "#/components/parameters/ChapterId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PinVariantRequest"
+      responses:
+        "200":
+          description: The chapter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChapterDetail"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}/series/{series_id}/chapters:
+    get:
+      operationId: listSeriesChapters
+      tags: [chapters]
+      summary: One source's chapters of the work, as the source lists them
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+        - $ref: "#/components/parameters/SeriesId"
+      responses:
+        "200":
+          description: The source's chapters in its own order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeriesChapterList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}/refresh:
+    post:
+      operationId: refreshWork
+      tags: [chapters]
+      summary: Check the work's sources for new chapters now
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+      responses:
+        "202":
+          description: Checks queued, one per attached series.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefreshQueued"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /library/{work_id}/seen:
+    post:
+      operationId: markWorkSeen
+      tags: [library]
+      summary: Clear the work's "new" chapter badges for you
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+      responses:
+        "204":
+          description: Seen.
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -1664,6 +1796,13 @@ components:
       description: A personal API key as a bearer token.
 
   parameters:
+    ChapterId:
+      name: chapter_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     WorkId:
       name: work_id
       in: path
@@ -1853,6 +1992,150 @@ components:
             $ref: "#/components/schemas/Problem"
 
   schemas:
+    ChapterVariant:
+      type: object
+      required: [id, series_id, source_id, source_name, key, name, priority, source_health]
+      properties:
+        id:
+          type: string
+          format: uuid
+        series_id:
+          type: string
+          format: uuid
+        source_id:
+          type: string
+        source_name:
+          type: string
+        key:
+          type: string
+        name:
+          type: string
+        number:
+          type: number
+        volume:
+          type: string
+        scanlator:
+          type: string
+        lang:
+          type: string
+        uploaded_at:
+          type: string
+          format: date-time
+        priority:
+          type: integer
+        source_health:
+          type: string
+          enum: [ok, failing, unknown]
+    UnifiedChapter:
+      type: object
+      required: [id, title, extra, available, new, variants, reason, pinned, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: number
+          description: Absent for chapters without a number (extras).
+        volume:
+          type: string
+        title:
+          type: string
+        extra:
+          type: boolean
+        available:
+          type: boolean
+          description: False when no source lists it any more.
+        new:
+          type: boolean
+        variants:
+          type: integer
+          description: How many copies across your sources.
+        reason:
+          type: string
+          description: Why the chosen copy won.
+        pinned:
+          type: boolean
+        chosen:
+          $ref: "#/components/schemas/ChapterVariant"
+        created_at:
+          type: string
+          format: date-time
+          description: When the chapter was first found.
+    ChapterList:
+      type: object
+      required: [chapters]
+      properties:
+        chapters:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnifiedChapter"
+    ChapterDetail:
+      type: object
+      required: [chapter, variants]
+      properties:
+        chapter:
+          $ref: "#/components/schemas/UnifiedChapter"
+        variants:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChapterVariant"
+    PinVariantRequest:
+      type: object
+      required: [variant_id]
+      properties:
+        variant_id:
+          type: [string, "null"]
+          format: uuid
+    SeriesChapter:
+      type: object
+      required: [key, name, present]
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        number:
+          type: number
+        volume:
+          type: string
+        scanlator:
+          type: string
+        lang:
+          type: string
+        url:
+          type: string
+        uploaded_at:
+          type: string
+          format: date-time
+        present:
+          type: boolean
+          description: False when the source no longer lists it.
+        chapter_id:
+          type: string
+          format: uuid
+          description: The unified chapter it belongs to.
+    SeriesChapterList:
+      type: object
+      required: [series, chapters]
+      properties:
+        series:
+          $ref: "#/components/schemas/MatchSeries"
+        checked_at:
+          type: string
+          format: date-time
+        check_error:
+          type: string
+        chapters:
+          type: array
+          items:
+            $ref: "#/components/schemas/SeriesChapter"
+    RefreshQueued:
+      type: object
+      required: [queued]
+      properties:
+        queued:
+          type: integer
+
     WorkSummary:
       type: object
       required: [id, entry_id, title, content_rating, attached_sources]
@@ -1881,13 +2164,16 @@ components:
           description: Sources a series is attached on.
     LibraryEntry:
       type: object
-      required: [work, added_at]
+      required: [work, added_at, new_chapters]
       properties:
         work:
           $ref: "#/components/schemas/WorkSummary"
         added_at:
           type: string
           format: date-time
+        new_chapters:
+          type: integer
+          description: Chapters found since you last marked the work seen.
     LibraryPage:
       type: object
       required: [entries, next_page_token]

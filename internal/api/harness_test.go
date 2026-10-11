@@ -20,6 +20,7 @@ import (
 
 	"github.com/panelarr/server/internal/api/apigen"
 	"github.com/panelarr/server/internal/auth"
+	"github.com/panelarr/server/internal/chapters"
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/imagecache"
 	"github.com/panelarr/server/internal/jobs"
@@ -82,6 +83,9 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		}
 		return nil, nil
 	}})
+	lib := library.NewService(st, m, host, q, nil, hub, nil)
+	chs := chapters.NewService(st, host, q, nil, hub, nil)
+	lib.SetChapterHooks(chs)
 	jm := jobs.NewManager(st, hub, nil, nil)
 	release := make(chan struct{})
 	jm.Register(jobs.Definition{
@@ -105,18 +109,19 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	go func() { defer close(qDone); _ = q.Run(runCtx) }()
 	t.Cleanup(func() { stop(); <-qDone; jm.Wait() })
 	deps := Deps{
-		Log:     slog.New(slog.DiscardHandler),
-		Auth:    a,
-		Users:   u,
-		Meta:    m,
-		Images:  imagecache.New(t.TempDir()),
-		Plugins: host,
-		Signer:  imagecache.NewSigner([]byte("test signing key")),
-		Jobs:    jm,
-		Queue:   q,
-		Hub:     hub,
-		Store:   st,
-		Library: library.NewService(st, m, host, q, nil, hub, nil),
+		Log:      slog.New(slog.DiscardHandler),
+		Auth:     a,
+		Users:    u,
+		Meta:     m,
+		Images:   imagecache.New(t.TempDir()),
+		Plugins:  host,
+		Signer:   imagecache.NewSigner([]byte("test signing key")),
+		Jobs:     jm,
+		Queue:    q,
+		Hub:      hub,
+		Store:    st,
+		Library:  lib,
+		Chapters: chs,
 		Checks: []Check{
 			{Name: "database", Required: true, Run: st.Pool.Ping},
 			{Name: "meta", Run: m.ReadyCheck},

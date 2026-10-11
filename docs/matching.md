@@ -33,3 +33,21 @@ A work is shown to a user when its content rating is within their ceiling and it
 ## Tuning
 
 The instance setting `matching` (JSON) overrides the defaults: `max_queries` (5), `candidate_score` (0.6), `max_candidates` (5), `details` (3).
+
+## Chapters
+
+Every attached series' chapters are kept exactly as its source lists them (the per-source view on a work's page). Across sources, chapters with the same number become **one chapter** (numbers are read from the source, or from the name such as "Chapter 12.5" when the source gives none); the volume is the one most sources give. Chapters without a number stay per source and are listed after the numbered ones. So a chapter missing on one source is filled from another.
+
+Each chapter shows one chosen copy and why:
+
+1. `pinned`: a user with `may_manage_matches` chose it (until it disappears from its source);
+2. `language`: the instance setting `chapters.languages` (a JSON list such as `["en", "de"]`) prefers copies in those languages, in order;
+3. `healthier_source`: a copy on a working source beats one on a failing source (a failing source still serves a chapter only it has);
+4. `priority`: the series' priority for the work;
+5. `newest_upload`, then `first_listed`.
+
+`only_source` means just one source has it. A chapter no source lists any more stays (progress and files may point at it) but shows as unavailable.
+
+### Update checks
+
+The `updates.check` job (every 6 hours) checks every attached series of followed works for chapters, spread over half an hour and within each source's limits; a work's page can ask for a check now. A newly attached series is checked right away. Chapters found after a user last opened a work show as **new** for them until they mark it seen. The `works.refresh` job (daily) refreshes works' titles, covers and statuses from the catalogue.

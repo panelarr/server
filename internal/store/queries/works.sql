@@ -89,3 +89,17 @@ WHERE state = 'attached' AND work_id = ANY(@work_ids::uuid[]) GROUP BY work_id;
 -- name: AttachedSourceIDsByWork :many
 SELECT work_id, source_id FROM source_series
 WHERE state = 'attached' AND work_id = ANY(@work_ids::uuid[]);
+
+-- name: UpdateWorkDisplay :one
+UPDATE works SET meta_entry_id = @meta_entry_id, title = @title, sort_title = @sort_title, type = @type,
+    status = @status, content_rating = @content_rating, year = @year, original_language = @original_language,
+    cover_url = @cover_url, meta_synced_at = now(), updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: FollowedWorksBySync :many
+-- Works someone follows, least recently refreshed first.
+SELECT * FROM works
+WHERE EXISTS (SELECT 1 FROM library_entries WHERE library_entries.work_id = works.id)
+ORDER BY meta_synced_at
+LIMIT @lim;

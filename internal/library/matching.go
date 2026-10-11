@@ -367,8 +367,9 @@ func (s *Service) handleMatchSource(ctx context.Context, t *queue.Task) (any, er
 		return nil, err
 	}
 	msg := fmt.Sprintf("%d candidates", len(cands))
-	if attached != "" {
-		msg = "attached " + attached
+	if attached != nil {
+		msg = "attached " + attached.Title
+		s.hooks.SeriesAttached(ctx, *attached)
 	}
 	if err := s.st.UpsertWorkSourceMatch(ctx, db.UpsertWorkSourceMatchParams{
 		WorkID: p.WorkID, SourceID: src.ID, Status: status, Message: msg, Queries: nonNil(queries),
@@ -382,7 +383,7 @@ func (s *Service) handleMatchSource(ctx context.Context, t *queue.Task) (any, er
 // saveMatches replaces a source's candidates for a work and attaches the
 // single strong one, unless a series is attached already or the strong
 // one was rejected before.
-func (s *Service) saveMatches(ctx context.Context, workID uuid.UUID, sourceID string, cands, strong []*candidate) (status, attachedTitle string, err error) {
+func (s *Service) saveMatches(ctx context.Context, workID uuid.UUID, sourceID string, cands, strong []*candidate) (status string, attached *db.SourceSeries, err error) {
 	err = s.st.InTx(ctx, func(q *db.Queries, _ pgx.Tx) error {
 		if err := q.DropCandidates(ctx, db.DropCandidatesParams{WorkID: workID, SourceID: sourceID}); err != nil {
 			return err
@@ -402,10 +403,11 @@ func (s *Service) saveMatches(ctx context.Context, workID uuid.UUID, sourceID st
 				return err
 			}
 			if len(strong) == 1 && strong[0] == c && !hasAttached && row.State == StateCandidate {
-				if _, err := q.SetSourceSeriesState(ctx, db.SetSourceSeriesStateParams{ID: row.ID, State: StateAttached, Origin: OriginAuto}); err != nil {
+				row, err = q.SetSourceSeriesState(ctx, db.SetSourceSeriesStateParams{ID: row.ID, State: StateAttached, Origin: OriginAuto})
+				if err != nil {
 					return err
 				}
-				hasAttached, attachedTitle = true, row.Title
+				hasAttached, attached = true, &row
 			}
 		}
 		switch {
@@ -418,7 +420,7 @@ func (s *Service) saveMatches(ctx context.Context, workID uuid.UUID, sourceID st
 		}
 		return nil
 	})
-	return status, attachedTitle, err
+	return status, attached, err
 }
 
 // mergeSeries keeps listing fields the details lack.

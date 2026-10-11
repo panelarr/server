@@ -50,6 +50,12 @@ type JobRun struct {
 	FinishedAt  *time.Time
 }
 
+type LibraryEntry struct {
+	UserID  uuid.UUID
+	WorkID  uuid.UUID
+	AddedAt time.Time
+}
+
 type Plugin struct {
 	ID            string
 	Url           string
@@ -102,6 +108,23 @@ type Source struct {
 	UpdatedAt       time.Time
 }
 
+type SourceSeries struct {
+	ID        uuid.UUID
+	WorkID    uuid.UUID
+	SourceID  string
+	Key       string
+	Title     string
+	Url       string
+	CoverRef  string
+	State     string
+	Origin    string
+	Score     float32
+	Evidence  []byte
+	Priority  int32
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type Task struct {
 	ID          uuid.UUID
 	Kind        string
@@ -141,4 +164,29 @@ type User struct {
 	UpdatedAt            time.Time
 	PasswordChangedAt    time.Time
 	LastLoginAt          *time.Time
+}
+
+type Work struct {
+	ID               uuid.UUID
+	MetaEntryID      string
+	Title            string
+	SortTitle        string
+	Type             string
+	Status           string
+	ContentRating    string
+	Year             *int32
+	OriginalLanguage string
+	CoverUrl         string
+	MetaSyncedAt     time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type WorkSourceMatch struct {
+	WorkID    uuid.UUID
+	SourceID  string
+	Status    string
+	Message   string
+	Queries   []string
+	CheckedAt time.Time
 }

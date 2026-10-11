@@ -19,6 +19,8 @@ internal/queue/          the task queue (claim, lease, retry, caps, cancel, paus
 internal/jobs/           named background jobs and their runs
 internal/limits/         per-source concurrency and rate limits
 internal/events/         the event hub behind the event stream
+internal/library/        works, libraries and matching works to source series
+internal/textmatch/      title and name normalization and similarity
 internal/config/         startup settings from env and flags
 internal/logging/        structured logs
 internal/metrics/        Prometheus collectors (bounded labels)

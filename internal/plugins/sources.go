@@ -236,3 +236,41 @@ func (h *Host) Image(ctx context.Context, v Viewer, id, ref string) (string, []b
 	}
 	return client.ReadImage(ctx, c, &sourcev1.FetchImageRequest{SourceId: s.SourceID, Ref: ref}, MaxImageBytes)
 }
+
+// Resolved is a series found from a pasted URL.
+type Resolved struct {
+	Source     Source
+	Series     *sourcev1.Series
+	BestEffort bool
+}
+
+// ResolveURL finds the series a URL points to, asking each enabled plugin
+// with a source v may use that resolves URLs. ErrNotFound when none knows
+// it.
+func (h *Host) ResolveURL(ctx context.Context, v Viewer, rawURL string) (Resolved, error) {
+	srcs, err := h.Sources(ctx, v, false)
+	if err != nil {
+		return Resolved{}, err
+	}
+	asked := map[string]bool{}
+	for _, s := range srcs {
+		if asked[s.PluginID] || !slices.Contains(s.Capabilities, "resolve_url") {
+			continue
+		}
+		asked[s.PluginID] = true
+		c, err := h.Client(ctx, s.PluginID)
+		if err != nil {
+			continue
+		}
+		res, err := c.ResolveUrl(ctx, &sourcev1.ResolveUrlRequest{Url: rawURL})
+		if err != nil || res.GetSeries() == nil {
+			continue
+		}
+		found, err := h.Source(ctx, s.PluginID+":"+res.GetSourceId(), v)
+		if err != nil {
+			continue // a source the viewer may not use
+		}
+		return Resolved{Source: found, Series: res.GetSeries(), BestEffort: res.GetBestEffort()}, nil
+	}
+	return Resolved{}, ErrNotFound
+}

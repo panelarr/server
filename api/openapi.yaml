@@ -74,6 +74,8 @@ tags:
     description: Named background jobs and their runs (admins).
   - name: tasks
     description: The task queue (admins).
+  - name: library
+    description: Your library, works and how they are matched on sources.
 
 paths:
   /system/info:
@@ -1384,6 +1386,266 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /library:
+    get:
+      operationId: listLibrary
+      tags: [library]
+      summary: Your library
+      description: Works you follow, by title. Works you may no longer see (your ceiling or allowed sources changed) are left out.
+      x-panelarr-access: user
+      parameters:
+        - name: q
+          in: query
+          description: Only titles containing this.
+          schema:
+            type: string
+            maxLength: 200
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/PageToken"
+      responses:
+        "200":
+          description: A page of your library.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryPage"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: addToLibrary
+      tags: [library]
+      summary: Add a catalogue entry to your library
+      description: |
+        Creates the work for the entry when nobody has it yet (one work per
+        entry, shared by everyone) and starts matching it on the sources.
+        Adding it again returns `200` with the existing entry. With
+        `source`, that series is attached to the work (e.g. when you picked
+        the entry after adding from a source). Needs the `may_add` grant
+        (`403`, code `grant_required`).
+      x-panelarr-access: user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddToLibraryRequest"
+      responses:
+        "200":
+          description: It was in your library already.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryEntry"
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryEntry"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /library/from-source:
+    post:
+      operationId: addFromSource
+      tags: [library]
+      summary: Add a series seen on a source
+      description: |
+        Finds the series' catalogue entry. When it is clear (the exact
+        title and a shared author), the work is added with the series
+        attached (`added`). Otherwise the likely entries come back as
+        `candidates`: pick one and add it with `POST /library` and this
+        series as `source`. Needs `may_add`.
+      x-panelarr-access: user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SeriesRef"
+      responses:
+        "200":
+          description: Added, or candidates to pick from.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddFromSourceResult"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /library/{work_id}:
+    delete:
+      operationId: removeFromLibrary
+      tags: [library]
+      summary: Remove a work from your library
+      description: Never deletes downloaded files; they are shared.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+      responses:
+        "204":
+          description: Removed.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}:
+    get:
+      operationId: getWork
+      tags: [library]
+      summary: A work, with how it is matched on each source
+      description: Lists every source you may use with its matching state, the attached series and candidates with their evidence.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+      responses:
+        "200":
+          description: The work.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Work"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}/cover:
+    get:
+      operationId: getWorkCover
+      tags: [library]
+      summary: A work's cover
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+      responses:
+        "200":
+          description: The image.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}/match:
+    post:
+      operationId: matchWork
+      tags: [library]
+      summary: Match the work on the sources again
+      description: Searches every source without an attached series (with `force`, every source; attached series stay). Series rejected before are not attached again. Needs `may_manage_matches`.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MatchWorkRequest"
+      responses:
+        "202":
+          description: Queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRef"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}/series:
+    post:
+      operationId: attachSeries
+      tags: [library]
+      summary: Attach a series to the work by source and key, or by its URL
+      description: The series becomes the work's series on its source (the one attached before becomes a candidate). A URL no plugin recognises answers `404`. Needs `may_manage_matches`.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachSeriesRequest"
+      responses:
+        "201":
+          description: Attached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchSeries"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}/series/{series_id}:
+    patch:
+      operationId: updateWorkSeries
+      tags: [library]
+      summary: Set a series' priority for the work
+      description: Higher priority wins when the same chapter is on several sources. Needs `may_manage_matches`.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+        - $ref: "#/components/parameters/SeriesId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkSeriesRequest"
+      responses:
+        "200":
+          description: The series.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchSeries"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}/series/{series_id}/attach:
+    post:
+      operationId: attachCandidate
+      tags: [library]
+      summary: Attach a candidate (or a rejected series)
+      description: Needs `may_manage_matches`.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+        - $ref: "#/components/parameters/SeriesId"
+      responses:
+        "200":
+          description: Attached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchSeries"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}/series/{series_id}/detach:
+    post:
+      operationId: detachSeries
+      tags: [library]
+      summary: Reject a series for the work
+      description: Matching won't attach it again. Needs `may_manage_matches`.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+        - $ref: "#/components/parameters/SeriesId"
+      responses:
+        "200":
+          description: Rejected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchSeries"
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -1402,6 +1664,20 @@ components:
       description: A personal API key as a bearer token.
 
   parameters:
+    WorkId:
+      name: work_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SeriesId:
+      name: series_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     JobId:
       name: job_id
       in: path
@@ -1577,6 +1853,244 @@ components:
             $ref: "#/components/schemas/Problem"
 
   schemas:
+    WorkSummary:
+      type: object
+      required: [id, entry_id, title, content_rating, attached_sources]
+      properties:
+        id:
+          type: string
+          format: uuid
+        entry_id:
+          type: string
+          description: The catalogue entry it was created from (see /catalog/entries).
+        title:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        content_rating:
+          $ref: "#/components/schemas/EntryContentRating"
+        year:
+          type: integer
+        cover_url:
+          type: string
+          description: The server's URL for the cover.
+        attached_sources:
+          type: integer
+          description: Sources a series is attached on.
+    LibraryEntry:
+      type: object
+      required: [work, added_at]
+      properties:
+        work:
+          $ref: "#/components/schemas/WorkSummary"
+        added_at:
+          type: string
+          format: date-time
+    LibraryPage:
+      type: object
+      required: [entries, next_page_token]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibraryEntry"
+        next_page_token:
+          type: string
+    SeriesRef:
+      type: object
+      required: [source_id, key]
+      properties:
+        source_id:
+          type: string
+          minLength: 3
+          maxLength: 300
+        key:
+          type: string
+          minLength: 1
+          maxLength: 2000
+    AddToLibraryRequest:
+      type: object
+      required: [entry_id]
+      properties:
+        entry_id:
+          type: string
+          minLength: 1
+          maxLength: 100
+        source:
+          $ref: "#/components/schemas/SeriesRef"
+    EntryCandidate:
+      type: object
+      required: [entry, score]
+      properties:
+        entry:
+          $ref: "#/components/schemas/CatalogEntrySummary"
+        score:
+          type: number
+          description: Title similarity, 0 to 1.
+        matched_title:
+          type: string
+        authors_match:
+          type: boolean
+          description: Absent when one side names no people.
+    AddFromSourceResult:
+      type: object
+      required: [added, candidates]
+      properties:
+        added:
+          type: boolean
+        entry:
+          $ref: "#/components/schemas/LibraryEntry"
+        candidates:
+          type: array
+          items:
+            $ref: "#/components/schemas/EntryCandidate"
+    MatchEvidence:
+      type: object
+      required: [title_score, source_authors]
+      properties:
+        entry_title:
+          type: string
+        matched_title:
+          type: string
+          description: The entry's title that matched best.
+        query:
+          type: string
+          description: The search that found it.
+        title_score:
+          type: number
+        authors_match:
+          type: boolean
+        source_authors:
+          type: array
+          items:
+            type: string
+        chapter_count:
+          type: integer
+    MatchSeries:
+      type: object
+      required: [id, source_id, key, title, state, origin, score, priority, evidence]
+      properties:
+        id:
+          type: string
+          format: uuid
+        source_id:
+          type: string
+        key:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+        cover_url:
+          type: string
+        state:
+          type: string
+          enum: [attached, candidate, rejected]
+        origin:
+          type: string
+          enum: [auto, manual, url]
+        score:
+          type: number
+        priority:
+          type: integer
+        evidence:
+          $ref: "#/components/schemas/MatchEvidence"
+    WorkSourceState:
+      type: object
+      required: [source, status, queries, candidates]
+      properties:
+        source:
+          $ref: "#/components/schemas/SourceInfo"
+        status:
+          type: string
+          enum: [unchecked, pending, matched, candidates, no_match, failed]
+        message:
+          type: string
+        queries:
+          type: array
+          description: The titles searched, in order.
+          items:
+            type: string
+        checked_at:
+          type: string
+          format: date-time
+        attached:
+          $ref: "#/components/schemas/MatchSeries"
+        candidates:
+          type: array
+          items:
+            $ref: "#/components/schemas/MatchSeries"
+    Work:
+      type: object
+      required: [id, entry_id, title, content_rating, attached_sources, in_library, sources]
+      properties:
+        id:
+          type: string
+          format: uuid
+        entry_id:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        content_rating:
+          $ref: "#/components/schemas/EntryContentRating"
+        year:
+          type: integer
+        cover_url:
+          type: string
+        attached_sources:
+          type: integer
+        in_library:
+          type: boolean
+        added_at:
+          type: string
+          format: date-time
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkSourceState"
+    MatchWorkRequest:
+      type: object
+      properties:
+        force:
+          type: boolean
+    TaskRef:
+      type: object
+      required: [task_id]
+      properties:
+        task_id:
+          type: string
+          format: uuid
+    AttachSeriesRequest:
+      type: object
+      description: Either source_id and key, or url.
+      properties:
+        source_id:
+          type: string
+          minLength: 3
+          maxLength: 300
+        key:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2000
+    UpdateWorkSeriesRequest:
+      type: object
+      required: [priority]
+      properties:
+        priority:
+          type: integer
+          minimum: -1000
+          maximum: 1000
+
     JobParam:
       type: object
       required: [name, type, required]

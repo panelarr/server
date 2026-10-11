@@ -12,10 +12,14 @@ import (
 )
 
 type Querier interface {
+	AddLibraryEntry(ctx context.Context, arg AddLibraryEntryParams) (LibraryEntry, error)
+	AttachedSourceIDsByWork(ctx context.Context, workIds []uuid.UUID) ([]AttachedSourceIDsByWorkRow, error)
+	AttachedSourceSeries(ctx context.Context, workID uuid.UUID) ([]SourceSeries, error)
 	CancelQueuedTask(ctx context.Context, id uuid.UUID) (Task, error)
 	// Due tasks of the given kinds, best first, locked for this transaction;
 	// the caller picks the ones its limits allow and marks them running.
 	ClaimCandidates(ctx context.Context, arg ClaimCandidatesParams) ([]Task, error)
+	CountAttachedByWork(ctx context.Context, workIds []uuid.UUID) ([]CountAttachedByWorkRow, error)
 	CountEnabledAdmins(ctx context.Context) (int64, error)
 	CountSourcesByPlugin(ctx context.Context) ([]CountSourcesByPluginRow, error)
 	CountUsers(ctx context.Context) (int64, error)
@@ -35,12 +39,17 @@ type Querier interface {
 	DeleteUserSession(ctx context.Context, arg DeleteUserSessionParams) (int64, error)
 	DeleteUserSessions(ctx context.Context, userID uuid.UUID) error
 	DeleteUserSessionsExcept(ctx context.Context, arg DeleteUserSessionsExceptParams) error
+	// Before attaching another series of the same source.
+	DemoteAttached(ctx context.Context, arg DemoteAttachedParams) error
+	// Candidates of a source are replaced on every matching run.
+	DropCandidates(ctx context.Context, arg DropCandidatesParams) error
 	ExtendTaskLease(ctx context.Context, arg ExtendTaskLeaseParams) error
 	FailInterruptedJobRuns(ctx context.Context) (int64, error)
 	FinishJobRun(ctx context.Context, arg FinishJobRunParams) (JobRun, error)
 	FinishTask(ctx context.Context, arg FinishTaskParams) (Task, error)
 	GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKeyByHashRow, error)
 	GetJobRun(ctx context.Context, id uuid.UUID) (JobRun, error)
+	GetLibraryEntry(ctx context.Context, arg GetLibraryEntryParams) (LibraryEntry, error)
 	GetLiveTaskByDedupeKey(ctx context.Context, dedupeKey string) (Task, error)
 	GetOpenInviteByTokenHash(ctx context.Context, tokenHash []byte) (Invite, error)
 	GetOpenInviteByTokenHashForUpdate(ctx context.Context, tokenHash []byte) (Invite, error)
@@ -48,22 +57,31 @@ type Querier interface {
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionByTokenHashRow, error)
 	GetSetting(ctx context.Context, key string) ([]byte, error)
 	GetSource(ctx context.Context, id string) (GetSourceRow, error)
+	GetSourceSeries(ctx context.Context, id uuid.UUID) (SourceSeries, error)
 	GetTask(ctx context.Context, id uuid.UUID) (Task, error)
 	GetUser(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
 	GetUserForUpdate(ctx context.Context, id uuid.UUID) (User, error)
+	GetWork(ctx context.Context, id uuid.UUID) (Work, error)
+	GetWorkByEntry(ctx context.Context, metaEntryID string) (Work, error)
 	// Returns no row when a live task with the same dedupe key exists.
 	InsertTask(ctx context.Context, arg InsertTaskParams) (Task, error)
 	LastJobRuns(ctx context.Context) ([]JobRun, error)
+	LibraryUserIDs(ctx context.Context, workID uuid.UUID) ([]uuid.UUID, error)
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ApiKey, error)
 	ListJobRuns(ctx context.Context, arg ListJobRunsParams) ([]JobRun, error)
+	// A user's library by title, after a (sort_title, id) cursor. Content
+	// filters run in Go (they depend on the user's grants).
+	ListLibrary(ctx context.Context, arg ListLibraryParams) ([]ListLibraryRow, error)
 	ListOpenInvites(ctx context.Context) ([]Invite, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]Session, error)
 	ListSettings(ctx context.Context) ([]Setting, error)
+	ListSourceSeries(ctx context.Context, workID uuid.UUID) ([]SourceSeries, error)
 	ListSources(ctx context.Context) ([]ListSourcesRow, error)
 	ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
+	ListWorkSourceMatches(ctx context.Context, workID uuid.UUID) ([]WorkSourceMatch, error)
 	// Serialises changes that check "is there another admin?" or "is this the
 	// first account?" within one transaction.
 	LockAccounts(ctx context.Context) error
@@ -72,6 +90,7 @@ type Querier interface {
 	PruneFinishedTasks(ctx context.Context, before *time.Time) (int64, error)
 	PruneJobRuns(ctx context.Context, arg PruneJobRunsParams) (int64, error)
 	PutSetting(ctx context.Context, arg PutSettingParams) error
+	RemoveLibraryEntry(ctx context.Context, arg RemoveLibraryEntryParams) (int64, error)
 	// Running tasks whose lease ran out (the server stopped) go back to the
 	// queue.
 	RequeueExpiredTasks(ctx context.Context) (int64, error)
@@ -82,6 +101,8 @@ type Querier interface {
 	SetPluginConfig(ctx context.Context, arg SetPluginConfigParams) error
 	SetPluginState(ctx context.Context, arg SetPluginStateParams) (Plugin, error)
 	SetSourceEnabled(ctx context.Context, arg SetSourceEnabledParams) (int64, error)
+	SetSourcePriority(ctx context.Context, arg SetSourcePriorityParams) (int64, error)
+	SetSourceSeriesState(ctx context.Context, arg SetSourceSeriesStateParams) (SourceSeries, error)
 	SetTaskProgress(ctx context.Context, arg SetTaskProgressParams) error
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
 	StartTask(ctx context.Context, arg StartTaskParams) (Task, error)
@@ -94,6 +115,11 @@ type Querier interface {
 	UpdatePlugin(ctx context.Context, arg UpdatePluginParams) (Plugin, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpsertSource(ctx context.Context, arg UpsertSourceParams) error
+	// Records a series found for a work. An attached or rejected series keeps
+	// its state when matching finds it again.
+	UpsertSourceSeries(ctx context.Context, arg UpsertSourceSeriesParams) (SourceSeries, error)
+	UpsertWork(ctx context.Context, arg UpsertWorkParams) (UpsertWorkRow, error)
+	UpsertWorkSourceMatch(ctx context.Context, arg UpsertWorkSourceMatchParams) error
 }
 
 var _ Querier = (*Queries)(nil)

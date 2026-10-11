@@ -23,6 +23,7 @@ import (
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/imagecache"
 	"github.com/panelarr/server/internal/jobs"
+	"github.com/panelarr/server/internal/library"
 	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/metrics"
 	"github.com/panelarr/server/internal/plugins"
@@ -115,6 +116,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		Queue:   q,
 		Hub:     hub,
 		Store:   st,
+		Library: library.NewService(st, m, host, q, nil, hub, nil),
 		Checks: []Check{
 			{Name: "database", Required: true, Run: st.Pool.Ping},
 			{Name: "meta", Run: m.ReadyCheck},

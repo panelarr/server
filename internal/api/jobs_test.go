@@ -132,14 +132,23 @@ func TestTasksAPI(t *testing.T) {
 	if len(all.Tasks) != 1 || all.NextPageToken == "" {
 		t.Fatalf("page %+v", all)
 	}
+	demoKind := func(st apigen.QueueState) apigen.QueueKind {
+		for _, k := range st.Kinds {
+			if k.Kind == "demo.task" {
+				return k
+			}
+		}
+		t.Fatalf("no demo.task in %+v", st)
+		return apigen.QueueKind{}
+	}
 	state := call[apigen.QueueState](admin, http.MethodGet, "/api/v1/queue", nil, 200)
-	if len(state.Kinds) != 1 || state.Kinds[0].Failed != 1 {
+	if demoKind(state).Failed != 1 {
 		t.Fatalf("queue %+v", state)
 	}
 
 	// Pausing holds new tasks; retry and cancel work on them.
 	state = call[apigen.QueueState](admin, http.MethodPatch, "/api/v1/queue/kinds/demo.task", map[string]bool{"paused": true}, 200)
-	if !state.Kinds[0].Paused {
+	if !demoKind(state).Paused {
 		t.Fatal("not paused")
 	}
 	admin.expectProblem(http.MethodPatch, "/api/v1/queue/kinds/nope", map[string]bool{"paused": true}, 404, CodeNotFound)
@@ -217,10 +226,13 @@ func TestEventStream(t *testing.T) {
 	}
 	sub := h.hub.Subscribe(eventsViewer(u.Id, false))
 	defer sub.Close()
-	_, _, _ = h.queue.Enqueue(context.Background(), queue.NewTask{Kind: "demo.task"})
+	other, _, _ := h.queue.Enqueue(context.Background(), queue.NewTask{Kind: "demo.task"})
 	time.Sleep(100 * time.Millisecond)
-	if len(sub.C) != 0 {
-		t.Fatalf("user saw someone else's task: %v", (<-sub.C).Type)
+	for len(sub.C) > 0 {
+		e := <-sub.C
+		if qe, ok := e.Data.(queue.Event); ok && qe.ID == other.ID {
+			t.Fatalf("user saw someone else's task: %s", e.Type)
+		}
 	}
 }
 

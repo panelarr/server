@@ -25,6 +25,7 @@ import (
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/imagecache"
 	"github.com/panelarr/server/internal/jobs"
+	"github.com/panelarr/server/internal/library"
 	"github.com/panelarr/server/internal/limits"
 	"github.com/panelarr/server/internal/logging"
 	"github.com/panelarr/server/internal/meta"
@@ -170,6 +171,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	}()
 
 	q := queue.New(st, hub, lim, m, logging.Component(log, "queue"))
+	lib := library.NewService(st, metaSvc, host, q, lim, hub, logging.Component(log, "library"))
 	jm := jobs.NewManager(st, hub, m, logging.Component(log, "jobs"))
 	registerJobs(jm, st, authSvc, host)
 	if err := jm.Start(ctx); err != nil {
@@ -209,6 +211,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		Queue:          q,
 		Hub:            hub,
 		Store:          st,
+		Library:        lib,
 		SecureCookies:  cfg.SecureCookies(),
 		TrustedProxies: cfg.TrustedProxies,
 	})

@@ -347,24 +347,6 @@ func (s *Service) CleanExpired(ctx context.Context) (int64, error) {
 	return s.st.DeleteExpiredSessions(ctx)
 }
 
-// RunCleanup deletes expired sessions every interval until ctx ends.
-func (s *Service) RunCleanup(ctx context.Context, interval time.Duration) {
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			if n, err := s.CleanExpired(ctx); err != nil {
-				s.log.WarnContext(ctx, "clean expired sessions", "err", err)
-			} else if n > 0 {
-				s.log.DebugContext(ctx, "expired sessions removed", "count", n)
-			}
-		}
-	}
-}
-
 func (s *Service) audit(ctx context.Context, msg string, args ...any) {
 	s.log.InfoContext(ctx, msg, append([]any{"component", "audit"}, args...)...)
 }

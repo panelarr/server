@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,13 +16,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/panelarr/server/internal/api/apigen"
 	"github.com/panelarr/server/internal/auth"
+	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/imagecache"
+	"github.com/panelarr/server/internal/jobs"
 	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/metrics"
 	"github.com/panelarr/server/internal/plugins"
+	"github.com/panelarr/server/internal/queue"
 	"github.com/panelarr/server/internal/secret"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/store/storetest"
@@ -38,7 +43,12 @@ type harness struct {
 	users   *users.Service
 	meta    *meta.Service
 	metrics *metrics.Metrics
+	queue   *queue.Queue
+	jobs    *jobs.Manager
+	hub     *events.Hub
 	srv     *httptest.Server
+	// release lets the demo job finish.
+	release chan struct{}
 }
 
 type harnessOpt func(*Deps)
@@ -57,6 +67,42 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	box := secret.NewBox("", filepath.Join(t.TempDir(), "secret.key"))
 	m := meta.NewService(st, box, meta.Conn{}, nil)
 	host := plugins.NewHost(st, box, plugins.RemoteDialer, nil)
+	hub := events.NewHub()
+	q := queue.New(st, hub, nil, nil, nil)
+	q.Poll = 20 * time.Millisecond
+	q.Backoff = func(int32) time.Duration { return time.Hour }
+	q.Register("demo.task", queue.Kind{MaxAttempts: 1, Handler: func(_ context.Context, task *queue.Task) (any, error) {
+		var p struct {
+			Fail bool `json:"fail"`
+		}
+		_ = task.Decode(&p)
+		if p.Fail {
+			return nil, errors.New("demo failure")
+		}
+		return nil, nil
+	}})
+	jm := jobs.NewManager(st, hub, nil, nil)
+	release := make(chan struct{})
+	jm.Register(jobs.Definition{
+		ID: "demo.job", Name: "Demo", Group: "Tests", Cancellable: true,
+		Params: []jobs.Param{{Name: "level", Type: jobs.ParamInt, Default: "1"}},
+		Run: func(ctx context.Context, r *jobs.Run) error {
+			r.Count("seen", 1)
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
+	})
+	runCtx, stop := context.WithCancel(context.Background())
+	if err := jm.Start(runCtx); err != nil {
+		t.Fatal(err)
+	}
+	qDone := make(chan struct{})
+	go func() { defer close(qDone); _ = q.Run(runCtx) }()
+	t.Cleanup(func() { stop(); <-qDone; jm.Wait() })
 	deps := Deps{
 		Log:     slog.New(slog.DiscardHandler),
 		Auth:    a,
@@ -65,6 +111,10 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		Images:  imagecache.New(t.TempDir()),
 		Plugins: host,
 		Signer:  imagecache.NewSigner([]byte("test signing key")),
+		Jobs:    jm,
+		Queue:   q,
+		Hub:     hub,
+		Store:   st,
 		Checks: []Check{
 			{Name: "database", Required: true, Run: st.Pool.Ping},
 			{Name: "meta", Run: m.ReadyCheck},
@@ -83,7 +133,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	}
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &harness{t: t, st: st, auth: a, users: u, meta: m, metrics: deps.Metrics, srv: srv}
+	return &harness{t: t, st: st, auth: a, users: u, meta: m, metrics: deps.Metrics, queue: q, jobs: jm, hub: hub, srv: srv, release: release}
 }
 
 // client is an API client that keeps cookies, sends the CSRF token it was

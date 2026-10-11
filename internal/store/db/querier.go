@@ -6,16 +6,22 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 type Querier interface {
+	CancelQueuedTask(ctx context.Context, id uuid.UUID) (Task, error)
+	// Due tasks of the given kinds, best first, locked for this transaction;
+	// the caller picks the ones its limits allow and marks them running.
+	ClaimCandidates(ctx context.Context, arg ClaimCandidatesParams) ([]Task, error)
 	CountEnabledAdmins(ctx context.Context) (int64, error)
 	CountSourcesByPlugin(ctx context.Context) ([]CountSourcesByPluginRow, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
 	CreateInvite(ctx context.Context, arg CreateInviteParams) (Invite, error)
+	CreateJobRun(ctx context.Context, arg CreateJobRunParams) (JobRun, error)
 	CreatePlugin(ctx context.Context, arg CreatePluginParams) (Plugin, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
@@ -29,36 +35,62 @@ type Querier interface {
 	DeleteUserSession(ctx context.Context, arg DeleteUserSessionParams) (int64, error)
 	DeleteUserSessions(ctx context.Context, userID uuid.UUID) error
 	DeleteUserSessionsExcept(ctx context.Context, arg DeleteUserSessionsExceptParams) error
+	ExtendTaskLease(ctx context.Context, arg ExtendTaskLeaseParams) error
+	FailInterruptedJobRuns(ctx context.Context) (int64, error)
+	FinishJobRun(ctx context.Context, arg FinishJobRunParams) (JobRun, error)
+	FinishTask(ctx context.Context, arg FinishTaskParams) (Task, error)
 	GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKeyByHashRow, error)
+	GetJobRun(ctx context.Context, id uuid.UUID) (JobRun, error)
+	GetLiveTaskByDedupeKey(ctx context.Context, dedupeKey string) (Task, error)
 	GetOpenInviteByTokenHash(ctx context.Context, tokenHash []byte) (Invite, error)
 	GetOpenInviteByTokenHashForUpdate(ctx context.Context, tokenHash []byte) (Invite, error)
 	GetPlugin(ctx context.Context, id string) (Plugin, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionByTokenHashRow, error)
 	GetSetting(ctx context.Context, key string) ([]byte, error)
 	GetSource(ctx context.Context, id string) (GetSourceRow, error)
+	GetTask(ctx context.Context, id uuid.UUID) (Task, error)
 	GetUser(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
 	GetUserForUpdate(ctx context.Context, id uuid.UUID) (User, error)
+	// Returns no row when a live task with the same dedupe key exists.
+	InsertTask(ctx context.Context, arg InsertTaskParams) (Task, error)
+	LastJobRuns(ctx context.Context) ([]JobRun, error)
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ApiKey, error)
+	ListJobRuns(ctx context.Context, arg ListJobRunsParams) ([]JobRun, error)
 	ListOpenInvites(ctx context.Context) ([]Invite, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]Session, error)
 	ListSettings(ctx context.Context) ([]Setting, error)
 	ListSources(ctx context.Context) ([]ListSourcesRow, error)
+	ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
 	// Serialises changes that check "is there another admin?" or "is this the
 	// first account?" within one transaction.
 	LockAccounts(ctx context.Context) error
 	MarkInviteUsed(ctx context.Context, arg MarkInviteUsedParams) error
 	MarkSourcesAbsent(ctx context.Context, arg MarkSourcesAbsentParams) error
+	PruneFinishedTasks(ctx context.Context, before *time.Time) (int64, error)
+	PruneJobRuns(ctx context.Context, arg PruneJobRunsParams) (int64, error)
 	PutSetting(ctx context.Context, arg PutSettingParams) error
+	// Running tasks whose lease ran out (the server stopped) go back to the
+	// queue.
+	RequeueExpiredTasks(ctx context.Context) (int64, error)
+	// Retry by hand: a failed or cancelled task runs again with fresh attempts.
+	RequeueTask(ctx context.Context, id uuid.UUID) (Task, error)
+	RetryTaskLater(ctx context.Context, arg RetryTaskLaterParams) (Task, error)
+	SetJobRunProgress(ctx context.Context, arg SetJobRunProgressParams) error
 	SetPluginConfig(ctx context.Context, arg SetPluginConfigParams) error
 	SetPluginState(ctx context.Context, arg SetPluginStateParams) (Plugin, error)
 	SetSourceEnabled(ctx context.Context, arg SetSourceEnabledParams) (int64, error)
+	SetTaskProgress(ctx context.Context, arg SetTaskProgressParams) error
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
+	StartTask(ctx context.Context, arg StartTaskParams) (Task, error)
+	TaskStats(ctx context.Context) ([]TaskStatsRow, error)
 	TouchAPIKey(ctx context.Context, id uuid.UUID) error
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	TouchUserLogin(ctx context.Context, id uuid.UUID) error
+	// Back to the queue without counting the attempt (the server stopped).
+	UnclaimTask(ctx context.Context, id uuid.UUID) (Task, error)
 	UpdatePlugin(ctx context.Context, arg UpdatePluginParams) (Plugin, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpsertSource(ctx context.Context, arg UpsertSourceParams) error

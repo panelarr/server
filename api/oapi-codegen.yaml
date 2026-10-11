@@ -9,6 +9,9 @@ generate:
   embedded-spec: true
 output-options:
   nullable-type: false
+  # The event stream flushes each event as it happens, which the generated
+  # strict handlers can't do; it is served by hand (internal/api/events.go).
+  exclude-operation-ids: [streamEvents]
 compatibility:
   # Enum constants carry their type name (ContentRatingSafe, RoleAdmin), so
   # values shared by several enums never collide.

@@ -30,6 +30,7 @@ import (
 	"github.com/panelarr/source-api/sdk/client"
 	"github.com/panelarr/source-api/sdk/plugin"
 
+	"github.com/panelarr/server/internal/limits"
 	"github.com/panelarr/server/internal/secret"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/store/db"
@@ -79,6 +80,24 @@ type Host struct {
 
 	mu      sync.RWMutex
 	clients map[string]client.Client
+	limits  *limits.Registry
+}
+
+// SetLimits makes the host keep each source's limits (from its plugin's
+// declared limits) in reg.
+func (h *Host) SetLimits(reg *limits.Registry) { h.limits = reg }
+
+// sourceLimit turns a plugin's declared limits into a source's cap.
+func sourceLimit(info *sourcev1.PluginInfo) limits.Limit {
+	l := limits.Default
+	if c := info.GetLimits().GetMaxConcurrencyPerSource(); c > 0 {
+		l.Concurrency = int(c)
+	}
+	if rl := info.GetLimits().GetDefaultRateLimit(); rl.GetRequests() > 0 && rl.GetPeriod().AsDuration() > 0 {
+		l.Every = rl.GetPeriod().AsDuration() / time.Duration(rl.GetRequests())
+		l.Burst = max(int(rl.GetBurst()), 1)
+	}
+	return l
 }
 
 // NewHost returns a host that reaches plugins with dial.
@@ -406,6 +425,12 @@ func (h *Host) Sync(ctx context.Context, id string) (Plugin, error) {
 	if err != nil {
 		return Plugin{}, err
 	}
+	if h.limits != nil {
+		l := sourceLimit(info)
+		for _, s := range res.GetSources() {
+			h.limits.Set("source:"+id+":"+s.GetId(), l)
+		}
+	}
 	return h.saveState(ctx, cur, state)
 }
 
@@ -478,29 +503,27 @@ func enumName(s, prefix string) string {
 	return s
 }
 
-// RunRefresh syncs every enabled plugin every interval until ctx ends.
-func (h *Host) RunRefresh(ctx context.Context, interval time.Duration) {
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			rows, err := h.st.ListPlugins(ctx)
-			if err != nil {
-				h.log.WarnContext(ctx, "list plugins", "err", err)
-				continue
-			}
-			for _, p := range rows {
-				if p.Enabled {
-					if _, err := h.Sync(ctx, p.ID); err != nil {
-						h.log.WarnContext(ctx, "plugin sync", "plugin", p.ID, "err", err)
-					}
-				}
-			}
+// SyncAll syncs every enabled plugin and reports how many are ok and down.
+func (h *Host) SyncAll(ctx context.Context) (ok, down int, err error) {
+	rows, err := h.st.ListPlugins(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, p := range rows {
+		if !p.Enabled {
+			continue
+		}
+		synced, err := h.Sync(ctx, p.ID)
+		if err != nil {
+			return ok, down, err
+		}
+		if synced.Health == "down" {
+			down++
+		} else {
+			ok++
 		}
 	}
+	return ok, down, nil
 }
 
 // Config is a plugin's configuration: its schema and current values.

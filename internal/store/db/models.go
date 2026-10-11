@@ -35,6 +35,21 @@ type Invite struct {
 	UsedBy    uuid.NullUUID
 }
 
+type JobRun struct {
+	ID          uuid.UUID
+	JobID       string
+	Status      string
+	Trigger     string
+	TriggeredBy string
+	Params      []byte
+	Message     string
+	Counts      []byte
+	Notes       []byte
+	Progress    []byte
+	StartedAt   time.Time
+	FinishedAt  *time.Time
+}
+
 type Plugin struct {
 	ID            string
 	Url           string
@@ -85,6 +100,28 @@ type Source struct {
 	Present         bool
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+type Task struct {
+	ID          uuid.UUID
+	Kind        string
+	Payload     []byte
+	DedupeKey   string
+	LimitKey    string
+	Priority    int32
+	State       string
+	Attempts    int32
+	MaxAttempts int32
+	RunAfter    time.Time
+	LeaseUntil  *time.Time
+	LastError   string
+	Progress    []byte
+	Result      []byte
+	CreatedBy   uuid.NullUUID
+	CreatedAt   time.Time
+	StartedAt   *time.Time
+	FinishedAt  *time.Time
+	UpdatedAt   time.Time
 }
 
 type User struct {

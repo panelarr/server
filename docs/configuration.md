@@ -48,6 +48,15 @@ Sources come from plugins that run as their own services. An admin adds a plugin
 
 Each source's ID is `<plugin>:<source>`. Admins turn sources on or off for everyone; each user's grants (allowed sources, content-rating ceiling) decide which they see. Mixed-content sources count as "suggestive", adult-only sources as "pornographic". Images from sources (covers, icons) are fetched through the plugin and cached by the server; their links are signed, so the server never fetches an address a caller made up.
 
+## Background work
+
+Two kinds of background work show in the admin:
+
+- **Jobs** are named and run on a schedule or by hand, one run at a time: `plugins.sync` (every 5 minutes), `sessions.cleanup` (hourly), `tasks.prune` (every 6 hours; finished tasks are kept a week, failed ones until retried). Each job keeps its last 100 runs with their outcome, counts and notes. A run left running when the server stopped is marked failed ("interrupted").
+- **Tasks** are single pieces of work queued by features (matching a work, checking it for updates, downloading a chapter). They retry with growing waits (30 seconds up to an hour), respect a source's "retry after" hint, and fail after their kind's attempts. The same work is never queued twice. At most 8 tasks run at once, each kind has its own cap, and each source caps how many of its tasks run at once and how fast they call it, across all users (from the plugin's declared limits, else 2 at once and 2 requests a second). Admins pause and resume kinds, cancel and retry tasks. Tasks interrupted by a restart go back to the queue.
+
+Live changes reach clients over `GET /api/v1/events` (server-sent events), filtered per user.
+
 ## Accounts
 
 The first account created (through the first-run wizard) is the admin. Admins add users with a password or send invite links, and set each user's role and grants. Passwords are hashed with argon2id. Failed logins are limited per username (5 per 15 minutes) and per client address (30 per 15 minutes).

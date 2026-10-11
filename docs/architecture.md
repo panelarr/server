@@ -15,6 +15,10 @@ internal/meta/metatest/  a fake metadata service for tests
 internal/imagecache/     fetched images (covers) cached on disk; signed image links
 internal/plugins/        source plugins: registration, sync, config, visibility, browsing
 internal/plugins/pluginstest/  serves made-up plugins over gRPC for tests
+internal/queue/          the task queue (claim, lease, retry, caps, cancel, pause)
+internal/jobs/           named background jobs and their runs
+internal/limits/         per-source concurrency and rate limits
+internal/events/         the event hub behind the event stream
 internal/config/         startup settings from env and flags
 internal/logging/        structured logs
 internal/metrics/        Prometheus collectors (bounded labels)

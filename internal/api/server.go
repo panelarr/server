@@ -15,10 +15,14 @@ import (
 
 	"github.com/panelarr/server/internal/api/apigen"
 	"github.com/panelarr/server/internal/auth"
+	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/imagecache"
+	"github.com/panelarr/server/internal/jobs"
 	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/metrics"
 	"github.com/panelarr/server/internal/plugins"
+	"github.com/panelarr/server/internal/queue"
+	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/users"
 )
 
@@ -42,6 +46,11 @@ type Deps struct {
 	Plugins *plugins.Host
 	// Signer signs image links the server hands out.
 	Signer *imagecache.Signer
+	Jobs   *jobs.Manager
+	Queue  *queue.Queue
+	Hub    *events.Hub
+	// Store answers list queries that need no service logic.
+	Store *store.Store
 
 	// SecureCookies marks session cookies Secure (https deployments).
 	SecureCookies bool
@@ -66,7 +75,8 @@ func NewHandler(deps Deps) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	if deps.Auth == nil || deps.Users == nil || deps.Meta == nil || deps.Images == nil || deps.Plugins == nil || deps.Signer == nil {
+	if deps.Auth == nil || deps.Users == nil || deps.Meta == nil || deps.Images == nil || deps.Plugins == nil || deps.Signer == nil ||
+		deps.Jobs == nil || deps.Queue == nil || deps.Hub == nil || deps.Store == nil {
 		return nil, fmt.Errorf("api: every service dependency is required")
 	}
 	s := &Server{deps: deps, policies: pols}
@@ -90,6 +100,7 @@ func NewHandler(deps Deps) (http.Handler, error) {
 				writeProblem(w, r, NewProblem(http.StatusMethodNotAllowed, CodeMethodNotAllowed, r.Method+" is not allowed here"))
 			})
 			r.Get("/openapi.json", serveSpec)
+			r.Get("/events", s.streamEvents)
 			strict := apigen.NewStrictHandlerWithOptions(s, nil, apigen.StrictHTTPServerOptions{
 				RequestErrorHandlerFunc:  writeBadRequest,
 				ResponseErrorHandlerFunc: writeError(deps.Log),

@@ -70,6 +70,10 @@ tags:
     description: Source plugins (admins).
   - name: sources
     description: Browsing sources through their plugins.
+  - name: jobs
+    description: Named background jobs and their runs (admins).
+  - name: tasks
+    description: The task queue (admins).
 
 paths:
   /system/info:
@@ -1105,6 +1109,281 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /jobs:
+    get:
+      operationId: listJobs
+      tags: [jobs]
+      summary: Background jobs
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: Every job with its schedule and last run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /jobs/{job_id}:
+    get:
+      operationId: getJob
+      tags: [jobs]
+      summary: One job
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: The job.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /jobs/{job_id}/runs:
+    get:
+      operationId: listJobRuns
+      tags: [jobs]
+      summary: A job's runs, newest first
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/PageToken"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/JobRunStatus"
+      responses:
+        "200":
+          description: Runs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRunList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /jobs/{job_id}/run:
+    post:
+      operationId: runJob
+      tags: [jobs]
+      summary: Run a job now
+      description: A job that is running answers `409`, code `already_running`, with the running run's ID in the detail. Parameters the job doesn't know, or that don't fit, answer `400`.
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunJobRequest"
+      responses:
+        "202":
+          description: Started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRunSummary"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /job-runs/{run_id}:
+    get:
+      operationId: getJobRun
+      tags: [jobs]
+      summary: One run in full
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRun"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /job-runs/{run_id}/cancel:
+    post:
+      operationId: cancelJobRun
+      tags: [jobs]
+      summary: Cancel a running run
+      description: "`409` with code `not_running` for a finished run, `not_cancellable` for jobs that can't stop midway."
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "202":
+          description: Cancelling.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRunSummary"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /tasks:
+    get:
+      operationId: listTasks
+      tags: [tasks]
+      summary: Queued, running and recent tasks
+      x-panelarr-access: admin
+      parameters:
+        - name: kind
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: state
+          in: query
+          schema:
+            $ref: "#/components/schemas/TaskState"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/PageToken"
+      responses:
+        "200":
+          description: Tasks, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /tasks/{task_id}:
+    get:
+      operationId: getTask
+      tags: [tasks]
+      summary: One task
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: The task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /tasks/{task_id}/cancel:
+    post:
+      operationId: cancelTask
+      tags: [tasks]
+      summary: Cancel a queued or running task
+      description: "`409`, code `task_finished`, when it already ended."
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: The task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /tasks/{task_id}/retry:
+    post:
+      operationId: retryTask
+      tags: [tasks]
+      summary: Run a failed or cancelled task again
+      description: "`409`, code `not_retryable`, for other states or when the same work is queued already."
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: The task, queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /queue:
+    get:
+      operationId: getQueue
+      tags: [tasks]
+      summary: The task queue per kind
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: Each kind's counts and state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueState"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /queue/kinds/{kind}:
+    patch:
+      operationId: updateQueueKind
+      tags: [tasks]
+      summary: Pause or resume a kind of task
+      description: Queued tasks of a paused kind wait; running ones finish.
+      x-panelarr-access: admin
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 100
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateQueueKindRequest"
+      responses:
+        "200":
+          description: The queue.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueState"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /events:
+    get:
+      operationId: streamEvents
+      tags: [system]
+      summary: Live events (server-sent events)
+      description: |
+        A `text/event-stream` of what changes, filtered to what the caller
+        may see: `task.queued`, `task.started`, `task.progress`,
+        `task.updated` (admins and the task's requester), `job.started`,
+        `job.progress`, `job.done`, `job.failed` (admins), and more as
+        features arrive (`work.updated`, `chapter.downloaded`, …). Each
+        event's `data` is JSON. The stream opens with a `ready` event and
+        sends a comment every 25 seconds to keep proxies from closing it.
+        Events aren't replayed: after reconnecting, refetch what you show.
+      x-panelarr-access: user
+      responses:
+        "200":
+          description: The event stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -1123,6 +1402,28 @@ components:
       description: A personal API key as a bearer token.
 
   parameters:
+    JobId:
+      name: job_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9._-]*$"
+        maxLength: 100
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     PluginId:
       name: plugin_id
       in: path
@@ -1276,6 +1577,259 @@ components:
             $ref: "#/components/schemas/Problem"
 
   schemas:
+    JobParam:
+      type: object
+      required: [name, type, required]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [bool, int, string, string_list]
+        description:
+          type: string
+        required:
+          type: boolean
+        default:
+          type: string
+        choices:
+          type: array
+          items:
+            type: string
+    JobSchedule:
+      type: object
+      required: [enabled]
+      properties:
+        interval_seconds:
+          type: integer
+          description: Absent for jobs run by hand only.
+        enabled:
+          type: boolean
+        source:
+          type: string
+          description: Where the schedule is configured (read-only here).
+    JobRunStatus:
+      type: string
+      enum: [running, succeeded, failed, cancelled, skipped]
+    JobRunSummary:
+      type: object
+      required: [id, job_id, status, trigger, started_at, message, counts]
+      properties:
+        id:
+          type: string
+          format: uuid
+        job_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/JobRunStatus"
+        trigger:
+          type: string
+          enum: [schedule, manual, startup, system]
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        message:
+          type: string
+        counts:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        triggered_by:
+          type: string
+    JobRunNote:
+      type: object
+      required: [at, level, message]
+      properties:
+        at:
+          type: string
+          format: date-time
+        level:
+          type: string
+        message:
+          type: string
+        ref:
+          type: string
+    JobProgress:
+      type: object
+      required: [done]
+      properties:
+        phase:
+          type: string
+        done:
+          type: integer
+          format: int64
+        total:
+          type: integer
+          format: int64
+        unit:
+          type: string
+    JobRun:
+      type: object
+      required: [summary, params, notes]
+      properties:
+        summary:
+          $ref: "#/components/schemas/JobRunSummary"
+        params:
+          type: object
+          additionalProperties:
+            type: string
+        notes:
+          type: array
+          items:
+            $ref: "#/components/schemas/JobRunNote"
+        progress:
+          $ref: "#/components/schemas/JobProgress"
+    JobRunList:
+      type: object
+      required: [runs, next_page_token]
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/JobRunSummary"
+        next_page_token:
+          type: string
+    Job:
+      type: object
+      required: [id, name, description, group, schedule, running, cancellable, params]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        group:
+          type: string
+        schedule:
+          $ref: "#/components/schemas/JobSchedule"
+        running:
+          type: boolean
+        current_run_id:
+          type: string
+          format: uuid
+        last_run:
+          $ref: "#/components/schemas/JobRunSummary"
+        next_run_at:
+          type: string
+          format: date-time
+        cancellable:
+          type: boolean
+        params:
+          type: array
+          items:
+            $ref: "#/components/schemas/JobParam"
+    JobList:
+      type: object
+      required: [jobs]
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Job"
+    RunJobRequest:
+      type: object
+      properties:
+        params:
+          type: object
+          additionalProperties:
+            type: string
+            maxLength: 1000
+
+    TaskState:
+      type: string
+      enum: [queued, running, succeeded, failed, cancelled]
+    Task:
+      type: object
+      required: [id, kind, state, priority, attempts, max_attempts, run_after, payload, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          description: e.g. match.work, update.work, download.chapter.
+        state:
+          $ref: "#/components/schemas/TaskState"
+        priority:
+          type: integer
+        attempts:
+          type: integer
+        max_attempts:
+          type: integer
+        run_after:
+          type: string
+          format: date-time
+          description: When a queued task may run next (retries wait).
+        last_error:
+          type: string
+        progress:
+          $ref: "#/components/schemas/JobProgress"
+        limit_key:
+          type: string
+          description: The limit it counts against, e.g. "source:fake:1001".
+        payload:
+          type: object
+          additionalProperties: true
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+    TaskList:
+      type: object
+      required: [tasks, next_page_token]
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+        next_page_token:
+          type: string
+    QueueKind:
+      type: object
+      required: [kind, paused, running, concurrency, queued, failed]
+      properties:
+        kind:
+          type: string
+        paused:
+          type: boolean
+        running:
+          type: integer
+        concurrency:
+          type: integer
+        queued:
+          type: integer
+          format: int64
+        failed:
+          type: integer
+          format: int64
+    QueueState:
+      type: object
+      required: [kinds]
+      properties:
+        kinds:
+          type: array
+          items:
+            $ref: "#/components/schemas/QueueKind"
+    UpdateQueueKindRequest:
+      type: object
+      required: [paused]
+      properties:
+        paused:
+          type: boolean
+
     RateLimit:
       type: object
       required: [requests, period_seconds]

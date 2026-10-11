@@ -22,11 +22,15 @@ import (
 	"github.com/panelarr/server/internal/auth"
 	"github.com/panelarr/server/internal/buildinfo"
 	"github.com/panelarr/server/internal/config"
+	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/imagecache"
+	"github.com/panelarr/server/internal/jobs"
+	"github.com/panelarr/server/internal/limits"
 	"github.com/panelarr/server/internal/logging"
 	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/metrics"
 	"github.com/panelarr/server/internal/plugins"
+	"github.com/panelarr/server/internal/queue"
 	"github.com/panelarr/server/internal/secret"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/users"
@@ -112,6 +116,9 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		return err
 	}
 	log := logging.New(cfg.Log, stdout)
+	// Background work stops with ctx, or when serving fails.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	log.Info("starting", "version", buildinfo.Version, "listen", cfg.Listen, "config_dir", cfg.ConfigDir, "data_dir", cfg.DataDir)
 
 	for _, dir := range []string{cfg.ConfigDir, cfg.DataDir} {
@@ -139,7 +146,8 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	}
 	authSvc := auth.NewService(st, auth.NewHasher(auth.DefaultArgon2, 4), logging.Component(log, "auth"))
 	usersSvc := users.NewService(st, authSvc, logging.Component(log, "users"))
-	go authSvc.RunCleanup(ctx, time.Hour)
+	hub := events.NewHub()
+	lim := limits.NewRegistry()
 
 	box := secret.NewBox(cfg.SecretKey, filepath.Join(cfg.ConfigDir, "secret.key"))
 	metaSvc := meta.NewService(st, box, meta.Conn{URL: cfg.MetaURL, APIKey: cfg.MetaAPIKey}, logging.Component(log, "meta"))
@@ -153,12 +161,31 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		return err
 	}
 	host := plugins.NewHost(st, box, plugins.RemoteDialer, logging.Component(log, "plugins"))
+	host.SetLimits(lim)
 	// Connecting to plugins can take a while; the API serves meanwhile.
 	go func() {
 		if err := host.Load(ctx); err != nil {
 			log.Error("load plugins", "component", "plugins", "err", err)
 		}
-		host.RunRefresh(ctx, 5*time.Minute)
+	}()
+
+	q := queue.New(st, hub, lim, m, logging.Component(log, "queue"))
+	jm := jobs.NewManager(st, hub, m, logging.Component(log, "jobs"))
+	registerJobs(jm, st, authSvc, host)
+	if err := jm.Start(ctx); err != nil {
+		return err
+	}
+	queueDone := make(chan struct{})
+	go func() {
+		defer close(queueDone)
+		if err := q.Run(ctx); err != nil {
+			log.Error("task queue", "component", "queue", "err", err)
+		}
+	}()
+	defer func() {
+		cancel()
+		<-queueDone
+		jm.Wait()
 	}()
 
 	handler, err := api.NewHandler(api.Deps{
@@ -178,6 +205,10 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		Images:         images,
 		Plugins:        host,
 		Signer:         signer,
+		Jobs:           jm,
+		Queue:          q,
+		Hub:            hub,
+		Store:          st,
 		SecureCookies:  cfg.SecureCookies(),
 		TrustedProxies: cfg.TrustedProxies,
 	})

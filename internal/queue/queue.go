@@ -253,6 +253,16 @@ func (q *Queue) EnqueueWith(ctx context.Context, dbq *db.Queries, n NewTask) (db
 		MaxAttempts: int32(k.MaxAttempts), RunAfter: runAfter, CreatedBy: createdBy, //nolint:gosec // small
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
+		// The same work is queued or running: asking again brings a queued
+		// one forward.
+		hurried, herr := dbq.HurryTask(ctx, db.HurryTaskParams{DedupeKey: n.DedupeKey, RunAfter: runAfter, Priority: n.Priority})
+		if herr == nil {
+			q.poke()
+			return hurried, false, nil
+		}
+		if !errors.Is(herr, pgx.ErrNoRows) {
+			return db.Task{}, false, herr
+		}
 		live, err := dbq.GetLiveTaskByDedupeKey(ctx, n.DedupeKey)
 		return live, false, err
 	}

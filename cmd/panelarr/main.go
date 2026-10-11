@@ -33,6 +33,7 @@ import (
 	"github.com/panelarr/server/internal/metrics"
 	"github.com/panelarr/server/internal/plugins"
 	"github.com/panelarr/server/internal/queue"
+	"github.com/panelarr/server/internal/reader"
 	"github.com/panelarr/server/internal/secret"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/users"
@@ -105,8 +106,8 @@ func loadConfig(name string, args []string, stderr io.Writer, getenv func(string
 }
 
 // serve runs the server until ctx is cancelled. ready, when not nil,
-// receives the API's address once it listens (for tests).
-func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string, ready chan<- string) error {
+// receives the listeners' addresses (API first) once they listen (tests).
+func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string, ready chan<- []string) error {
 	cfg, rest, err := loadConfig("serve", args, stderr, getenv)
 	if err != nil {
 		return err
@@ -175,6 +176,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	lib := library.NewService(st, metaSvc, host, q, lim, hub, logging.Component(log, "library"))
 	chs := chapters.NewService(st, host, q, lim, hub, logging.Component(log, "chapters"))
 	lib.SetChapterHooks(chs)
+	rdr := reader.NewService(st, host, lib, chs, lim, hub, logging.Component(log, "reader"))
 	jm := jobs.NewManager(st, hub, m, logging.Component(log, "jobs"))
 	registerJobs(jm, st, authSvc, host, lib, chs)
 	if err := jm.Start(ctx); err != nil {
@@ -216,6 +218,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		Store:          st,
 		Library:        lib,
 		Chapters:       chs,
+		Reader:         rdr,
 		SecureCookies:  cfg.SecureCookies(),
 		TrustedProxies: cfg.TrustedProxies,
 	})
@@ -249,7 +252,7 @@ func newHTTPServer(h http.Handler) *http.Server {
 
 // runServers listens on every address, serves until ctx ends or a server
 // fails, then shuts all of them down gracefully.
-func runServers(ctx context.Context, log *slog.Logger, servers []*namedServer, ready chan<- string) error {
+func runServers(ctx context.Context, log *slog.Logger, servers []*namedServer, ready chan<- []string) error {
 	var lc net.ListenConfig
 	listeners := make([]net.Listener, 0, len(servers))
 	for _, s := range servers {
@@ -272,7 +275,11 @@ func runServers(ctx context.Context, log *slog.Logger, servers []*namedServer, r
 		}()
 	}
 	if ready != nil {
-		ready <- listeners[0].Addr().String()
+		addrs := make([]string, len(listeners))
+		for i, l := range listeners {
+			addrs[i] = l.Addr().String()
+		}
+		ready <- addrs
 	}
 
 	var err error

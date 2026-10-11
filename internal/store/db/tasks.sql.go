@@ -223,6 +223,47 @@ func (q *Queries) GetTask(ctx context.Context, id uuid.UUID) (Task, error) {
 	return i, err
 }
 
+const hurryTask = `-- name: HurryTask :one
+UPDATE tasks SET run_after = least(run_after, $1), priority = greatest(priority, $2), updated_at = now()
+WHERE dedupe_key = $3 AND state = 'queued'
+RETURNING id, kind, payload, dedupe_key, limit_key, priority, state, attempts, max_attempts, run_after, lease_until, last_error, progress, result, created_by, created_at, started_at, finished_at, updated_at
+`
+
+type HurryTaskParams struct {
+	RunAfter  time.Time
+	Priority  int32
+	DedupeKey string
+}
+
+// Asking again for queued work brings it forward (e.g. a refresh while a
+// retry waits out its back-off).
+func (q *Queries) HurryTask(ctx context.Context, arg HurryTaskParams) (Task, error) {
+	row := q.db.QueryRow(ctx, hurryTask, arg.RunAfter, arg.Priority, arg.DedupeKey)
+	var i Task
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.Payload,
+		&i.DedupeKey,
+		&i.LimitKey,
+		&i.Priority,
+		&i.State,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.RunAfter,
+		&i.LeaseUntil,
+		&i.LastError,
+		&i.Progress,
+		&i.Result,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const insertTask = `-- name: InsertTask :one
 INSERT INTO tasks (kind, payload, dedupe_key, limit_key, priority, max_attempts, run_after, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

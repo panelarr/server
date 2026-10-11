@@ -34,16 +34,6 @@ func TestServeNeedsDatabase(t *testing.T) {
 	}
 }
 
-func freeAddr(t *testing.T) string {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	return ln.Addr().String()
-}
-
 func get(t *testing.T, url string) (int, string) {
 	t.Helper()
 	res, err := http.Get(url) //nolint:noctx // test helper
@@ -57,24 +47,24 @@ func get(t *testing.T, url string) (int, string) {
 
 func TestServeEndToEnd(t *testing.T) {
 	dir := t.TempDir()
-	metricsAddr := freeAddr(t)
 	e := env(map[string]string{
 		config.EnvDatabaseURL:    storetest.URL(t),
 		config.EnvConfigDir:      dir + "/config",
 		config.EnvDataDir:        dir + "/data",
 		config.EnvMetricsEnabled: "true",
-		config.EnvMetricsListen:  metricsAddr,
+		config.EnvMetricsListen:  "127.0.0.1:0",
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ready := make(chan string, 1)
+	ready := make(chan []string, 1)
 	done := make(chan error, 1)
 	var logs bytes.Buffer
 	go func() { done <- serve(ctx, []string{"--listen", "127.0.0.1:0"}, &logs, io.Discard, e, ready) }()
 
-	var addr string
+	var addr, metricsAddr string
 	select {
-	case addr = <-ready:
+	case addrs := <-ready:
+		addr, metricsAddr = addrs[0], addrs[1]
 	case err := <-done:
 		t.Fatalf("serve stopped: %v\n%s", err, logs.String())
 	case <-time.After(60 * time.Second):

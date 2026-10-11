@@ -84,3 +84,10 @@ UPDATE tasks SET state = 'queued', attempts = greatest(attempts - 1, 0), run_aft
     lease_until = NULL, progress = NULL, last_error = 'interrupted', updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: HurryTask :one
+-- Asking again for queued work brings it forward (e.g. a refresh while a
+-- retry waits out its back-off).
+UPDATE tasks SET run_after = least(run_after, @run_after), priority = greatest(priority, @priority), updated_at = now()
+WHERE dedupe_key = @dedupe_key AND state = 'queued'
+RETURNING *;

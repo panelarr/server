@@ -327,3 +327,20 @@ func TestExpiredLeasesRequeued(t *testing.T) {
 	f.start(t)
 	waitState(t, f.st, task.ID, queue.StateSucceeded)
 }
+
+func TestEnqueueAgainHurries(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.q.Register("demo.ok", queue.Kind{Handler: func(context.Context, *queue.Task) (any, error) { return nil, nil }})
+	ctx := context.Background()
+	later, _, err := f.q.Enqueue(ctx, queue.NewTask{Kind: "demo.ok", DedupeKey: "k", RunAfter: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, created, err := f.q.Enqueue(ctx, queue.NewTask{Kind: "demo.ok", DedupeKey: "k", Priority: 7})
+	if err != nil || created || again.ID != later.ID || again.Priority != 7 || again.RunAfter.After(time.Now()) {
+		t.Fatalf("hurried: %v %v %+v", err, created, again)
+	}
+	f.start(t)
+	waitState(t, f.st, later.ID, queue.StateSucceeded)
+}

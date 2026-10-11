@@ -38,6 +38,8 @@ type Querier interface {
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	DeleteInvite(ctx context.Context, id uuid.UUID) (int64, error)
 	DeletePlugin(ctx context.Context, id string) (int64, error)
+	DeleteProgress(ctx context.Context, arg DeleteProgressParams) error
+	DeleteReaderSettings(ctx context.Context, arg DeleteReaderSettingsParams) (int64, error)
 	DeleteSession(ctx context.Context, id uuid.UUID) error
 	DeleteSetting(ctx context.Context, key string) error
 	DeleteUser(ctx context.Context, id uuid.UUID) (int64, error)
@@ -63,6 +65,8 @@ type Querier interface {
 	GetOpenInviteByTokenHash(ctx context.Context, tokenHash []byte) (Invite, error)
 	GetOpenInviteByTokenHashForUpdate(ctx context.Context, tokenHash []byte) (Invite, error)
 	GetPlugin(ctx context.Context, id string) (Plugin, error)
+	GetPreferences(ctx context.Context, userID uuid.UUID) (UserPreference, error)
+	GetProgress(ctx context.Context, arg GetProgressParams) (Progress, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionByTokenHashRow, error)
 	GetSetting(ctx context.Context, key string) ([]byte, error)
 	GetSource(ctx context.Context, id string) (GetSourceRow, error)
@@ -73,6 +77,10 @@ type Querier interface {
 	GetUserForUpdate(ctx context.Context, id uuid.UUID) (User, error)
 	GetWork(ctx context.Context, id uuid.UUID) (Work, error)
 	GetWorkByEntry(ctx context.Context, metaEntryID string) (Work, error)
+	History(ctx context.Context, arg HistoryParams) ([]HistoryRow, error)
+	// Asking again for queued work brings it forward (e.g. a refresh while a
+	// retry waits out its back-off).
+	HurryTask(ctx context.Context, arg HurryTaskParams) (Task, error)
 	InsertChapter(ctx context.Context, arg InsertChapterParams) (Chapter, error)
 	// Returns no row when a live task with the same dedupe key exists.
 	InsertTask(ctx context.Context, arg InsertTaskParams) (Task, error)
@@ -86,6 +94,7 @@ type Querier interface {
 	ListLibrary(ctx context.Context, arg ListLibraryParams) ([]ListLibraryRow, error)
 	ListOpenInvites(ctx context.Context) ([]Invite, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
+	ListReaderSettings(ctx context.Context, arg ListReaderSettingsParams) ([]ReaderSetting, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]Session, error)
 	ListSettings(ctx context.Context) ([]Setting, error)
 	ListSourceChaptersBySeries(ctx context.Context, sourceSeriesID uuid.UUID) ([]SourceChapter, error)
@@ -106,6 +115,8 @@ type Querier interface {
 	NewChaptersForUser(ctx context.Context, arg NewChaptersForUserParams) ([]NewChaptersForUserRow, error)
 	PruneFinishedTasks(ctx context.Context, before *time.Time) (int64, error)
 	PruneJobRuns(ctx context.Context, arg PruneJobRunsParams) (int64, error)
+	PutPreferences(ctx context.Context, arg PutPreferencesParams) (UserPreference, error)
+	PutReaderSettings(ctx context.Context, arg PutReaderSettingsParams) (ReaderSetting, error)
 	PutSetting(ctx context.Context, arg PutSettingParams) error
 	RemoveLibraryEntry(ctx context.Context, arg RemoveLibraryEntryParams) (int64, error)
 	// Running tasks whose lease ran out (the server stopped) go back to the
@@ -135,6 +146,7 @@ type Querier interface {
 	UpdatePlugin(ctx context.Context, arg UpdatePluginParams) (Plugin, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpdateWorkDisplay(ctx context.Context, arg UpdateWorkDisplayParams) (Work, error)
+	UpsertProgress(ctx context.Context, arg UpsertProgressParams) (Progress, error)
 	UpsertSource(ctx context.Context, arg UpsertSourceParams) error
 	UpsertSourceChapter(ctx context.Context, arg UpsertSourceChapterParams) error
 	// Records a series found for a work. An attached or rejected series keeps
@@ -142,6 +154,7 @@ type Querier interface {
 	UpsertSourceSeries(ctx context.Context, arg UpsertSourceSeriesParams) (SourceSeries, error)
 	UpsertWork(ctx context.Context, arg UpsertWorkParams) (UpsertWorkRow, error)
 	UpsertWorkSourceMatch(ctx context.Context, arg UpsertWorkSourceMatchParams) error
+	WorkProgress(ctx context.Context, arg WorkProgressParams) ([]Progress, error)
 	// Present chapters of a work's attached series, with what decides the
 	// preferred variant.
 	WorkVariants(ctx context.Context, workID uuid.UUID) ([]WorkVariantsRow, error)

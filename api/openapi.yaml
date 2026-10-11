@@ -78,6 +78,8 @@ tags:
     description: Your library, works and how they are matched on sources.
   - name: chapters
     description: Works' unified chapters and update checks.
+  - name: reader
+    description: Pages, progress, history and reader settings.
 
 paths:
   /system/info:
@@ -1778,6 +1780,247 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /chapters/{chapter_id}/pages:
+    get:
+      operationId: getChapterPages
+      tags: [reader]
+      summary: A chapter's pages for the reader
+      description: |
+        The pages of the chapter's chosen copy (or `variant_id`'s), with
+        the previous and next chapters in reading order and your progress.
+        When the chosen copy is on a source you may not use, another copy
+        is used; `404` with code `no_copy` when none is left.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/ChapterId"
+        - $ref: "#/components/parameters/VariantIdQuery"
+      responses:
+        "200":
+          description: The pages.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChapterPages"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /chapters/{chapter_id}/pages/{index}:
+    get:
+      operationId: getChapterPage
+      tags: [reader]
+      summary: One page image
+      description: Fetched through the source's plugin (its headers and network settings apply), never by the browser from the site.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/ChapterId"
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 10000
+        - $ref: "#/components/parameters/VariantIdQuery"
+      responses:
+        "200":
+          description: The image.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /chapters/{chapter_id}/progress:
+    put:
+      operationId: setChapterProgress
+      tags: [reader]
+      summary: Save where you are in a chapter
+      description: Reaching the last page (when `pages` is given) marks the chapter read, unless `completed` says otherwise. Your other devices get a `progress.synced` event.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/ChapterId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetProgressRequest"
+      responses:
+        "200":
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChapterProgress"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}/progress:
+    get:
+      operationId: getWorkProgress
+      tags: [reader]
+      summary: Your progress in a work, and where to continue
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+      responses:
+        "200":
+          description: Progress per chapter you started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkProgress"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: markChaptersRead
+      tags: [reader]
+      summary: Mark chapters read or unread
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkReadRequest"
+      responses:
+        "204":
+          description: Done.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/history:
+    get:
+      operationId: getMyHistory
+      tags: [reader]
+      summary: Chapters you read, newest first
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/PageToken"
+      responses:
+        "200":
+          description: A page of history.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryPage"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/reader-settings:
+    get:
+      operationId: getReaderSettings
+      tags: [reader]
+      summary: Your reader settings for a place
+      description: |
+        Settings live at three levels: global, per source and per work
+        (series). `effective` merges them, a more specific level's keys
+        winning. Their shape belongs to the client (zoom, fit, mode,
+        direction, …); the server stores JSON objects up to 16 KiB.
+      x-panelarr-access: user
+      parameters:
+        - name: source_id
+          in: query
+          schema:
+            type: string
+            maxLength: 300
+        - name: work_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Each level and the effective settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReaderSettings"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/reader-settings/{scope}:
+    parameters:
+      - name: scope
+        in: path
+        required: true
+        description: global, source:<source id> or work:<work id>.
+        schema:
+          type: string
+          maxLength: 310
+          pattern: "^(global|source:.+|work:[0-9a-fA-F-]{36})$"
+    put:
+      operationId: putReaderSettings
+      tags: [reader]
+      summary: Replace one level of your reader settings
+      x-panelarr-access: user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "204":
+          description: Saved.
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteReaderSettings
+      tags: [reader]
+      summary: Remove one level (fall back to the broader ones)
+      x-panelarr-access: user
+      responses:
+        "204":
+          description: Removed.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/preferences:
+    get:
+      operationId: getMyPreferences
+      tags: [me]
+      summary: Your app preferences
+      description: Theme, colours, fonts and other choices that follow you across devices. The shape belongs to the client; up to 16 KiB.
+      x-panelarr-access: user
+      responses:
+        "200":
+          description: The preferences ({} when none).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: putMyPreferences
+      tags: [me]
+      summary: Replace your app preferences
+      x-panelarr-access: user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "204":
+          description: Saved.
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -1796,6 +2039,13 @@ components:
       description: A personal API key as a bearer token.
 
   parameters:
+    VariantIdQuery:
+      name: variant_id
+      in: query
+      description: Read this copy instead of the chosen one.
+      schema:
+        type: string
+        format: uuid
     ChapterId:
       name: chapter_id
       in: path
@@ -1992,6 +2242,152 @@ components:
             $ref: "#/components/schemas/Problem"
 
   schemas:
+    ReaderPage:
+      type: object
+      required: [index, url]
+      properties:
+        index:
+          type: integer
+        url:
+          type: string
+          description: The server's URL for the page image.
+    ChapterProgress:
+      type: object
+      required: [chapter_id, page, completed, updated_at]
+      properties:
+        chapter_id:
+          type: string
+          format: uuid
+        page:
+          type: integer
+          description: The page you are on, from 0.
+        pages:
+          type: integer
+        completed:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    ChapterPages:
+      type: object
+      required: [work_id, chapter, variant, origin, pages]
+      properties:
+        work_id:
+          type: string
+          format: uuid
+        chapter:
+          $ref: "#/components/schemas/UnifiedChapter"
+        variant:
+          $ref: "#/components/schemas/ChapterVariant"
+        origin:
+          type: string
+          enum: [source, file]
+          description: Pages come live from the source, or from the downloaded file.
+        pages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReaderPage"
+        prev_chapter_id:
+          type: string
+          format: uuid
+        next_chapter_id:
+          type: string
+          format: uuid
+        progress:
+          $ref: "#/components/schemas/ChapterProgress"
+    SetProgressRequest:
+      type: object
+      required: [page]
+      properties:
+        page:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        pages:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        completed:
+          type: boolean
+    WorkProgress:
+      type: object
+      required: [chapters]
+      properties:
+        chapters:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChapterProgress"
+        continue_chapter_id:
+          type: string
+          format: uuid
+          description: Where to continue reading.
+    MarkReadRequest:
+      type: object
+      required: [chapter_ids, read]
+      properties:
+        chapter_ids:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          items:
+            type: string
+            format: uuid
+        read:
+          type: boolean
+    HistoryItem:
+      type: object
+      required: [work_id, work_title, chapter_id, chapter_title, page, completed, updated_at]
+      properties:
+        work_id:
+          type: string
+          format: uuid
+        work_title:
+          type: string
+        work_cover_url:
+          type: string
+        chapter_id:
+          type: string
+          format: uuid
+        chapter_number:
+          type: number
+        chapter_title:
+          type: string
+        page:
+          type: integer
+        pages:
+          type: integer
+        completed:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    HistoryPage:
+      type: object
+      required: [items, next_page_token]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryItem"
+        next_page_token:
+          type: string
+    ReaderSettings:
+      type: object
+      required: [effective]
+      properties:
+        global:
+          type: object
+          additionalProperties: true
+        source:
+          type: object
+          additionalProperties: true
+        work:
+          type: object
+          additionalProperties: true
+        effective:
+          type: object
+          additionalProperties: true
+
     ChapterVariant:
       type: object
       required: [id, series_id, source_id, source_name, key, name, priority, source_health]

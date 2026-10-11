@@ -86,6 +86,23 @@ type Plugin struct {
 	UpdatedAt     time.Time
 }
 
+type Progress struct {
+	UserID    uuid.UUID
+	ChapterID uuid.UUID
+	WorkID    uuid.UUID
+	Page      int32
+	Pages     *int32
+	Completed bool
+	UpdatedAt time.Time
+}
+
+type ReaderSetting struct {
+	UserID    uuid.UUID
+	Scope     string
+	Settings  []byte
+	UpdatedAt time.Time
+}
+
 type Session struct {
 	ID         uuid.UUID
 	TokenHash  []byte
@@ -200,6 +217,12 @@ type User struct {
 	UpdatedAt            time.Time
 	PasswordChangedAt    time.Time
 	LastLoginAt          *time.Time
+}
+
+type UserPreference struct {
+	UserID      uuid.UUID
+	Preferences []byte
+	UpdatedAt   time.Time
 }
 
 type Work struct {

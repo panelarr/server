@@ -280,3 +280,16 @@ func (h *Host) ResolveURL(ctx context.Context, v Viewer, rawURL string) (Resolve
 	}
 	return Resolved{}, ErrNotFound
 }
+
+// Pages lists a chapter's pages in reading order.
+func (h *Host) Pages(ctx context.Context, v Viewer, id, chapterKey string) ([]*sourcev1.Page, error) {
+	s, c, err := h.call(ctx, v, id, "")
+	if err != nil {
+		return nil, err
+	}
+	res, err := c.ListPages(ctx, &sourcev1.ListPagesRequest{SourceId: s.SourceID, ChapterKey: chapterKey})
+	if err != nil {
+		return nil, err
+	}
+	return res.GetPages(), nil
+}

@@ -48,6 +48,7 @@ Startup settings come from `PANELARR_*` environment variables or flags; everythi
 - [API](docs/api.md): the public REST API ([`api/openapi.yaml`](api/openapi.yaml))
 - [Configuration](docs/configuration.md): settings, logs, health, migrations
 - [Works and matching](docs/matching.md): one work per actual work, matched to the sources
+- [Reader API](docs/reader.md): pages, progress, settings
 - [Architecture](docs/architecture.md): how the code is laid out
 - [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md)
 

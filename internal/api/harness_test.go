@@ -29,6 +29,7 @@ import (
 	"github.com/panelarr/server/internal/metrics"
 	"github.com/panelarr/server/internal/plugins"
 	"github.com/panelarr/server/internal/queue"
+	"github.com/panelarr/server/internal/reader"
 	"github.com/panelarr/server/internal/secret"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/store/storetest"
@@ -122,6 +123,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		Store:    st,
 		Library:  lib,
 		Chapters: chs,
+		Reader:   reader.NewService(st, host, lib, chs, nil, hub, nil),
 		Checks: []Check{
 			{Name: "database", Required: true, Run: st.Pool.Ping},
 			{Name: "meta", Run: m.ReadyCheck},

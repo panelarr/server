@@ -21,6 +21,7 @@ internal/limits/         per-source concurrency and rate limits
 internal/events/         the event hub behind the event stream
 internal/library/        works, libraries and matching works to source series
 internal/chapters/       unified chapters, chosen copies, update checks
+internal/reader/         pages, progress, history, reader settings and preferences
 internal/textmatch/      title and name normalization and similarity
 internal/config/         startup settings from env and flags
 internal/logging/        structured logs

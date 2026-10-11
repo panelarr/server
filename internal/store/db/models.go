@@ -35,6 +35,20 @@ type Invite struct {
 	UsedBy    uuid.NullUUID
 }
 
+type Plugin struct {
+	ID            string
+	Url           string
+	ApiKey        string
+	Config        string
+	Enabled       bool
+	Info          []byte
+	Health        string
+	HealthMessage string
+	CheckedAt     *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type Session struct {
 	ID         uuid.UUID
 	TokenHash  []byte
@@ -51,6 +65,26 @@ type Setting struct {
 	Key       string
 	Value     []byte
 	UpdatedAt time.Time
+}
+
+type Source struct {
+	ID              string
+	PluginID        string
+	SourceID        string
+	Name            string
+	Lang            string
+	ContentRating   string
+	IconUrl         string
+	HomeUrl         string
+	Capabilities    []string
+	Health          string
+	HealthReason    string
+	HealthMessage   string
+	HealthCheckedAt *time.Time
+	Enabled         bool
+	Present         bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type User struct {

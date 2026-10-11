@@ -18,6 +18,7 @@ Until the Panelarr metadata service and the source API are published as versione
 
 ```sh
 git clone https://github.com/panelarr/meta ../meta
+git clone https://github.com/panelarr/source-api ../source-api
 ```
 
 ### Tests and PostgreSQL

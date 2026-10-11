@@ -66,6 +66,10 @@ tags:
     description: The connection to the metadata service (admins).
   - name: catalog
     description: Searching and browsing the metadata catalogue, to find works to add.
+  - name: plugins
+    description: Source plugins (admins).
+  - name: sources
+    description: Browsing sources through their plugins.
 
 paths:
   /system/info:
@@ -740,6 +744,367 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /plugins:
+    get:
+      operationId: listPlugins
+      tags: [plugins]
+      summary: List source plugins
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: Plugins by ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: registerPlugin
+      tags: [plugins]
+      summary: Add a source plugin running as a service
+      description: |
+        The server checks the plugin answers and speaks the source plugin
+        contract (`422`, code `plugin_unreachable`, otherwise), stores it and
+        lists its sources. The ID names this plugin instance and prefixes
+        its sources' IDs; it defaults to the plugin's own ID. A taken ID
+        answers `409`, code `plugin_id_taken`.
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterPluginRequest"
+      responses:
+        "201":
+          description: The plugin, with its sources synced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plugin"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+    get:
+      operationId: getPlugin
+      tags: [plugins]
+      summary: Get a plugin
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The plugin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plugin"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updatePlugin
+      tags: [plugins]
+      summary: Change a plugin's address or key, or turn it off
+      description: A new address or key is checked before it is saved.
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePluginRequest"
+      responses:
+        "200":
+          description: The plugin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plugin"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deletePlugin
+      tags: [plugins]
+      summary: Remove a plugin and its sources
+      x-panelarr-access: admin
+      responses:
+        "204":
+          description: Removed.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}/sync:
+    post:
+      operationId: syncPlugin
+      tags: [plugins]
+      summary: Refresh a plugin's info, health and sources now
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/PluginId"
+      responses:
+        "200":
+          description: The plugin after the sync. A plugin that didn't answer shows health `down`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plugin"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}/config:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+    get:
+      operationId: getPluginConfig
+      tags: [plugins]
+      summary: A plugin's configuration and its schema
+      description: Secret fields (`writeOnly` in the schema) come back empty. A plugin without configuration answers `404`, code `no_config`.
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The configuration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginConfig"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: setPluginConfig
+      tags: [plugins]
+      summary: Replace a plugin's configuration
+      description: The plugin validates and applies it; the server keeps it (encrypted) and hands it back whenever the plugin restarts. Secret fields left empty keep their current value.
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetPluginConfigRequest"
+      responses:
+        "200":
+          description: The configuration as the plugin now reports it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginConfig"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /sources:
+    get:
+      operationId: listSources
+      tags: [sources]
+      summary: Sources the caller may use
+      description: Users see enabled sources their grants allow, within their content-rating ceiling. Admins see every usable source, and with `all=true` also disabled ones and ones their plugin no longer lists.
+      x-panelarr-access: user
+      parameters:
+        - name: all
+          in: query
+          schema:
+            type: boolean
+        - name: lang
+          in: query
+          description: Only sources in this language.
+          schema:
+            type: string
+            maxLength: 35
+      responses:
+        "200":
+          description: Sources by plugin and name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /sources/{source_id}:
+    patch:
+      operationId: updateSource
+      tags: [sources]
+      summary: Turn a source on or off for everyone
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/SourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSourceRequest"
+      responses:
+        "200":
+          description: The source.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceInfo"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /sources/{source_id}/popular:
+    get:
+      operationId: sourcePopular
+      tags: [sources]
+      summary: A source's popular series
+      description: Errors from the source answer `502` with code `source_failed` (the reason, e.g. a challenge page or the site being down, is in the detail), or `429` with code `rate_limited`.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/SourceId"
+        - $ref: "#/components/parameters/SourcePage"
+      responses:
+        "200":
+          description: A page of series.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceSeriesPage"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /sources/{source_id}/latest:
+    get:
+      operationId: sourceLatest
+      tags: [sources]
+      summary: A source's latest updates
+      description: "`422`, code `unsupported`, when the source has no latest list."
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/SourceId"
+        - $ref: "#/components/parameters/SourcePage"
+      responses:
+        "200":
+          description: A page of series.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceSeriesPage"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /sources/{source_id}/search:
+    post:
+      operationId: sourceSearch
+      tags: [sources]
+      summary: Search a source
+      description: A POST because filter values are structured; it only reads, so a `read` API key may call it.
+      x-panelarr-access: user
+      x-panelarr-read-only: true
+      parameters:
+        - $ref: "#/components/parameters/SourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceSearchRequest"
+      responses:
+        "200":
+          description: A page of series.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceSeriesPage"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /sources/{source_id}/filters:
+    get:
+      operationId: sourceFilters
+      tags: [sources]
+      summary: A source's search filters
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/SourceId"
+      responses:
+        "200":
+          description: The filters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceFilters"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /sources/{source_id}/series:
+    get:
+      operationId: sourceSeries
+      tags: [sources]
+      summary: A series on a source, in full
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/SourceId"
+        - $ref: "#/components/parameters/SeriesKey"
+      responses:
+        "200":
+          description: The series.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceSeries"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /sources/{source_id}/chapters:
+    get:
+      operationId: sourceChapters
+      tags: [sources]
+      summary: A series' chapters exactly as the source lists them
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/SourceId"
+        - $ref: "#/components/parameters/SeriesKey"
+      responses:
+        "200":
+          description: The chapters, newest first as the source orders them.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceChapterList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /sources/{source_id}/image:
+    get:
+      operationId: sourceImage
+      tags: [sources]
+      summary: An image from a source (covers, icons)
+      description: Only image links the server handed out work (they are signed); the image is fetched through the source's plugin and cached.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/SourceId"
+        - name: ref
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 4000
+        - name: sig
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+      responses:
+        "200":
+          description: The image.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -758,6 +1123,39 @@ components:
       description: A personal API key as a bearer token.
 
   parameters:
+    PluginId:
+      name: plugin_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9_-]{0,39}$"
+    SourceId:
+      name: source_id
+      in: path
+      required: true
+      description: The source's ID, "plugin:source".
+      schema:
+        type: string
+        minLength: 3
+        maxLength: 300
+    SourcePage:
+      name: page
+      in: query
+      description: The page, from 1.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 10000
+    SeriesKey:
+      name: key
+      in: query
+      required: true
+      description: The series' key on the source, as listed.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 2000
     EntryId:
       name: entry_id
       in: path
@@ -878,6 +1276,285 @@ components:
             $ref: "#/components/schemas/Problem"
 
   schemas:
+    RateLimit:
+      type: object
+      required: [requests, period_seconds]
+      properties:
+        requests:
+          type: integer
+        period_seconds:
+          type: number
+        burst:
+          type: integer
+    Plugin:
+      type: object
+      required: [id, url, enabled, name, version, contracts, capabilities, has_config, health, source_count, created_at]
+      properties:
+        id:
+          type: string
+        url:
+          type: string
+        enabled:
+          type: boolean
+        name:
+          type: string
+          description: The plugin's own name.
+        plugin_id:
+          type: string
+          description: The plugin's own ID (what it reports), e.g. to tell instances of one plugin apart.
+        version:
+          type: string
+        contracts:
+          type: array
+          items:
+            type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        max_concurrency_per_source:
+          type: integer
+          description: How many calls per source the plugin takes at once, when it says.
+        default_rate_limit:
+          $ref: "#/components/schemas/RateLimit"
+        has_config:
+          type: boolean
+          description: The plugin has settings (see its config).
+        health:
+          type: string
+          enum: [ok, degraded, down, unknown]
+        health_message:
+          type: string
+        checked_at:
+          type: string
+          format: date-time
+        source_count:
+          type: integer
+          format: int64
+          description: Sources the plugin lists now.
+        created_at:
+          type: string
+          format: date-time
+    PluginList:
+      type: object
+      required: [plugins]
+      properties:
+        plugins:
+          type: array
+          items:
+            $ref: "#/components/schemas/Plugin"
+    RegisterPluginRequest:
+      type: object
+      required: [url]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]{0,39}$"
+        url:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: The plugin service's base URL, e.g. "http://source-plugin:8904".
+        api_key:
+          type: string
+          maxLength: 500
+    UpdatePluginRequest:
+      type: object
+      properties:
+        url:
+          type: string
+          minLength: 1
+          maxLength: 500
+        api_key:
+          type: string
+          maxLength: 500
+          description: The new key; an empty string removes it.
+        enabled:
+          type: boolean
+    PluginConfig:
+      type: object
+      required: [schema, values]
+      properties:
+        schema:
+          type: object
+          additionalProperties: true
+          description: The plugin's JSON Schema for its configuration. Render the form from it.
+        values:
+          type: object
+          additionalProperties: true
+    SetPluginConfigRequest:
+      type: object
+      required: [values]
+      properties:
+        values:
+          type: object
+          additionalProperties: true
+
+    SourceHealth:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, failing, unknown]
+        reason:
+          type: string
+          description: Why it fails, e.g. CLOUDFLARE_CHALLENGE or SOURCE_DOWN.
+        message:
+          type: string
+        checked_at:
+          type: string
+          format: date-time
+    SourceInfo:
+      type: object
+      required: [id, plugin_id, name, lang, content_rating, capabilities, health, enabled, present]
+      properties:
+        id:
+          type: string
+          description: '"plugin:source".'
+        plugin_id:
+          type: string
+        name:
+          type: string
+        lang:
+          type: string
+        content_rating:
+          type: string
+          enum: [safe, mixed, nsfw, unknown]
+        icon_url:
+          type: string
+          description: The server's URL for the source's icon.
+        home_url:
+          type: string
+        capabilities:
+          type: array
+          description: latest, search, filters, resolve_url, settings, needs_webview, nsfw.
+          items:
+            type: string
+        health:
+          $ref: "#/components/schemas/SourceHealth"
+        enabled:
+          type: boolean
+        present:
+          type: boolean
+          description: The plugin still lists it.
+    SourceList:
+      type: object
+      required: [sources]
+      properties:
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceInfo"
+    UpdateSourceRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+    SourceSeries:
+      type: object
+      required: [key, title, alt_titles, authors, artists, genres]
+      properties:
+        key:
+          type: string
+          description: The series' key on the source; pass it back as is.
+        title:
+          type: string
+        alt_titles:
+          type: array
+          items:
+            type: string
+        authors:
+          type: array
+          items:
+            type: string
+        artists:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+        genres:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          description: ongoing, completed, licensed, publishing_finished, cancelled, on_hiatus or absent when unknown.
+        cover_url:
+          type: string
+          description: The server's URL for the cover.
+        url:
+          type: string
+          description: The series' page on the site.
+    SourceSeriesPage:
+      type: object
+      required: [series, has_next_page]
+      properties:
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceSeries"
+        has_next_page:
+          type: boolean
+    SourceSearchRequest:
+      type: object
+      properties:
+        query:
+          type: string
+          maxLength: 200
+        page:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        filters:
+          type: array
+          maxItems: 200
+          description: Filter values in the source plugin contract's JSON form, e.g. {"path":[2],"select":1}.
+          items:
+            type: object
+            additionalProperties: true
+    SourceFilters:
+      type: object
+      required: [filters]
+      properties:
+        filters:
+          type: array
+          description: The source's filters in the source plugin contract's JSON form (headers, separators, text, checkboxes, tri-states, selects, sorts, groups).
+          items:
+            type: object
+            additionalProperties: true
+    SourceChapter:
+      type: object
+      required: [key, name]
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        number:
+          type: number
+        volume:
+          type: string
+        scanlator:
+          type: string
+        uploaded_at:
+          type: string
+          format: date-time
+        lang:
+          type: string
+        url:
+          type: string
+    SourceChapterList:
+      type: object
+      required: [chapters]
+      properties:
+        chapters:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceChapter"
+
     MetaProvider:
       type: object
       required: [id, health, records]

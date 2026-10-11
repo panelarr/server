@@ -18,6 +18,7 @@ import (
 	"github.com/panelarr/server/internal/imagecache"
 	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/metrics"
+	"github.com/panelarr/server/internal/plugins"
 	"github.com/panelarr/server/internal/users"
 )
 
@@ -34,10 +35,13 @@ type Deps struct {
 	// Checks are the readiness dependencies, e.g. the database.
 	Checks []Check
 
-	Auth   *auth.Service
-	Users  *users.Service
-	Meta   *meta.Service
-	Images *imagecache.Cache
+	Auth    *auth.Service
+	Users   *users.Service
+	Meta    *meta.Service
+	Images  *imagecache.Cache
+	Plugins *plugins.Host
+	// Signer signs image links the server hands out.
+	Signer *imagecache.Signer
 
 	// SecureCookies marks session cookies Secure (https deployments).
 	SecureCookies bool
@@ -62,8 +66,8 @@ func NewHandler(deps Deps) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	if deps.Auth == nil || deps.Users == nil || deps.Meta == nil || deps.Images == nil {
-		return nil, fmt.Errorf("api: the auth, users, meta and image services are required")
+	if deps.Auth == nil || deps.Users == nil || deps.Meta == nil || deps.Images == nil || deps.Plugins == nil || deps.Signer == nil {
+		return nil, fmt.Errorf("api: every service dependency is required")
 	}
 	s := &Server{deps: deps, policies: pols}
 

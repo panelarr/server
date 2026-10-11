@@ -177,6 +177,30 @@ func (e MeAuthMethod) Valid() bool {
 	}
 }
 
+// Defines values for PluginHealth.
+const (
+	PluginHealthDegraded PluginHealth = "degraded"
+	PluginHealthDown     PluginHealth = "down"
+	PluginHealthOk       PluginHealth = "ok"
+	PluginHealthUnknown  PluginHealth = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the PluginHealth enum.
+func (e PluginHealth) Valid() bool {
+	switch e {
+	case PluginHealthDegraded:
+		return true
+	case PluginHealthDown:
+		return true
+	case PluginHealthOk:
+		return true
+	case PluginHealthUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Role.
 const (
 	RoleAdmin Role = "admin"
@@ -207,6 +231,51 @@ func (e RunMetaSyncRequestKind) Valid() bool {
 	case RunMetaSyncRequestKindDelta:
 		return true
 	case RunMetaSyncRequestKindDump:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SourceHealthStatus.
+const (
+	SourceHealthStatusFailing SourceHealthStatus = "failing"
+	SourceHealthStatusOk      SourceHealthStatus = "ok"
+	SourceHealthStatusUnknown SourceHealthStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the SourceHealthStatus enum.
+func (e SourceHealthStatus) Valid() bool {
+	switch e {
+	case SourceHealthStatusFailing:
+		return true
+	case SourceHealthStatusOk:
+		return true
+	case SourceHealthStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SourceInfoContentRating.
+const (
+	SourceInfoContentRatingMixed   SourceInfoContentRating = "mixed"
+	SourceInfoContentRatingNsfw    SourceInfoContentRating = "nsfw"
+	SourceInfoContentRatingSafe    SourceInfoContentRating = "safe"
+	SourceInfoContentRatingUnknown SourceInfoContentRating = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the SourceInfoContentRating enum.
+func (e SourceInfoContentRating) Valid() bool {
+	switch e {
+	case SourceInfoContentRatingMixed:
+		return true
+	case SourceInfoContentRatingNsfw:
+		return true
+	case SourceInfoContentRatingSafe:
+		return true
+	case SourceInfoContentRatingUnknown:
 		return true
 	default:
 		return false
@@ -744,6 +813,51 @@ type MetaSyncStarted struct {
 // Password 8 to 256 characters.
 type Password = string
 
+// Plugin defines model for Plugin.
+type Plugin struct {
+	Capabilities     []string   `json:"capabilities"`
+	CheckedAt        *time.Time `json:"checked_at,omitempty"`
+	Contracts        []string   `json:"contracts"`
+	CreatedAt        time.Time  `json:"created_at"`
+	DefaultRateLimit *RateLimit `json:"default_rate_limit,omitempty"`
+	Enabled          bool       `json:"enabled"`
+
+	// HasConfig The plugin has settings (see its config).
+	HasConfig     bool         `json:"has_config"`
+	Health        PluginHealth `json:"health"`
+	HealthMessage *string      `json:"health_message,omitempty"`
+	Id            string       `json:"id"`
+
+	// MaxConcurrencyPerSource How many calls per source the plugin takes at once, when it says.
+	MaxConcurrencyPerSource *int `json:"max_concurrency_per_source,omitempty"`
+
+	// Name The plugin's own name.
+	Name string `json:"name"`
+
+	// PluginId The plugin's own ID (what it reports), e.g. to tell instances of one plugin apart.
+	PluginId *string `json:"plugin_id,omitempty"`
+
+	// SourceCount Sources the plugin lists now.
+	SourceCount int64  `json:"source_count"`
+	Url         string `json:"url"`
+	Version     string `json:"version"`
+}
+
+// PluginHealth defines model for Plugin.Health.
+type PluginHealth string
+
+// PluginConfig defines model for PluginConfig.
+type PluginConfig struct {
+	// Schema The plugin's JSON Schema for its configuration. Render the form from it.
+	Schema map[string]interface{} `json:"schema"`
+	Values map[string]interface{} `json:"values"`
+}
+
+// PluginList defines model for PluginList.
+type PluginList struct {
+	Plugins []Plugin `json:"plugins"`
+}
+
 // Problem RFC 9457 problem details.
 type Problem struct {
 	// Code A stable, machine-readable error code. Common ones:
@@ -773,6 +887,22 @@ type Problem struct {
 	//
 	// Examples: about:blank
 	Type string `json:"type"`
+}
+
+// RateLimit defines model for RateLimit.
+type RateLimit struct {
+	Burst         *int    `json:"burst,omitempty"`
+	PeriodSeconds float32 `json:"period_seconds"`
+	Requests      int     `json:"requests"`
+}
+
+// RegisterPluginRequest defines model for RegisterPluginRequest.
+type RegisterPluginRequest struct {
+	ApiKey *string `json:"api_key,omitempty"`
+	Id     *string `json:"id,omitempty"`
+
+	// Url The plugin service's base URL, e.g. "http://source-plugin:8904".
+	Url string `json:"url"`
 }
 
 // Role Admins may do everything; users what their grants allow.
@@ -814,6 +944,11 @@ type SetMetaConnectionRequest struct {
 	Url string `json:"url"`
 }
 
+// SetPluginConfigRequest defines model for SetPluginConfigRequest.
+type SetPluginConfigRequest struct {
+	Values map[string]interface{} `json:"values"`
+}
+
 // SetupStatus defines model for SetupStatus.
 type SetupStatus struct {
 	// AdminCreated The first account exists.
@@ -828,6 +963,108 @@ type SetupStatus struct {
 
 	// MetaReady The metadata service is usable (see `GET /system/meta` for details).
 	MetaReady bool `json:"meta_ready"`
+}
+
+// SourceChapter defines model for SourceChapter.
+type SourceChapter struct {
+	Key        string     `json:"key"`
+	Lang       *string    `json:"lang,omitempty"`
+	Name       string     `json:"name"`
+	Number     *float32   `json:"number,omitempty"`
+	Scanlator  *string    `json:"scanlator,omitempty"`
+	UploadedAt *time.Time `json:"uploaded_at,omitempty"`
+	Url        *string    `json:"url,omitempty"`
+	Volume     *string    `json:"volume,omitempty"`
+}
+
+// SourceChapterList defines model for SourceChapterList.
+type SourceChapterList struct {
+	Chapters []SourceChapter `json:"chapters"`
+}
+
+// SourceFilters defines model for SourceFilters.
+type SourceFilters struct {
+	// Filters The source's filters in the source plugin contract's JSON form (headers, separators, text, checkboxes, tri-states, selects, sorts, groups).
+	Filters []map[string]interface{} `json:"filters"`
+}
+
+// SourceHealth defines model for SourceHealth.
+type SourceHealth struct {
+	CheckedAt *time.Time `json:"checked_at,omitempty"`
+	Message   *string    `json:"message,omitempty"`
+
+	// Reason Why it fails, e.g. CLOUDFLARE_CHALLENGE or SOURCE_DOWN.
+	Reason *string            `json:"reason,omitempty"`
+	Status SourceHealthStatus `json:"status"`
+}
+
+// SourceHealthStatus defines model for SourceHealth.Status.
+type SourceHealthStatus string
+
+// SourceInfo defines model for SourceInfo.
+type SourceInfo struct {
+	// Capabilities latest, search, filters, resolve_url, settings, needs_webview, nsfw.
+	Capabilities  []string                `json:"capabilities"`
+	ContentRating SourceInfoContentRating `json:"content_rating"`
+	Enabled       bool                    `json:"enabled"`
+	Health        SourceHealth            `json:"health"`
+	HomeUrl       *string                 `json:"home_url,omitempty"`
+
+	// IconUrl The server's URL for the source's icon.
+	IconUrl *string `json:"icon_url,omitempty"`
+
+	// Id "plugin:source".
+	Id       string `json:"id"`
+	Lang     string `json:"lang"`
+	Name     string `json:"name"`
+	PluginId string `json:"plugin_id"`
+
+	// Present The plugin still lists it.
+	Present bool `json:"present"`
+}
+
+// SourceInfoContentRating defines model for SourceInfo.ContentRating.
+type SourceInfoContentRating string
+
+// SourceList defines model for SourceList.
+type SourceList struct {
+	Sources []SourceInfo `json:"sources"`
+}
+
+// SourceSearchRequest defines model for SourceSearchRequest.
+type SourceSearchRequest struct {
+	// Filters Filter values in the source plugin contract's JSON form, e.g. {"path":[2],"select":1}.
+	Filters *[]map[string]interface{} `json:"filters,omitempty"`
+	Page    *int                      `json:"page,omitempty"`
+	Query   *string                   `json:"query,omitempty"`
+}
+
+// SourceSeries defines model for SourceSeries.
+type SourceSeries struct {
+	AltTitles []string `json:"alt_titles"`
+	Artists   []string `json:"artists"`
+	Authors   []string `json:"authors"`
+
+	// CoverUrl The server's URL for the cover.
+	CoverUrl    *string  `json:"cover_url,omitempty"`
+	Description *string  `json:"description,omitempty"`
+	Genres      []string `json:"genres"`
+
+	// Key The series' key on the source; pass it back as is.
+	Key string `json:"key"`
+
+	// Status ongoing, completed, licensed, publishing_finished, cancelled, on_hiatus or absent when unknown.
+	Status *string `json:"status,omitempty"`
+	Title  string  `json:"title"`
+
+	// Url The series' page on the site.
+	Url *string `json:"url,omitempty"`
+}
+
+// SourceSeriesPage defines model for SourceSeriesPage.
+type SourceSeriesPage struct {
+	HasNextPage bool           `json:"has_next_page"`
+	Series      []SourceSeries `json:"series"`
 }
 
 // SystemHealth defines model for SystemHealth.
@@ -857,6 +1094,19 @@ type SystemInfoName string
 // UpdateMeRequest defines model for UpdateMeRequest.
 type UpdateMeRequest struct {
 	DisplayName *DisplayName `json:"display_name,omitempty"`
+}
+
+// UpdatePluginRequest defines model for UpdatePluginRequest.
+type UpdatePluginRequest struct {
+	// ApiKey The new key; an empty string removes it.
+	ApiKey  *string `json:"api_key,omitempty"`
+	Enabled *bool   `json:"enabled,omitempty"`
+	Url     *string `json:"url,omitempty"`
+}
+
+// UpdateSourceRequest defines model for UpdateSourceRequest.
+type UpdateSourceRequest struct {
+	Enabled bool `json:"enabled"`
 }
 
 // UpdateUserRequest defines model for UpdateUserRequest.
@@ -931,8 +1181,20 @@ type PageSize = int
 // PageToken defines model for PageToken.
 type PageToken = string
 
+// PluginId defines model for PluginId.
+type PluginId = string
+
 // Reverse defines model for Reverse.
 type Reverse = bool
+
+// SeriesKey defines model for SeriesKey.
+type SeriesKey = string
+
+// SourceId defines model for SourceId.
+type SourceId = string
+
+// SourcePage defines model for SourcePage.
+type SourcePage = int
 
 // YearFrom defines model for YearFrom.
 type YearFrom = int
@@ -1008,6 +1270,44 @@ type SearchCatalogParams struct {
 // SearchCatalogParamsSort defines parameters for SearchCatalog.
 type SearchCatalogParamsSort string
 
+// ListSourcesParams defines parameters for ListSources.
+type ListSourcesParams struct {
+	All *bool `form:"all,omitempty" json:"all,omitempty"`
+
+	// Lang Only sources in this language.
+	Lang *string `form:"lang,omitempty" json:"lang,omitempty"`
+}
+
+// SourceChaptersParams defines parameters for SourceChapters.
+type SourceChaptersParams struct {
+	// Key The series' key on the source, as listed.
+	Key SeriesKey `form:"key" json:"key"`
+}
+
+// SourceImageParams defines parameters for SourceImage.
+type SourceImageParams struct {
+	Ref string `form:"ref" json:"ref"`
+	Sig string `form:"sig" json:"sig"`
+}
+
+// SourceLatestParams defines parameters for SourceLatest.
+type SourceLatestParams struct {
+	// Page The page, from 1.
+	Page *SourcePage `form:"page,omitempty" json:"page,omitempty"`
+}
+
+// SourcePopularParams defines parameters for SourcePopular.
+type SourcePopularParams struct {
+	// Page The page, from 1.
+	Page *SourcePage `form:"page,omitempty" json:"page,omitempty"`
+}
+
+// SourceSeriesParams defines parameters for SourceSeries.
+type SourceSeriesParams struct {
+	// Key The series' key on the source, as listed.
+	Key SeriesKey `form:"key" json:"key"`
+}
+
 // ListUsersParams defines parameters for ListUsers.
 type ListUsersParams struct {
 	// PageSize Items per page, 1 to 200. Default 50.
@@ -1038,8 +1338,23 @@ type CreateMyApiKeyJSONRequestBody = CreateApiKeyRequest
 // ChangeMyPasswordJSONRequestBody defines body for ChangeMyPassword for application/json ContentType.
 type ChangeMyPasswordJSONRequestBody = ChangePasswordRequest
 
+// RegisterPluginJSONRequestBody defines body for RegisterPlugin for application/json ContentType.
+type RegisterPluginJSONRequestBody = RegisterPluginRequest
+
+// UpdatePluginJSONRequestBody defines body for UpdatePlugin for application/json ContentType.
+type UpdatePluginJSONRequestBody = UpdatePluginRequest
+
+// SetPluginConfigJSONRequestBody defines body for SetPluginConfig for application/json ContentType.
+type SetPluginConfigJSONRequestBody = SetPluginConfigRequest
+
 // CreateSetupAdminJSONRequestBody defines body for CreateSetupAdmin for application/json ContentType.
 type CreateSetupAdminJSONRequestBody = CreateSetupAdminRequest
+
+// UpdateSourceJSONRequestBody defines body for UpdateSource for application/json ContentType.
+type UpdateSourceJSONRequestBody = UpdateSourceRequest
+
+// SourceSearchJSONRequestBody defines body for SourceSearch for application/json ContentType.
+type SourceSearchJSONRequestBody = SourceSearchRequest
 
 // SetMetaConnectionJSONRequestBody defines body for SetMetaConnection for application/json ContentType.
 type SetMetaConnectionJSONRequestBody = SetMetaConnectionRequest
@@ -1112,6 +1427,30 @@ type ServerInterface interface {
 	// DeleteMySession Sign out another session (session only)
 	// (DELETE /me/sessions/{id})
 	DeleteMySession(w http.ResponseWriter, r *http.Request, id Id)
+	// ListPlugins List source plugins
+	// (GET /plugins)
+	ListPlugins(w http.ResponseWriter, r *http.Request)
+	// RegisterPlugin Add a source plugin running as a service
+	// (POST /plugins)
+	RegisterPlugin(w http.ResponseWriter, r *http.Request)
+	// DeletePlugin Remove a plugin and its sources
+	// (DELETE /plugins/{plugin_id})
+	DeletePlugin(w http.ResponseWriter, r *http.Request, pluginId PluginId)
+	// GetPlugin Get a plugin
+	// (GET /plugins/{plugin_id})
+	GetPlugin(w http.ResponseWriter, r *http.Request, pluginId PluginId)
+	// UpdatePlugin Change a plugin's address or key, or turn it off
+	// (PATCH /plugins/{plugin_id})
+	UpdatePlugin(w http.ResponseWriter, r *http.Request, pluginId PluginId)
+	// GetPluginConfig A plugin's configuration and its schema
+	// (GET /plugins/{plugin_id}/config)
+	GetPluginConfig(w http.ResponseWriter, r *http.Request, pluginId PluginId)
+	// SetPluginConfig Replace a plugin's configuration
+	// (PUT /plugins/{plugin_id}/config)
+	SetPluginConfig(w http.ResponseWriter, r *http.Request, pluginId PluginId)
+	// SyncPlugin Refresh a plugin's info, health and sources now
+	// (POST /plugins/{plugin_id}/sync)
+	SyncPlugin(w http.ResponseWriter, r *http.Request, pluginId PluginId)
 	// GetSetup First-run wizard state
 	// (GET /setup)
 	GetSetup(w http.ResponseWriter, r *http.Request)
@@ -1121,6 +1460,33 @@ type ServerInterface interface {
 	// CompleteSetup Finish the first-run wizard
 	// (POST /setup/complete)
 	CompleteSetup(w http.ResponseWriter, r *http.Request)
+	// ListSources Sources the caller may use
+	// (GET /sources)
+	ListSources(w http.ResponseWriter, r *http.Request, params ListSourcesParams)
+	// UpdateSource Turn a source on or off for everyone
+	// (PATCH /sources/{source_id})
+	UpdateSource(w http.ResponseWriter, r *http.Request, sourceId SourceId)
+	// SourceChapters A series' chapters exactly as the source lists them
+	// (GET /sources/{source_id}/chapters)
+	SourceChapters(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourceChaptersParams)
+	// SourceFilters A source's search filters
+	// (GET /sources/{source_id}/filters)
+	SourceFilters(w http.ResponseWriter, r *http.Request, sourceId SourceId)
+	// SourceImage An image from a source (covers, icons)
+	// (GET /sources/{source_id}/image)
+	SourceImage(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourceImageParams)
+	// SourceLatest A source's latest updates
+	// (GET /sources/{source_id}/latest)
+	SourceLatest(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourceLatestParams)
+	// SourcePopular A source's popular series
+	// (GET /sources/{source_id}/popular)
+	SourcePopular(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourcePopularParams)
+	// SourceSearch Search a source
+	// (POST /sources/{source_id}/search)
+	SourceSearch(w http.ResponseWriter, r *http.Request, sourceId SourceId)
+	// SourceSeries A series on a source, in full
+	// (GET /sources/{source_id}/series)
+	SourceSeries(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourceSeriesParams)
 	// GetSystemHealth Detailed health (admins)
 	// (GET /system/health)
 	GetSystemHealth(w http.ResponseWriter, r *http.Request)
@@ -1274,6 +1640,54 @@ func (_ Unimplemented) DeleteMySession(w http.ResponseWriter, r *http.Request, i
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListPlugins List source plugins
+// (GET /plugins)
+func (_ Unimplemented) ListPlugins(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RegisterPlugin Add a source plugin running as a service
+// (POST /plugins)
+func (_ Unimplemented) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeletePlugin Remove a plugin and its sources
+// (DELETE /plugins/{plugin_id})
+func (_ Unimplemented) DeletePlugin(w http.ResponseWriter, r *http.Request, pluginId PluginId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPlugin Get a plugin
+// (GET /plugins/{plugin_id})
+func (_ Unimplemented) GetPlugin(w http.ResponseWriter, r *http.Request, pluginId PluginId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdatePlugin Change a plugin's address or key, or turn it off
+// (PATCH /plugins/{plugin_id})
+func (_ Unimplemented) UpdatePlugin(w http.ResponseWriter, r *http.Request, pluginId PluginId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPluginConfig A plugin's configuration and its schema
+// (GET /plugins/{plugin_id}/config)
+func (_ Unimplemented) GetPluginConfig(w http.ResponseWriter, r *http.Request, pluginId PluginId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetPluginConfig Replace a plugin's configuration
+// (PUT /plugins/{plugin_id}/config)
+func (_ Unimplemented) SetPluginConfig(w http.ResponseWriter, r *http.Request, pluginId PluginId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SyncPlugin Refresh a plugin's info, health and sources now
+// (POST /plugins/{plugin_id}/sync)
+func (_ Unimplemented) SyncPlugin(w http.ResponseWriter, r *http.Request, pluginId PluginId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetSetup First-run wizard state
 // (GET /setup)
 func (_ Unimplemented) GetSetup(w http.ResponseWriter, r *http.Request) {
@@ -1289,6 +1703,60 @@ func (_ Unimplemented) CreateSetupAdmin(w http.ResponseWriter, r *http.Request) 
 // CompleteSetup Finish the first-run wizard
 // (POST /setup/complete)
 func (_ Unimplemented) CompleteSetup(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListSources Sources the caller may use
+// (GET /sources)
+func (_ Unimplemented) ListSources(w http.ResponseWriter, r *http.Request, params ListSourcesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateSource Turn a source on or off for everyone
+// (PATCH /sources/{source_id})
+func (_ Unimplemented) UpdateSource(w http.ResponseWriter, r *http.Request, sourceId SourceId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SourceChapters A series' chapters exactly as the source lists them
+// (GET /sources/{source_id}/chapters)
+func (_ Unimplemented) SourceChapters(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourceChaptersParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SourceFilters A source's search filters
+// (GET /sources/{source_id}/filters)
+func (_ Unimplemented) SourceFilters(w http.ResponseWriter, r *http.Request, sourceId SourceId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SourceImage An image from a source (covers, icons)
+// (GET /sources/{source_id}/image)
+func (_ Unimplemented) SourceImage(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourceImageParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SourceLatest A source's latest updates
+// (GET /sources/{source_id}/latest)
+func (_ Unimplemented) SourceLatest(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourceLatestParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SourcePopular A source's popular series
+// (GET /sources/{source_id}/popular)
+func (_ Unimplemented) SourcePopular(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourcePopularParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SourceSearch Search a source
+// (POST /sources/{source_id}/search)
+func (_ Unimplemented) SourceSearch(w http.ResponseWriter, r *http.Request, sourceId SourceId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SourceSeries A series on a source, in full
+// (GET /sources/{source_id}/series)
+func (_ Unimplemented) SourceSeries(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourceSeriesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1994,6 +2462,190 @@ func (siw *ServerInterfaceWrapper) DeleteMySession(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListPlugins operation middleware
+func (siw *ServerInterfaceWrapper) ListPlugins(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPlugins(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RegisterPlugin operation middleware
+func (siw *ServerInterfaceWrapper) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RegisterPlugin(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeletePlugin operation middleware
+func (siw *ServerInterfaceWrapper) DeletePlugin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "plugin_id" -------------
+	var pluginId PluginId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "plugin_id", chi.URLParam(r, "plugin_id"), &pluginId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "plugin_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeletePlugin(w, r, pluginId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPlugin operation middleware
+func (siw *ServerInterfaceWrapper) GetPlugin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "plugin_id" -------------
+	var pluginId PluginId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "plugin_id", chi.URLParam(r, "plugin_id"), &pluginId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "plugin_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPlugin(w, r, pluginId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdatePlugin operation middleware
+func (siw *ServerInterfaceWrapper) UpdatePlugin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "plugin_id" -------------
+	var pluginId PluginId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "plugin_id", chi.URLParam(r, "plugin_id"), &pluginId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "plugin_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdatePlugin(w, r, pluginId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPluginConfig operation middleware
+func (siw *ServerInterfaceWrapper) GetPluginConfig(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "plugin_id" -------------
+	var pluginId PluginId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "plugin_id", chi.URLParam(r, "plugin_id"), &pluginId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "plugin_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPluginConfig(w, r, pluginId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetPluginConfig operation middleware
+func (siw *ServerInterfaceWrapper) SetPluginConfig(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "plugin_id" -------------
+	var pluginId PluginId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "plugin_id", chi.URLParam(r, "plugin_id"), &pluginId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "plugin_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetPluginConfig(w, r, pluginId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SyncPlugin operation middleware
+func (siw *ServerInterfaceWrapper) SyncPlugin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "plugin_id" -------------
+	var pluginId PluginId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "plugin_id", chi.URLParam(r, "plugin_id"), &pluginId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "plugin_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SyncPlugin(w, r, pluginId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetSetup operation middleware
 func (siw *ServerInterfaceWrapper) GetSetup(w http.ResponseWriter, r *http.Request) {
 
@@ -2027,6 +2679,353 @@ func (siw *ServerInterfaceWrapper) CompleteSetup(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CompleteSetup(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSources operation middleware
+func (siw *ServerInterfaceWrapper) ListSources(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSourcesParams
+
+	// ------------- Optional query parameter "all" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "all", r.URL.Query(), &params.All, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "all"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "all", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "lang" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "lang", r.URL.Query(), &params.Lang, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "lang"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lang", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSources(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateSource operation middleware
+func (siw *ServerInterfaceWrapper) UpdateSource(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "source_id" -------------
+	var sourceId SourceId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "source_id", chi.URLParam(r, "source_id"), &sourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "source_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateSource(w, r, sourceId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SourceChapters operation middleware
+func (siw *ServerInterfaceWrapper) SourceChapters(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "source_id" -------------
+	var sourceId SourceId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "source_id", chi.URLParam(r, "source_id"), &sourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "source_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SourceChaptersParams
+
+	// ------------- Required query parameter "key" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "key", r.URL.Query(), &params.Key, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "key"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SourceChapters(w, r, sourceId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SourceFilters operation middleware
+func (siw *ServerInterfaceWrapper) SourceFilters(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "source_id" -------------
+	var sourceId SourceId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "source_id", chi.URLParam(r, "source_id"), &sourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "source_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SourceFilters(w, r, sourceId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SourceImage operation middleware
+func (siw *ServerInterfaceWrapper) SourceImage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "source_id" -------------
+	var sourceId SourceId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "source_id", chi.URLParam(r, "source_id"), &sourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "source_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SourceImageParams
+
+	// ------------- Required query parameter "ref" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "ref", r.URL.Query(), &params.Ref, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "ref"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ref", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "sig" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "sig", r.URL.Query(), &params.Sig, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sig"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sig", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SourceImage(w, r, sourceId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SourceLatest operation middleware
+func (siw *ServerInterfaceWrapper) SourceLatest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "source_id" -------------
+	var sourceId SourceId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "source_id", chi.URLParam(r, "source_id"), &sourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "source_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SourceLatestParams
+
+	// ------------- Optional query parameter "page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page", r.URL.Query(), &params.Page, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SourceLatest(w, r, sourceId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SourcePopular operation middleware
+func (siw *ServerInterfaceWrapper) SourcePopular(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "source_id" -------------
+	var sourceId SourceId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "source_id", chi.URLParam(r, "source_id"), &sourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "source_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SourcePopularParams
+
+	// ------------- Optional query parameter "page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page", r.URL.Query(), &params.Page, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SourcePopular(w, r, sourceId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SourceSearch operation middleware
+func (siw *ServerInterfaceWrapper) SourceSearch(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "source_id" -------------
+	var sourceId SourceId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "source_id", chi.URLParam(r, "source_id"), &sourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "source_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SourceSearch(w, r, sourceId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SourceSeries operation middleware
+func (siw *ServerInterfaceWrapper) SourceSeries(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "source_id" -------------
+	var sourceId SourceId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "source_id", chi.URLParam(r, "source_id"), &sourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "source_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SourceSeriesParams
+
+	// ------------- Required query parameter "key" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "key", r.URL.Query(), &params.Key, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "key"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SourceSeries(w, r, sourceId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2481,6 +3480,57 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/catalog/entries/{entry_id}/cover", wrapper.GetCatalogEntryCover)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/plugins", wrapper.ListPlugins)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/plugins", wrapper.RegisterPlugin)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/plugins/{plugin_id}", wrapper.DeletePlugin)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/plugins/{plugin_id}", wrapper.GetPlugin)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/plugins/{plugin_id}", wrapper.UpdatePlugin)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/plugins/{plugin_id}/sync", wrapper.SyncPlugin)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/plugins/{plugin_id}/config", wrapper.GetPluginConfig)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/plugins/{plugin_id}/config", wrapper.SetPluginConfig)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/sources", wrapper.ListSources)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/sources/{source_id}", wrapper.UpdateSource)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/sources/{source_id}/popular", wrapper.SourcePopular)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/sources/{source_id}/latest", wrapper.SourceLatest)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/sources/{source_id}/search", wrapper.SourceSearch)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/sources/{source_id}/filters", wrapper.SourceFilters)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/sources/{source_id}/series", wrapper.SourceSeries)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/sources/{source_id}/chapters", wrapper.SourceChapters)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/sources/{source_id}/image", wrapper.SourceImage)
 	})
 
 	return r
@@ -3210,6 +4260,313 @@ func (response DeleteMySessiondefaultApplicationProblemPlusJSONResponse) VisitDe
 	return err
 }
 
+type ListPluginsRequestObject struct {
+}
+
+type ListPluginsResponseObject interface {
+	VisitListPluginsResponse(w http.ResponseWriter) error
+}
+
+type ListPlugins200JSONResponse PluginList
+
+func (response ListPlugins200JSONResponse) VisitListPluginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPluginsdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response ListPluginsdefaultApplicationProblemPlusJSONResponse) VisitListPluginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RegisterPluginRequestObject struct {
+	Body *RegisterPluginJSONRequestBody
+}
+
+type RegisterPluginResponseObject interface {
+	VisitRegisterPluginResponse(w http.ResponseWriter) error
+}
+
+type RegisterPlugin201JSONResponse Plugin
+
+func (response RegisterPlugin201JSONResponse) VisitRegisterPluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RegisterPlugindefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response RegisterPlugindefaultApplicationProblemPlusJSONResponse) VisitRegisterPluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeletePluginRequestObject struct {
+	PluginId PluginId `json:"plugin_id"`
+}
+
+type DeletePluginResponseObject interface {
+	VisitDeletePluginResponse(w http.ResponseWriter) error
+}
+
+type DeletePlugin204Response struct {
+}
+
+func (response DeletePlugin204Response) VisitDeletePluginResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeletePlugindefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response DeletePlugindefaultApplicationProblemPlusJSONResponse) VisitDeletePluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginRequestObject struct {
+	PluginId PluginId `json:"plugin_id"`
+}
+
+type GetPluginResponseObject interface {
+	VisitGetPluginResponse(w http.ResponseWriter) error
+}
+
+type GetPlugin200JSONResponse Plugin
+
+func (response GetPlugin200JSONResponse) VisitGetPluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPlugindefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response GetPlugindefaultApplicationProblemPlusJSONResponse) VisitGetPluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePluginRequestObject struct {
+	PluginId PluginId `json:"plugin_id"`
+	Body     *UpdatePluginJSONRequestBody
+}
+
+type UpdatePluginResponseObject interface {
+	VisitUpdatePluginResponse(w http.ResponseWriter) error
+}
+
+type UpdatePlugin200JSONResponse Plugin
+
+func (response UpdatePlugin200JSONResponse) VisitUpdatePluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePlugindefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response UpdatePlugindefaultApplicationProblemPlusJSONResponse) VisitUpdatePluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginConfigRequestObject struct {
+	PluginId PluginId `json:"plugin_id"`
+}
+
+type GetPluginConfigResponseObject interface {
+	VisitGetPluginConfigResponse(w http.ResponseWriter) error
+}
+
+type GetPluginConfig200JSONResponse PluginConfig
+
+func (response GetPluginConfig200JSONResponse) VisitGetPluginConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginConfigdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response GetPluginConfigdefaultApplicationProblemPlusJSONResponse) VisitGetPluginConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginConfigRequestObject struct {
+	PluginId PluginId `json:"plugin_id"`
+	Body     *SetPluginConfigJSONRequestBody
+}
+
+type SetPluginConfigResponseObject interface {
+	VisitSetPluginConfigResponse(w http.ResponseWriter) error
+}
+
+type SetPluginConfig200JSONResponse PluginConfig
+
+func (response SetPluginConfig200JSONResponse) VisitSetPluginConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginConfigdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response SetPluginConfigdefaultApplicationProblemPlusJSONResponse) VisitSetPluginConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncPluginRequestObject struct {
+	PluginId PluginId `json:"plugin_id"`
+}
+
+type SyncPluginResponseObject interface {
+	VisitSyncPluginResponse(w http.ResponseWriter) error
+}
+
+type SyncPlugin200JSONResponse Plugin
+
+func (response SyncPlugin200JSONResponse) VisitSyncPluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncPlugindefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response SyncPlugindefaultApplicationProblemPlusJSONResponse) VisitSyncPluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetSetupRequestObject struct {
 }
 
@@ -3314,6 +4671,379 @@ type CompleteSetupdefaultApplicationProblemPlusJSONResponse struct {
 }
 
 func (response CompleteSetupdefaultApplicationProblemPlusJSONResponse) VisitCompleteSetupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSourcesRequestObject struct {
+	Params ListSourcesParams
+}
+
+type ListSourcesResponseObject interface {
+	VisitListSourcesResponse(w http.ResponseWriter) error
+}
+
+type ListSources200JSONResponse SourceList
+
+func (response ListSources200JSONResponse) VisitListSourcesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSourcesdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response ListSourcesdefaultApplicationProblemPlusJSONResponse) VisitListSourcesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSourceRequestObject struct {
+	SourceId SourceId `json:"source_id"`
+	Body     *UpdateSourceJSONRequestBody
+}
+
+type UpdateSourceResponseObject interface {
+	VisitUpdateSourceResponse(w http.ResponseWriter) error
+}
+
+type UpdateSource200JSONResponse SourceInfo
+
+func (response UpdateSource200JSONResponse) VisitUpdateSourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSourcedefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response UpdateSourcedefaultApplicationProblemPlusJSONResponse) VisitUpdateSourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SourceChaptersRequestObject struct {
+	SourceId SourceId `json:"source_id"`
+	Params   SourceChaptersParams
+}
+
+type SourceChaptersResponseObject interface {
+	VisitSourceChaptersResponse(w http.ResponseWriter) error
+}
+
+type SourceChapters200JSONResponse SourceChapterList
+
+func (response SourceChapters200JSONResponse) VisitSourceChaptersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SourceChaptersdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response SourceChaptersdefaultApplicationProblemPlusJSONResponse) VisitSourceChaptersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SourceFiltersRequestObject struct {
+	SourceId SourceId `json:"source_id"`
+}
+
+type SourceFiltersResponseObject interface {
+	VisitSourceFiltersResponse(w http.ResponseWriter) error
+}
+
+type SourceFilters200JSONResponse SourceFilters
+
+func (response SourceFilters200JSONResponse) VisitSourceFiltersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SourceFiltersdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response SourceFiltersdefaultApplicationProblemPlusJSONResponse) VisitSourceFiltersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SourceImageRequestObject struct {
+	SourceId SourceId `json:"source_id"`
+	Params   SourceImageParams
+}
+
+type SourceImageResponseObject interface {
+	VisitSourceImageResponse(w http.ResponseWriter) error
+}
+
+type SourceImage200ResponseHeaders struct {
+	CacheControl *string
+}
+
+type SourceImage200ImageResponse struct {
+	Body          io.Reader
+	Headers       SourceImage200ResponseHeaders
+	ContentType   string
+	ContentLength int64
+}
+
+func (response SourceImage200ImageResponse) VisitSourceImageResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", response.ContentType)
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type SourceImagedefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response SourceImagedefaultApplicationProblemPlusJSONResponse) VisitSourceImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SourceLatestRequestObject struct {
+	SourceId SourceId `json:"source_id"`
+	Params   SourceLatestParams
+}
+
+type SourceLatestResponseObject interface {
+	VisitSourceLatestResponse(w http.ResponseWriter) error
+}
+
+type SourceLatest200JSONResponse SourceSeriesPage
+
+func (response SourceLatest200JSONResponse) VisitSourceLatestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SourceLatestdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response SourceLatestdefaultApplicationProblemPlusJSONResponse) VisitSourceLatestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SourcePopularRequestObject struct {
+	SourceId SourceId `json:"source_id"`
+	Params   SourcePopularParams
+}
+
+type SourcePopularResponseObject interface {
+	VisitSourcePopularResponse(w http.ResponseWriter) error
+}
+
+type SourcePopular200JSONResponse SourceSeriesPage
+
+func (response SourcePopular200JSONResponse) VisitSourcePopularResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SourcePopulardefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response SourcePopulardefaultApplicationProblemPlusJSONResponse) VisitSourcePopularResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SourceSearchRequestObject struct {
+	SourceId SourceId `json:"source_id"`
+	Body     *SourceSearchJSONRequestBody
+}
+
+type SourceSearchResponseObject interface {
+	VisitSourceSearchResponse(w http.ResponseWriter) error
+}
+
+type SourceSearch200JSONResponse SourceSeriesPage
+
+func (response SourceSearch200JSONResponse) VisitSourceSearchResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SourceSearchdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response SourceSearchdefaultApplicationProblemPlusJSONResponse) VisitSourceSearchResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SourceSeriesRequestObject struct {
+	SourceId SourceId `json:"source_id"`
+	Params   SourceSeriesParams
+}
+
+type SourceSeriesResponseObject interface {
+	VisitSourceSeriesResponse(w http.ResponseWriter) error
+}
+
+type SourceSeries200JSONResponse SourceSeries
+
+func (response SourceSeries200JSONResponse) VisitSourceSeriesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SourceSeriesdefaultApplicationProblemPlusJSONResponse struct {
+	Body       Problem
+	StatusCode int
+}
+
+func (response SourceSeriesdefaultApplicationProblemPlusJSONResponse) VisitSourceSeriesResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -3805,6 +5535,30 @@ type StrictServerInterface interface {
 	// DeleteMySession Sign out another session (session only)
 	// (DELETE /me/sessions/{id})
 	DeleteMySession(ctx context.Context, request DeleteMySessionRequestObject) (DeleteMySessionResponseObject, error)
+	// ListPlugins List source plugins
+	// (GET /plugins)
+	ListPlugins(ctx context.Context, request ListPluginsRequestObject) (ListPluginsResponseObject, error)
+	// RegisterPlugin Add a source plugin running as a service
+	// (POST /plugins)
+	RegisterPlugin(ctx context.Context, request RegisterPluginRequestObject) (RegisterPluginResponseObject, error)
+	// DeletePlugin Remove a plugin and its sources
+	// (DELETE /plugins/{plugin_id})
+	DeletePlugin(ctx context.Context, request DeletePluginRequestObject) (DeletePluginResponseObject, error)
+	// GetPlugin Get a plugin
+	// (GET /plugins/{plugin_id})
+	GetPlugin(ctx context.Context, request GetPluginRequestObject) (GetPluginResponseObject, error)
+	// UpdatePlugin Change a plugin's address or key, or turn it off
+	// (PATCH /plugins/{plugin_id})
+	UpdatePlugin(ctx context.Context, request UpdatePluginRequestObject) (UpdatePluginResponseObject, error)
+	// GetPluginConfig A plugin's configuration and its schema
+	// (GET /plugins/{plugin_id}/config)
+	GetPluginConfig(ctx context.Context, request GetPluginConfigRequestObject) (GetPluginConfigResponseObject, error)
+	// SetPluginConfig Replace a plugin's configuration
+	// (PUT /plugins/{plugin_id}/config)
+	SetPluginConfig(ctx context.Context, request SetPluginConfigRequestObject) (SetPluginConfigResponseObject, error)
+	// SyncPlugin Refresh a plugin's info, health and sources now
+	// (POST /plugins/{plugin_id}/sync)
+	SyncPlugin(ctx context.Context, request SyncPluginRequestObject) (SyncPluginResponseObject, error)
 	// GetSetup First-run wizard state
 	// (GET /setup)
 	GetSetup(ctx context.Context, request GetSetupRequestObject) (GetSetupResponseObject, error)
@@ -3814,6 +5568,33 @@ type StrictServerInterface interface {
 	// CompleteSetup Finish the first-run wizard
 	// (POST /setup/complete)
 	CompleteSetup(ctx context.Context, request CompleteSetupRequestObject) (CompleteSetupResponseObject, error)
+	// ListSources Sources the caller may use
+	// (GET /sources)
+	ListSources(ctx context.Context, request ListSourcesRequestObject) (ListSourcesResponseObject, error)
+	// UpdateSource Turn a source on or off for everyone
+	// (PATCH /sources/{source_id})
+	UpdateSource(ctx context.Context, request UpdateSourceRequestObject) (UpdateSourceResponseObject, error)
+	// SourceChapters A series' chapters exactly as the source lists them
+	// (GET /sources/{source_id}/chapters)
+	SourceChapters(ctx context.Context, request SourceChaptersRequestObject) (SourceChaptersResponseObject, error)
+	// SourceFilters A source's search filters
+	// (GET /sources/{source_id}/filters)
+	SourceFilters(ctx context.Context, request SourceFiltersRequestObject) (SourceFiltersResponseObject, error)
+	// SourceImage An image from a source (covers, icons)
+	// (GET /sources/{source_id}/image)
+	SourceImage(ctx context.Context, request SourceImageRequestObject) (SourceImageResponseObject, error)
+	// SourceLatest A source's latest updates
+	// (GET /sources/{source_id}/latest)
+	SourceLatest(ctx context.Context, request SourceLatestRequestObject) (SourceLatestResponseObject, error)
+	// SourcePopular A source's popular series
+	// (GET /sources/{source_id}/popular)
+	SourcePopular(ctx context.Context, request SourcePopularRequestObject) (SourcePopularResponseObject, error)
+	// SourceSearch Search a source
+	// (POST /sources/{source_id}/search)
+	SourceSearch(ctx context.Context, request SourceSearchRequestObject) (SourceSearchResponseObject, error)
+	// SourceSeries A series on a source, in full
+	// (GET /sources/{source_id}/series)
+	SourceSeries(ctx context.Context, request SourceSeriesRequestObject) (SourceSeriesResponseObject, error)
 	// GetSystemHealth Detailed health (admins)
 	// (GET /system/health)
 	GetSystemHealth(ctx context.Context, request GetSystemHealthRequestObject) (GetSystemHealthResponseObject, error)
@@ -4408,6 +6189,231 @@ func (sh *strictHandler) DeleteMySession(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// ListPlugins operation middleware
+func (sh *strictHandler) ListPlugins(w http.ResponseWriter, r *http.Request) {
+	var request ListPluginsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPlugins(ctx, request.(ListPluginsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPlugins")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPluginsResponseObject); ok {
+		if err := validResponse.VisitListPluginsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RegisterPlugin operation middleware
+func (sh *strictHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
+	var request RegisterPluginRequestObject
+
+	var body RegisterPluginJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RegisterPlugin(ctx, request.(RegisterPluginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RegisterPlugin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RegisterPluginResponseObject); ok {
+		if err := validResponse.VisitRegisterPluginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeletePlugin operation middleware
+func (sh *strictHandler) DeletePlugin(w http.ResponseWriter, r *http.Request, pluginId PluginId) {
+	var request DeletePluginRequestObject
+
+	request.PluginId = pluginId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeletePlugin(ctx, request.(DeletePluginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeletePlugin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeletePluginResponseObject); ok {
+		if err := validResponse.VisitDeletePluginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPlugin operation middleware
+func (sh *strictHandler) GetPlugin(w http.ResponseWriter, r *http.Request, pluginId PluginId) {
+	var request GetPluginRequestObject
+
+	request.PluginId = pluginId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPlugin(ctx, request.(GetPluginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPlugin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPluginResponseObject); ok {
+		if err := validResponse.VisitGetPluginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdatePlugin operation middleware
+func (sh *strictHandler) UpdatePlugin(w http.ResponseWriter, r *http.Request, pluginId PluginId) {
+	var request UpdatePluginRequestObject
+
+	request.PluginId = pluginId
+
+	var body UpdatePluginJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdatePlugin(ctx, request.(UpdatePluginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdatePlugin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdatePluginResponseObject); ok {
+		if err := validResponse.VisitUpdatePluginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPluginConfig operation middleware
+func (sh *strictHandler) GetPluginConfig(w http.ResponseWriter, r *http.Request, pluginId PluginId) {
+	var request GetPluginConfigRequestObject
+
+	request.PluginId = pluginId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPluginConfig(ctx, request.(GetPluginConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPluginConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPluginConfigResponseObject); ok {
+		if err := validResponse.VisitGetPluginConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetPluginConfig operation middleware
+func (sh *strictHandler) SetPluginConfig(w http.ResponseWriter, r *http.Request, pluginId PluginId) {
+	var request SetPluginConfigRequestObject
+
+	request.PluginId = pluginId
+
+	var body SetPluginConfigJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetPluginConfig(ctx, request.(SetPluginConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetPluginConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetPluginConfigResponseObject); ok {
+		if err := validResponse.VisitSetPluginConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SyncPlugin operation middleware
+func (sh *strictHandler) SyncPlugin(w http.ResponseWriter, r *http.Request, pluginId PluginId) {
+	var request SyncPluginRequestObject
+
+	request.PluginId = pluginId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SyncPlugin(ctx, request.(SyncPluginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SyncPlugin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SyncPluginResponseObject); ok {
+		if err := validResponse.VisitSyncPluginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetSetup operation middleware
 func (sh *strictHandler) GetSetup(w http.ResponseWriter, r *http.Request) {
 	var request GetSetupRequestObject
@@ -4480,6 +6486,259 @@ func (sh *strictHandler) CompleteSetup(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CompleteSetupResponseObject); ok {
 		if err := validResponse.VisitCompleteSetupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSources operation middleware
+func (sh *strictHandler) ListSources(w http.ResponseWriter, r *http.Request, params ListSourcesParams) {
+	var request ListSourcesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSources(ctx, request.(ListSourcesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSources")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSourcesResponseObject); ok {
+		if err := validResponse.VisitListSourcesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateSource operation middleware
+func (sh *strictHandler) UpdateSource(w http.ResponseWriter, r *http.Request, sourceId SourceId) {
+	var request UpdateSourceRequestObject
+
+	request.SourceId = sourceId
+
+	var body UpdateSourceJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateSource(ctx, request.(UpdateSourceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateSource")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateSourceResponseObject); ok {
+		if err := validResponse.VisitUpdateSourceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SourceChapters operation middleware
+func (sh *strictHandler) SourceChapters(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourceChaptersParams) {
+	var request SourceChaptersRequestObject
+
+	request.SourceId = sourceId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SourceChapters(ctx, request.(SourceChaptersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SourceChapters")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SourceChaptersResponseObject); ok {
+		if err := validResponse.VisitSourceChaptersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SourceFilters operation middleware
+func (sh *strictHandler) SourceFilters(w http.ResponseWriter, r *http.Request, sourceId SourceId) {
+	var request SourceFiltersRequestObject
+
+	request.SourceId = sourceId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SourceFilters(ctx, request.(SourceFiltersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SourceFilters")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SourceFiltersResponseObject); ok {
+		if err := validResponse.VisitSourceFiltersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SourceImage operation middleware
+func (sh *strictHandler) SourceImage(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourceImageParams) {
+	var request SourceImageRequestObject
+
+	request.SourceId = sourceId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SourceImage(ctx, request.(SourceImageRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SourceImage")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SourceImageResponseObject); ok {
+		if err := validResponse.VisitSourceImageResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SourceLatest operation middleware
+func (sh *strictHandler) SourceLatest(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourceLatestParams) {
+	var request SourceLatestRequestObject
+
+	request.SourceId = sourceId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SourceLatest(ctx, request.(SourceLatestRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SourceLatest")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SourceLatestResponseObject); ok {
+		if err := validResponse.VisitSourceLatestResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SourcePopular operation middleware
+func (sh *strictHandler) SourcePopular(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourcePopularParams) {
+	var request SourcePopularRequestObject
+
+	request.SourceId = sourceId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SourcePopular(ctx, request.(SourcePopularRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SourcePopular")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SourcePopularResponseObject); ok {
+		if err := validResponse.VisitSourcePopularResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SourceSearch operation middleware
+func (sh *strictHandler) SourceSearch(w http.ResponseWriter, r *http.Request, sourceId SourceId) {
+	var request SourceSearchRequestObject
+
+	request.SourceId = sourceId
+
+	var body SourceSearchJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SourceSearch(ctx, request.(SourceSearchRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SourceSearch")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SourceSearchResponseObject); ok {
+		if err := validResponse.VisitSourceSearchResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SourceSeries operation middleware
+func (sh *strictHandler) SourceSeries(w http.ResponseWriter, r *http.Request, sourceId SourceId, params SourceSeriesParams) {
+	var request SourceSeriesRequestObject
+
+	request.SourceId = sourceId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SourceSeries(ctx, request.(SourceSeriesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SourceSeries")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SourceSeriesResponseObject); ok {
+		if err := validResponse.VisitSourceSeriesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -4797,147 +7056,190 @@ func (sh *strictHandler) UpdateUser(w http.ResponseWriter, r *http.Request, id I
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"eaRk6wOZPG9fqB+Z3H24+68BAA==",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

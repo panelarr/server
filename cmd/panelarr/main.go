@@ -26,6 +26,7 @@ import (
 	"github.com/panelarr/server/internal/logging"
 	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/metrics"
+	"github.com/panelarr/server/internal/plugins"
 	"github.com/panelarr/server/internal/secret"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/users"
@@ -147,6 +148,18 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		log.Error("metadata service connection", "component", "meta", "err", err)
 	}
 	images := imagecache.New(filepath.Join(cfg.ConfigDir, "cache", "images"))
+	signer, err := imagecache.LoadSigner(ctx, st)
+	if err != nil {
+		return err
+	}
+	host := plugins.NewHost(st, box, plugins.RemoteDialer, logging.Component(log, "plugins"))
+	// Connecting to plugins can take a while; the API serves meanwhile.
+	go func() {
+		if err := host.Load(ctx); err != nil {
+			log.Error("load plugins", "component", "plugins", "err", err)
+		}
+		host.RunRefresh(ctx, 5*time.Minute)
+	}()
 
 	handler, err := api.NewHandler(api.Deps{
 		Log:          logging.Component(log, "api"),
@@ -157,11 +170,14 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 			// The library needs the metadata service, but reading what's
 			// downloaded doesn't: without it the server is degraded.
 			{Name: "meta", Run: metaSvc.ReadyCheck},
+			{Name: "plugins", Run: host.ReadyCheck},
 		},
 		Auth:           authSvc,
 		Users:          usersSvc,
 		Meta:           metaSvc,
 		Images:         images,
+		Plugins:        host,
+		Signer:         signer,
 		SecureCookies:  cfg.SecureCookies(),
 		TrustedProxies: cfg.TrustedProxies,
 	})

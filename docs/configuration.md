@@ -42,6 +42,12 @@ Entries without a known content rating are shown to users by default. To hide th
 
 Covers are fetched by the server and cached under `<config>/cache/images` (safe to delete).
 
+## Source plugins
+
+Sources come from plugins that run as their own services. An admin adds a plugin by its URL (and API key, stored encrypted); the server checks it speaks the source plugin contract, lists its sources and refreshes them with their health every five minutes. A plugin's settings are edited in the app, kept encrypted, and handed back to the plugin whenever it restarts. A plugin that is down marks the server `degraded`; its sources stay known.
+
+Each source's ID is `<plugin>:<source>`. Admins turn sources on or off for everyone; each user's grants (allowed sources, content-rating ceiling) decide which they see. Mixed-content sources count as "suggestive", adult-only sources as "pornographic". Images from sources (covers, icons) are fetched through the plugin and cached by the server; their links are signed, so the server never fetches an address a caller made up.
+
 ## Accounts
 
 The first account created (through the first-run wizard) is the admin. Admins add users with a password or send invite links, and set each user's role and grants. Passwords are hashed with argon2id. Failed logins are limited per username (5 per 15 minutes) and per client address (30 per 15 minutes).

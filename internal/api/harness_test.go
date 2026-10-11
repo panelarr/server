@@ -21,6 +21,7 @@ import (
 	"github.com/panelarr/server/internal/imagecache"
 	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/metrics"
+	"github.com/panelarr/server/internal/plugins"
 	"github.com/panelarr/server/internal/secret"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/store/storetest"
@@ -53,16 +54,21 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	st := storetest.New(t)
 	a := auth.NewService(st, auth.NewHasher(fastArgon2, 4), nil)
 	u := users.NewService(st, a, nil)
-	m := meta.NewService(st, secret.NewBox("", filepath.Join(t.TempDir(), "secret.key")), meta.Conn{}, nil)
+	box := secret.NewBox("", filepath.Join(t.TempDir(), "secret.key"))
+	m := meta.NewService(st, box, meta.Conn{}, nil)
+	host := plugins.NewHost(st, box, plugins.RemoteDialer, nil)
 	deps := Deps{
-		Log:    slog.New(slog.DiscardHandler),
-		Auth:   a,
-		Users:  u,
-		Meta:   m,
-		Images: imagecache.New(t.TempDir()),
+		Log:     slog.New(slog.DiscardHandler),
+		Auth:    a,
+		Users:   u,
+		Meta:    m,
+		Images:  imagecache.New(t.TempDir()),
+		Plugins: host,
+		Signer:  imagecache.NewSigner([]byte("test signing key")),
 		Checks: []Check{
 			{Name: "database", Required: true, Run: st.Pool.Ping},
 			{Name: "meta", Run: m.ReadyCheck},
+			{Name: "plugins", Run: host.ReadyCheck},
 		},
 		// The test client connects from loopback; trust nothing, so the
 		// peer address is the client address.

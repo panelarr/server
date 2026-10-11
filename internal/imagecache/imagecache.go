@@ -70,10 +70,20 @@ func (c *Cache) paths(rawURL string) (data, meta string) {
 	return base, base + ".type"
 }
 
-// Get returns the image at rawURL, fetching it on first use. Concurrent
-// requests for the same URL share one fetch.
+// Fetcher produces an image: its content type and bytes.
+type Fetcher func(ctx context.Context) (contentType string, body io.Reader, err error)
+
+// Get returns the image at rawURL, fetching it over HTTP on first use.
 func (c *Cache) Get(ctx context.Context, rawURL string) (Image, error) {
-	data, meta := c.paths(rawURL)
+	return c.GetWith(ctx, rawURL, func(ctx context.Context) (string, io.Reader, error) {
+		return c.fetchHTTP(ctx, rawURL)
+	})
+}
+
+// GetWith returns the image cached under key, calling fetch on first use.
+// Concurrent requests for the same key share one fetch.
+func (c *Cache) GetWith(ctx context.Context, key string, fetch Fetcher) (Image, error) {
+	data, meta := c.paths(key)
 	if img, ok := c.cached(data, meta); ok {
 		return img, nil
 	}
@@ -84,7 +94,14 @@ func (c *Cache) Get(ctx context.Context, rawURL string) (Image, error) {
 		// The fetch outlives a cancelled caller: others may wait for it.
 		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		return c.fetch(fctx, rawURL, data, meta)
+		ct, body, err := fetch(fctx)
+		if err != nil {
+			return nil, err
+		}
+		if rc, ok := body.(io.Closer); ok {
+			defer rc.Close()
+		}
+		return c.store(ct, body, data, meta)
 	})
 	if err != nil {
 		return Image{}, err
@@ -104,25 +121,30 @@ func (c *Cache) cached(data, meta string) (Image, bool) {
 	return Image{Path: data, ContentType: string(ct), ModTime: st.ModTime()}, true
 }
 
-func (c *Cache) fetch(ctx context.Context, rawURL, data, meta string) (Image, error) {
+func (c *Cache) fetchHTTP(ctx context.Context, rawURL string) (string, io.Reader, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return Image{}, fmt.Errorf("imagecache: unsupported URL")
+		return "", nil, fmt.Errorf("imagecache: unsupported URL")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return Image{}, err
+		return "", nil, err
 	}
 	req.Header.Set("Accept", "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8")
 	res, err := c.hc.Do(req)
 	if err != nil {
-		return Image{}, fmt.Errorf("imagecache: fetch: %w", err)
+		return "", nil, fmt.Errorf("imagecache: fetch: %w", err)
 	}
-	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return Image{}, fmt.Errorf("imagecache: fetch: status %d", res.StatusCode)
+		_ = res.Body.Close()
+		return "", nil, fmt.Errorf("imagecache: fetch: status %d", res.StatusCode)
 	}
-	ct, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type"))
+	return res.Header.Get("Content-Type"), res.Body, nil
+}
+
+// store checks the content type and writes the image atomically.
+func (c *Cache) store(contentType string, body io.Reader, data, meta string) (Image, error) {
+	ct, _, _ := mime.ParseMediaType(contentType)
 	if !strings.HasPrefix(ct, "image/") || ct == "image/svg+xml" {
 		// SVG can carry scripts; it is never served from our origin.
 		return Image{}, ErrNotImage
@@ -135,7 +157,7 @@ func (c *Cache) fetch(ctx context.Context, rawURL, data, meta string) (Image, er
 		return Image{}, err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
-	n, err := io.Copy(tmp, io.LimitReader(res.Body, MaxBytes+1))
+	n, err := io.Copy(tmp, io.LimitReader(body, MaxBytes+1))
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}

@@ -54,7 +54,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 			anonWant = want{401, "unauthenticated"}
 			userWant, writeKeyWant, adminKeyWant = ok, ok, ok
 			readKeyWant = ok
-			if !safe {
+			if !safe && !pol.ReadOnly {
 				readKeyWant = want{403, "insufficient_scope"}
 			}
 		case AccessAdmin:

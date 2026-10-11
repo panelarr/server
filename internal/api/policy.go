@@ -30,6 +30,9 @@ type policy struct {
 	Setup bool
 	// SessionOnly operations refuse API keys.
 	SessionOnly bool
+	// ReadOnly operations only read even when their method isn't GET (a
+	// POST with a structured query): a key's read scope is enough.
+	ReadOnly bool
 	// Route lets the request validator check the request against the spec.
 	Route *routers.Route
 }
@@ -65,6 +68,9 @@ func loadPolicies() (policies, error) {
 				return nil, err
 			}
 			if err := extBool(op, "x-panelarr-session-only", &p.SessionOnly); err != nil {
+				return nil, err
+			}
+			if err := extBool(op, "x-panelarr-read-only", &p.ReadOnly); err != nil {
 				return nil, err
 			}
 			if p.Access == AccessPublic && p.SessionOnly {

@@ -64,13 +64,15 @@ func (s *Service) allowedRatings(ctx context.Context, v Viewer) []metadatav1.Con
 			break
 		}
 	}
-	if v.Admin || !s.hideUnknown(ctx) {
+	if v.Admin || !s.HideUnknown(ctx) {
 		out = append(out, unrated...)
 	}
 	return out
 }
 
-func (s *Service) hideUnknown(ctx context.Context) bool {
+// HideUnknown reports whether users are kept from entries and sources
+// without a known content rating.
+func (s *Service) HideUnknown(ctx context.Context) bool {
 	raw, err := s.st.GetSetting(ctx, settingHideUnknown)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false

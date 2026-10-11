@@ -203,7 +203,7 @@ func (s *Server) checkAccess(r *http.Request, pol *policy) *Problem {
 			return NewProblem(http.StatusForbidden, "session_required", "this needs a signed-in browser session, not an API key")
 		}
 		need := auth.ScopeWrite
-		if safeMethod(r.Method) {
+		if safeMethod(r.Method) || pol.ReadOnly {
 			need = auth.ScopeRead
 		}
 		if !p.HasScope(need) || (pol.Access == AccessAdmin && !p.HasScope(auth.ScopeAdmin)) {

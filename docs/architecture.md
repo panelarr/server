@@ -12,7 +12,9 @@ internal/users/          accounts, grants, invites, first-run setup
 internal/secret/         encryption of stored secrets
 internal/meta/           the metadata service: connection, checks, catalogue
 internal/meta/metatest/  a fake metadata service for tests
-internal/imagecache/     fetched images (covers) cached on disk
+internal/imagecache/     fetched images (covers) cached on disk; signed image links
+internal/plugins/        source plugins: registration, sync, config, visibility, browsing
+internal/plugins/pluginstest/  serves made-up plugins over gRPC for tests
 internal/config/         startup settings from env and flags
 internal/logging/        structured logs
 internal/metrics/        Prometheus collectors (bounded labels)

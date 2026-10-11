@@ -17,7 +17,14 @@ export PANELARR_DB='postgres://panelarr:secret@localhost:5432/panelarr?sslmode=d
 curl http://localhost:8900/api/v1/system/info
 ```
 
-The server migrates its database on start. A container image will follow.
+The server migrates its database on start. On first use, create the admin account:
+
+```sh
+curl -X POST http://localhost:8900/api/v1/setup/admin \
+  -H 'Content-Type: application/json' -d '{"username":"admin","password":"choose a good one"}'
+```
+
+A container image will follow.
 
 ## Configuration
 
@@ -31,7 +38,9 @@ Startup settings come from `PANELARR_*` environment variables or flags; everythi
 | `PANELARR_DATA` | `<config>/data` | default library location (`/data` in containers) |
 | `PANELARR_BASE_URL` | | public URL |
 | `PANELARR_LOG_FORMAT` / `PANELARR_LOG_LEVEL` | `json` / `info` | logging |
-| `PANELARR_METRICS_ENABLED` / `PANELARR_METRICS_LISTEN` | off | Prometheus metrics on a separate listener |
+| `PANELARR_SECRET_KEY` | key file in config | encrypts stored secrets |
+| `PANELARR_TRUSTED_PROXIES` | private networks | reverse proxies allowed to set `X-Forwarded-For` |
+| `PANELARR_METRICS_ENABLED` / `PANELARR_METRICS_LISTEN` | off | Prometheus metrics, on a separate listener or behind a `metrics:read` key |
 
 ## Docs
 

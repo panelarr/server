@@ -7,3 +7,19 @@ The Panelarr server's REST API is a **public client API**: the web app is one cl
 - **Errors:** [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem details (`application/problem+json`) with a stable `code` such as `not_found` or `invalid_request`, the `request_id` and, for validation errors, per-field `errors`. Unexpected errors are answered with a bare `internal` problem; details go to the server log under the same request ID.
 - **Request IDs:** every response carries `X-Request-Id`. Send your own (letters, digits, `.`, `_`, `-`, up to 64 characters) to correlate calls.
 - **Lists** are cursor-paginated (`page_token` → `next_page_token`).
+
+## Authentication
+
+- **Browser sessions.** `POST /api/v1/auth/login` (or the first-run `POST /api/v1/setup/admin`, or accepting an invite) sets two cookies: `panelarr_session` (HTTP-only) and `panelarr_csrf` (readable). Every request that changes something (not GET, HEAD or OPTIONS) must echo the CSRF token in the `X-CSRF-Token` header. Cross-site requests are refused. Sessions last 30 days from their last use.
+- **Personal API keys** (`pnl_…`), created by a signed-in user under `/api/v1/me/api-keys`. Send `X-Api-Key: <key>` or `Authorization: Bearer <key>`; no CSRF token is needed. Scopes: `read` (GET), `write` (changes), `admin` (admin endpoints; admins only), `metrics:read` (`/metrics`; admins only). A key never holds more than its owner's current role allows. Changing the password and managing sessions and keys need a browser session.
+- Sending an invalid key is an error (`401 invalid_api_key`), never a silent fallback to anonymous.
+
+Every operation in the spec declares who may call it (`x-panelarr-access`: `public`, `user` or `admin`; `x-panelarr-session-only`). The server enforces exactly that, and a test calls every operation as each kind of caller.
+
+## First run
+
+Until the first account exists, every endpoint except `GET /system/info`, `GET /setup` and `POST /setup/admin` answers `409 setup_required`. `GET /system/info` tells clients whether setup is needed (`setup_required`).
+
+## Validation
+
+Requests are checked against the spec before they reach a handler: wrong types, missing fields, unknown enum values, lengths and patterns answer `400 invalid_request` with one `errors` entry per field.

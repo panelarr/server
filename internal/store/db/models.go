@@ -6,10 +6,68 @@ package db
 
 import (
 	"time"
+
+	"github.com/google/uuid"
 )
+
+type ApiKey struct {
+	ID         uuid.UUID
+	UserID     uuid.UUID
+	Name       string
+	Prefix     string
+	KeyHash    []byte
+	Scopes     []string
+	CreatedAt  time.Time
+	LastUsedAt *time.Time
+	ExpiresAt  *time.Time
+}
+
+type Invite struct {
+	ID        uuid.UUID
+	TokenHash []byte
+	Role      string
+	Grants    []byte
+	Note      string
+	CreatedBy uuid.NullUUID
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+	UsedBy    uuid.NullUUID
+}
+
+type Session struct {
+	ID         uuid.UUID
+	TokenHash  []byte
+	UserID     uuid.UUID
+	CsrfToken  string
+	UserAgent  string
+	Ip         string
+	CreatedAt  time.Time
+	LastSeenAt time.Time
+	ExpiresAt  time.Time
+}
 
 type Setting struct {
 	Key       string
 	Value     []byte
 	UpdatedAt time.Time
+}
+
+type User struct {
+	ID                   uuid.UUID
+	Username             string
+	DisplayName          string
+	PasswordHash         string
+	Role                 string
+	Disabled             bool
+	MayAdd               bool
+	MayDownload          bool
+	MayManageMatches     bool
+	ContentRatingCeiling string
+	AllSources           bool
+	AllowedSources       []string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	PasswordChangedAt    time.Time
+	LastLoginAt          *time.Time
 }

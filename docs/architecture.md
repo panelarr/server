@@ -7,6 +7,9 @@ cmd/panelarr/            entry point: serve, migrate, healthcheck, version
 api/openapi.yaml         the public API contract (spec-first)
 internal/api/            HTTP layer: router, middleware, problem errors, handlers
 internal/api/apigen/     code generated from the spec (do not edit)
+internal/auth/           sessions, API keys, password hashing, login limits
+internal/users/          accounts, grants, invites, first-run setup
+internal/secret/         encryption of stored secrets
 internal/config/         startup settings from env and flags
 internal/logging/        structured logs
 internal/metrics/        Prometheus collectors (bounded labels)

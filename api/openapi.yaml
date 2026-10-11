@@ -9,27 +9,70 @@ info:
     need a new major path (`/api/v2`); CI checks every change against the
     published spec.
 
-    **Errors** use RFC 9457 problem details (`application/problem+json`) with
-    a stable, machine-readable `code`.
+    ## Authentication
 
-    **Lists** are cursor-paginated: pass `page_token` from the previous
+    - **Browser sessions:** `POST /auth/login` sets an HTTP-only session
+      cookie (`panelarr_session`) and a readable CSRF cookie
+      (`panelarr_csrf`). Requests that change something (any method other
+      than GET, HEAD and OPTIONS) made with the session cookie must send the
+      CSRF token in the `X-CSRF-Token` header.
+    - **Personal API keys** (`pnl_…`): send `X-Api-Key: <key>` or
+      `Authorization: Bearer <key>`. No CSRF token is needed. A key acts as
+      its owner, limited by its scopes: `read` (GET requests), `write`
+      (everything else), `admin` (admin endpoints, for admins' keys) and
+      `metrics:read` (`/metrics` on the API port).
+
+    Some endpoints need a browser session (marked "session only"): changing
+    the password and managing sessions and API keys can't be done with a key.
+
+    ## First run
+
+    Until the first account exists, every endpoint except the setup ones
+    answers `409` with code `setup_required`. `POST /setup/admin` creates
+    that account, which becomes the admin.
+
+    ## Errors
+
+    Errors use RFC 9457 problem details (`application/problem+json`) with a
+    stable, machine-readable `code`.
+
+    ## Lists
+
+    Lists are cursor-paginated: pass `page_token` from the previous
     response's `next_page_token`; an empty token means the last page.
   license:
     name: GPL-3.0-or-later
     identifier: GPL-3.0-or-later
 servers:
   - url: /api/v1
+security:
+  - sessionCookie: []
+  - apiKeyHeader: []
+  - bearer: []
 tags:
   - name: system
     description: Server information and health.
+  - name: setup
+    description: The first-run wizard.
+  - name: auth
+    description: Signing in and out, and invites.
+  - name: me
+    description: The signed-in user's own account, sessions and API keys.
+  - name: users
+    description: Managing users (admins).
+  - name: invites
+    description: Invite links for new users (admins).
+
 paths:
   /system/info:
     get:
       operationId: getSystemInfo
       tags: [system]
-      summary: Server name and version
-      description: Needs no authentication, so clients can recognise a Panelarr server before signing in.
+      summary: Server name, version and setup state
+      description: Needs no authentication, so clients can recognise a Panelarr server and whether it still needs setting up before signing in.
       security: []
+      x-panelarr-access: public
+      x-panelarr-setup: true
       responses:
         "200":
           description: Server information.
@@ -39,7 +82,503 @@ paths:
                 $ref: "#/components/schemas/SystemInfo"
         default:
           $ref: "#/components/responses/Problem"
+
+  /system/health:
+    get:
+      operationId: getSystemHealth
+      tags: [system]
+      summary: Detailed health (admins)
+      description: Every component the server depends on, with its status and the error if it fails. `degraded` means an optional component fails and the server keeps serving what it can.
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The health of each component.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemHealth"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /setup:
+    get:
+      operationId: getSetup
+      tags: [setup]
+      summary: First-run wizard state
+      security: []
+      x-panelarr-access: public
+      x-panelarr-setup: true
+      responses:
+        "200":
+          description: Where the wizard stands.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupStatus"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /setup/admin:
+    post:
+      operationId: createSetupAdmin
+      tags: [setup]
+      summary: Create the first account (the admin)
+      description: Works only while no account exists; afterwards it answers `409` with code `already_set_up`. Signs the new admin in (sets the session cookies).
+      security: []
+      x-panelarr-access: public
+      x-panelarr-setup: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSetupAdminRequest"
+      responses:
+        "201":
+          description: The admin, signed in.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /setup/complete:
+    post:
+      operationId: completeSetup
+      tags: [setup]
+      summary: Finish the first-run wizard
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The wizard is complete.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupStatus"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Sign in with a username and password
+      description: |
+        Sets the session cookie and the CSRF cookie, and returns the CSRF
+        token. Wrong credentials answer `401` with code
+        `invalid_credentials`; too many failed attempts answer `429` with
+        code `rate_limited` and a `Retry-After` header.
+      security: []
+      x-panelarr-access: public
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Sign out (session only)
+      description: Ends the current session and clears the cookies.
+      x-panelarr-access: user
+      x-panelarr-session-only: true
+      responses:
+        "204":
+          description: Signed out.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /auth/invites/check:
+    post:
+      operationId: checkInvite
+      tags: [auth]
+      summary: Check an invite token before signing up
+      description: The token travels in the body, never in a URL, so it doesn't end up in logs. An unknown, used or expired token answers `404` with code `invite_invalid`.
+      security: []
+      x-panelarr-access: public
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InviteToken"
+      responses:
+        "200":
+          description: The invite is valid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteCheck"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /auth/invites/accept:
+    post:
+      operationId: acceptInvite
+      tags: [auth]
+      summary: Create an account from an invite
+      description: Creates the user with the invite's role and grants, uses up the invite and signs the user in.
+      security: []
+      x-panelarr-access: public
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptInviteRequest"
+      responses:
+        "201":
+          description: The new user, signed in.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me:
+    get:
+      operationId: getMe
+      tags: [me]
+      summary: The signed-in user
+      x-panelarr-access: user
+      responses:
+        "200":
+          description: The caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateMe
+      tags: [me]
+      summary: Change your own profile
+      x-panelarr-access: user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMeRequest"
+      responses:
+        "200":
+          description: The updated caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/password:
+    post:
+      operationId: changeMyPassword
+      tags: [me]
+      summary: Change your own password (session only)
+      description: Needs the current password (`403` with code `invalid_credentials` otherwise). Ends every other session of the user.
+      x-panelarr-access: user
+      x-panelarr-session-only: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "204":
+          description: Changed.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/sessions:
+    get:
+      operationId: listMySessions
+      tags: [me]
+      summary: Your signed-in sessions (session only)
+      x-panelarr-access: user
+      x-panelarr-session-only: true
+      responses:
+        "200":
+          description: Sessions, most recently used first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/sessions/{id}:
+    delete:
+      operationId: deleteMySession
+      tags: [me]
+      summary: Sign out another session (session only)
+      x-panelarr-access: user
+      x-panelarr-session-only: true
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204":
+          description: Signed out.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/api-keys:
+    get:
+      operationId: listMyApiKeys
+      tags: [me]
+      summary: Your API keys (session only)
+      x-panelarr-access: user
+      x-panelarr-session-only: true
+      responses:
+        "200":
+          description: Keys, newest first. The keys themselves are never shown again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createMyApiKey
+      tags: [me]
+      summary: Create an API key (session only)
+      description: The key is in this response only; the server keeps just its hash. `admin` and `metrics:read` scopes need an admin account.
+      x-panelarr-access: user
+      x-panelarr-session-only: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApiKeyRequest"
+      responses:
+        "201":
+          description: The new key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyCreated"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/api-keys/{id}:
+    delete:
+      operationId: deleteMyApiKey
+      tags: [me]
+      summary: Revoke an API key (session only)
+      x-panelarr-access: user
+      x-panelarr-session-only: true
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204":
+          description: Revoked.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List users
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/PageToken"
+      responses:
+        "200":
+          description: Users by username.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createUser
+      tags: [users]
+      summary: Create a user with a password
+      description: A taken username answers `409` with code `username_taken`.
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: The new user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      operationId: getUser
+      tags: [users]
+      summary: Get a user
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateUser
+      tags: [users]
+      summary: Change a user
+      description: |
+        Only the fields sent change. Setting `password` resets it and ends
+        the user's sessions; disabling a user ends their sessions and stops
+        their API keys from working. The last enabled admin can't be
+        disabled or demoted (`409`, code `last_admin`), and admins can't
+        disable or demote themselves (`409`, code `cannot_change_self`).
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "200":
+          description: The updated user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteUser
+      tags: [users]
+      summary: Delete a user
+      description: Deletes the account with its sessions and API keys. Content they added stays (it is shared). Admins can't delete themselves (`409`, code `cannot_change_self`).
+      x-panelarr-access: admin
+      responses:
+        "204":
+          description: Deleted.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /invites:
+    get:
+      operationId: listInvites
+      tags: [invites]
+      summary: List open invites
+      description: Invites that are neither used nor expired, newest first.
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: Open invites.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createInvite
+      tags: [invites]
+      summary: Create an invite
+      description: The token is in this response only. The web app builds the invite link from it (as a URL fragment, so it never reaches server logs).
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInviteRequest"
+      responses:
+        "201":
+          description: The new invite and its token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteCreated"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /invites/{id}:
+    delete:
+      operationId: deleteInvite
+      tags: [invites]
+      summary: Revoke an invite
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204":
+          description: Revoked.
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: panelarr_session
+      description: Browser session. Changes also need the `X-CSRF-Token` header.
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: A personal API key.
+    bearer:
+      type: http
+      scheme: bearer
+      description: A personal API key as a bearer token.
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PageSize:
+      name: page_size
+      in: query
+      description: Items per page, 1 to 200. Default 50.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+    PageToken:
+      name: page_token
+      in: query
+      description: The `next_page_token` of the previous page.
+      schema:
+        type: string
+        maxLength: 512
+
   responses:
     Problem:
       description: An error, as RFC 9457 problem details.
@@ -47,6 +586,7 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
+
   schemas:
     Problem:
       type: object
@@ -71,7 +611,10 @@ components:
           description: The request path.
         code:
           type: string
-          description: A stable, machine-readable error code, e.g. "not_found", "invalid_request", "setup_required".
+          description: |
+            A stable, machine-readable error code. Common ones:
+            `invalid_request`, `unauthenticated`, `forbidden`, `csrf_failed`,
+            `not_found`, `setup_required`, `rate_limited`, `internal`.
           pattern: "^[a-z][a-z0-9_]*$"
         request_id:
           type: string
@@ -87,12 +630,13 @@ components:
       properties:
         field:
           type: string
-          description: JSON path of the field, e.g. "grants.allowed_sources[2]".
+          description: The field, e.g. "grants.allowed_sources".
         message:
           type: string
+
     SystemInfo:
       type: object
-      required: [name, version]
+      required: [name, version, setup_required]
       properties:
         name:
           type: string
@@ -101,3 +645,428 @@ components:
         version:
           type: string
           description: The server version, e.g. "0.3.1", or "dev".
+        setup_required:
+          type: boolean
+          description: True until the first account (the admin) exists.
+
+    HealthStatus:
+      type: string
+      enum: [ok, degraded, unavailable]
+      description: "`unavailable`: a required component fails. `degraded`: an optional one fails."
+    ComponentHealth:
+      type: object
+      required: [name, required, status]
+      properties:
+        name:
+          type: string
+        required:
+          type: boolean
+          description: Whether the server can't work without it.
+        status:
+          type: string
+          enum: [ok, failing]
+        error:
+          type: string
+        latency_ms:
+          type: integer
+    SystemHealth:
+      type: object
+      required: [status, version, components]
+      properties:
+        status:
+          $ref: "#/components/schemas/HealthStatus"
+        version:
+          type: string
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/ComponentHealth"
+
+    SetupStatus:
+      type: object
+      required: [admin_created, completed]
+      properties:
+        admin_created:
+          type: boolean
+          description: The first account exists.
+        completed:
+          type: boolean
+          description: An admin finished the wizard.
+        completed_at:
+          type: string
+          format: date-time
+    CreateSetupAdminRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          $ref: "#/components/schemas/Username"
+        password:
+          $ref: "#/components/schemas/Password"
+        display_name:
+          $ref: "#/components/schemas/DisplayName"
+
+    Username:
+      type: string
+      description: Letters, digits, `.`, `_` and `-`, starting with a letter or digit. Case-insensitively unique.
+      minLength: 2
+      maxLength: 64
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    Password:
+      type: string
+      description: 8 to 256 characters.
+      minLength: 8
+      maxLength: 256
+    DisplayName:
+      type: string
+      maxLength: 100
+    Role:
+      type: string
+      enum: [admin, user]
+      description: Admins may do everything; users what their grants allow.
+    ContentRating:
+      type: string
+      enum: [safe, suggestive, erotic, pornographic]
+      description: Content ratings from mildest to strongest.
+    Grants:
+      type: object
+      description: What a user may do. Admins may always do everything, whatever their grants say.
+      required: [may_add, may_download, may_manage_matches, content_rating_ceiling, all_sources, allowed_sources]
+      properties:
+        may_add:
+          type: boolean
+          description: Add works to their library.
+        may_download:
+          type: boolean
+          description: Queue downloads.
+        may_manage_matches:
+          type: boolean
+          description: Fix source matches, pin chapter variants and set source priorities for works.
+        content_rating_ceiling:
+          $ref: "#/components/schemas/ContentRating"
+        all_sources:
+          type: boolean
+          description: Every source is allowed, including ones added later. When false, only `allowed_sources`.
+        allowed_sources:
+          type: array
+          description: Source IDs (`plugin:source`) the user may use when `all_sources` is false.
+          maxItems: 1000
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+    GrantsPatch:
+      type: object
+      description: Only the fields sent change.
+      properties:
+        may_add:
+          type: boolean
+        may_download:
+          type: boolean
+        may_manage_matches:
+          type: boolean
+        content_rating_ceiling:
+          $ref: "#/components/schemas/ContentRating"
+        all_sources:
+          type: boolean
+        allowed_sources:
+          type: array
+          maxItems: 1000
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+
+    User:
+      type: object
+      required: [id, username, display_name, role, disabled, grants, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        display_name:
+          type: string
+          description: Empty when not set; show the username then.
+        role:
+          $ref: "#/components/schemas/Role"
+        disabled:
+          type: boolean
+        grants:
+          $ref: "#/components/schemas/Grants"
+        created_at:
+          type: string
+          format: date-time
+        last_login_at:
+          type: string
+          format: date-time
+    UserList:
+      type: object
+      required: [users, next_page_token]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        next_page_token:
+          type: string
+    CreateUserRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          $ref: "#/components/schemas/Username"
+        password:
+          $ref: "#/components/schemas/Password"
+        display_name:
+          $ref: "#/components/schemas/DisplayName"
+        role:
+          $ref: "#/components/schemas/Role"
+        grants:
+          $ref: "#/components/schemas/GrantsPatch"
+    UpdateUserRequest:
+      type: object
+      properties:
+        display_name:
+          $ref: "#/components/schemas/DisplayName"
+        role:
+          $ref: "#/components/schemas/Role"
+        disabled:
+          type: boolean
+        password:
+          $ref: "#/components/schemas/Password"
+        grants:
+          $ref: "#/components/schemas/GrantsPatch"
+
+    Me:
+      type: object
+      required: [user, auth]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        auth:
+          type: object
+          required: [method, scopes]
+          properties:
+            method:
+              type: string
+              enum: [session, api_key]
+            scopes:
+              type: array
+              description: For API keys, the key's scopes; for sessions, every scope the user's role allows.
+              items:
+                $ref: "#/components/schemas/ApiKeyScope"
+    UpdateMeRequest:
+      type: object
+      properties:
+        display_name:
+          $ref: "#/components/schemas/DisplayName"
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          maxLength: 256
+        new_password:
+          $ref: "#/components/schemas/Password"
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          maxLength: 64
+        password:
+          type: string
+          maxLength: 256
+    LoginResponse:
+      type: object
+      required: [user, csrf_token]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        csrf_token:
+          type: string
+          description: Send it as `X-CSRF-Token` with changing requests. Also in the `panelarr_csrf` cookie.
+
+    Session:
+      type: object
+      required: [id, current, created_at, last_seen_at, expires_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        current:
+          type: boolean
+          description: The session making this request.
+        user_agent:
+          type: string
+        ip:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    SessionList:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Session"
+
+    ApiKeyScope:
+      type: string
+      enum: [read, write, admin, "metrics:read"]
+    ApiKey:
+      type: object
+      required: [id, name, prefix, scopes, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+          description: The start of the key, to tell keys apart.
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApiKeyScope"
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    ApiKeyList:
+      type: object
+      required: [api_keys]
+      properties:
+        api_keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApiKey"
+    CreateApiKeyRequest:
+      type: object
+      required: [name, scopes]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        scopes:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ApiKeyScope"
+        expires_at:
+          type: string
+          format: date-time
+          description: Optional. The key stops working then.
+    ApiKeyCreated:
+      type: object
+      required: [api_key, key]
+      properties:
+        api_key:
+          $ref: "#/components/schemas/ApiKey"
+        key:
+          type: string
+          description: The key. Shown only here.
+
+    InviteToken:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 200
+    InviteCheck:
+      type: object
+      required: [role, expires_at]
+      properties:
+        role:
+          $ref: "#/components/schemas/Role"
+        expires_at:
+          type: string
+          format: date-time
+    AcceptInviteRequest:
+      type: object
+      required: [token, username, password]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 200
+        username:
+          $ref: "#/components/schemas/Username"
+        password:
+          $ref: "#/components/schemas/Password"
+        display_name:
+          $ref: "#/components/schemas/DisplayName"
+    Invite:
+      type: object
+      required: [id, role, grants, note, created_at, expires_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          $ref: "#/components/schemas/Role"
+        grants:
+          $ref: "#/components/schemas/Grants"
+        note:
+          type: string
+          description: The admin's note, e.g. who it's for.
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    InviteList:
+      type: object
+      required: [invites]
+      properties:
+        invites:
+          type: array
+          items:
+            $ref: "#/components/schemas/Invite"
+    CreateInviteRequest:
+      type: object
+      properties:
+        role:
+          $ref: "#/components/schemas/Role"
+        grants:
+          $ref: "#/components/schemas/GrantsPatch"
+        note:
+          type: string
+          maxLength: 200
+        expires_in_hours:
+          type: integer
+          minimum: 1
+          maximum: 720
+          description: Default 72.
+    InviteCreated:
+      type: object
+      required: [invite, token]
+      properties:
+        invite:
+          $ref: "#/components/schemas/Invite"
+        token:
+          type: string
+          description: The invite token. Shown only here.

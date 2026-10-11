@@ -3,7 +3,7 @@
 The plan for the server's first version, in slices. Each slice works end to end, has tests and ends with `make check` green. The first version covers: accounts and first-run setup, adding a work from the metadata service and matching it on sources, unified chapters, the reader API and downloads.
 
 - [x] **0. Scaffold:** Go module, `make` targets, lint, CI, release config, repo docs. `panelarr serve | migrate | healthcheck | version`; env and flag config; JSON/text logs; Prometheus metrics on a private listener (off by default); `/healthz` and `/readyz` with required and optional checks; PostgreSQL with goose, sqlc and pgx; spec-first REST API (`api/openapi.yaml`, oapi-codegen strict server) with RFC 9457 problem errors and a breaking-change check.
-- [ ] **1. Accounts and setup:** users (argon2id), roles admin and user, grants (`may_add`, `may_download`, `may_manage_matches`, allowed sources, content-rating ceiling); cookie sessions with CSRF protection; scoped personal API keys (hashed, shown once); rate-limited login; first-run gate (the first account becomes the admin); users admin; invite links; secrets encrypted at rest; authorization test matrix; detailed health for admins; metrics via a `metrics:read` key.
+- [x] **1. Accounts and setup:** users (argon2id), roles admin and user, grants (`may_add`, `may_download`, `may_manage_matches`, allowed sources, content-rating ceiling); cookie sessions with CSRF protection; scoped personal API keys (hashed, shown once); rate-limited login; first-run gate (the first account becomes the admin); users admin; invite links; secrets encryption (used from slice 2); authorization from the spec with a test matrix over every operation; request validation against the spec; detailed health for admins; metrics via a `metrics:read` key.
 - [ ] **2. Metadata service:** connection and setup-wizard check (reachable, admin key, a provider with entries); degraded while it's down; catalogue search, browse and details through the server, filtered by the user's ceiling; cover proxy and cache.
 - [ ] **3. Source plugins (remote):** register endpoints, plugin config from its schema, sync sources and their health, per-source visibility; browse, search and series preview through the server; optional wizard step.
 - [ ] **4. Jobs and events:** PostgreSQL job queue (lease, retries with back-off, per-source concurrency and rate limits, de-duplication); named jobs and runs API; per-user filtered server-sent events.
@@ -26,4 +26,4 @@ Settled for now, cheap to change:
 
 ## Next
 
-Slice 1: accounts and setup.
+Slice 2: the metadata service connection and catalogue.

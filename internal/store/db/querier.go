@@ -6,13 +6,49 @@ package db
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
 
 type Querier interface {
+	CountEnabledAdmins(ctx context.Context) (int64, error)
+	CountUsers(ctx context.Context) (int64, error)
+	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
+	CreateInvite(ctx context.Context, arg CreateInviteParams) (Invite, error)
+	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteExpiredSessions(ctx context.Context) (int64, error)
+	DeleteInvite(ctx context.Context, id uuid.UUID) (int64, error)
+	DeleteSession(ctx context.Context, id uuid.UUID) error
 	DeleteSetting(ctx context.Context, key string) error
+	DeleteUser(ctx context.Context, id uuid.UUID) (int64, error)
+	DeleteUserAPIKey(ctx context.Context, arg DeleteUserAPIKeyParams) (int64, error)
+	DeleteUserSession(ctx context.Context, arg DeleteUserSessionParams) (int64, error)
+	DeleteUserSessions(ctx context.Context, userID uuid.UUID) error
+	DeleteUserSessionsExcept(ctx context.Context, arg DeleteUserSessionsExceptParams) error
+	GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKeyByHashRow, error)
+	GetOpenInviteByTokenHash(ctx context.Context, tokenHash []byte) (Invite, error)
+	GetOpenInviteByTokenHashForUpdate(ctx context.Context, tokenHash []byte) (Invite, error)
+	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionByTokenHashRow, error)
 	GetSetting(ctx context.Context, key string) ([]byte, error)
+	GetUser(ctx context.Context, id uuid.UUID) (User, error)
+	GetUserByUsername(ctx context.Context, username string) (User, error)
+	GetUserForUpdate(ctx context.Context, id uuid.UUID) (User, error)
+	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ApiKey, error)
+	ListOpenInvites(ctx context.Context) ([]Invite, error)
+	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]Session, error)
 	ListSettings(ctx context.Context) ([]Setting, error)
+	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
+	// Serialises changes that check "is there another admin?" or "is this the
+	// first account?" within one transaction.
+	LockAccounts(ctx context.Context) error
+	MarkInviteUsed(ctx context.Context, arg MarkInviteUsedParams) error
 	PutSetting(ctx context.Context, arg PutSettingParams) error
+	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
+	TouchAPIKey(ctx context.Context, id uuid.UUID) error
+	TouchSession(ctx context.Context, arg TouchSessionParams) error
+	TouchUserLogin(ctx context.Context, id uuid.UUID) error
+	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 }
 
 var _ Querier = (*Queries)(nil)

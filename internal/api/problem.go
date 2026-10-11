@@ -7,6 +7,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
+
+	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/getkin/kin-openapi/openapi3filter"
 
 	"github.com/panelarr/server/internal/api/apigen"
 )
@@ -80,3 +84,52 @@ func writeBadRequest(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// validationProblem turns a spec validation failure into a 400 with one
+// entry per failing field.
+func validationProblem(err error) *Problem {
+	var fields []apigen.FieldError
+	var collect func(prefix string, err error)
+	collect = func(prefix string, err error) {
+		var multi openapi3.MultiError
+		if errors.As(err, &multi) {
+			for _, e := range multi {
+				collect(prefix, e)
+			}
+			return
+		}
+		var re *openapi3filter.RequestError
+		if errors.As(err, &re) {
+			p := prefix
+			if re.Parameter != nil {
+				p = re.Parameter.Name
+			}
+			if re.Err != nil {
+				collect(p, re.Err)
+				return
+			}
+			fields = append(fields, apigen.FieldError{Field: p, Message: re.Reason})
+			return
+		}
+		var se *openapi3.SchemaError
+		if errors.As(err, &se) {
+			field := strings.Join(se.JSONPointer(), ".")
+			if prefix != "" && field != "" {
+				field = prefix + "." + field
+			} else if prefix != "" {
+				field = prefix
+			}
+			fields = append(fields, apigen.FieldError{Field: field, Message: se.Reason})
+			return
+		}
+		fields = append(fields, apigen.FieldError{Field: prefix, Message: err.Error()})
+	}
+	collect("", err)
+	return &Problem{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Detail: "the request doesn't match the API description", Fields: fields}
+}
+
+// fieldProblem is a 400 about one field.
+func fieldProblem(field, message string) *Problem {
+	return &Problem{Status: http.StatusBadRequest, Code: CodeInvalidRequest, Detail: message,
+		Fields: []apigen.FieldError{{Field: field, Message: message}}}
+}

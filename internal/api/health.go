@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -20,67 +22,82 @@ type Check struct {
 	Run      func(ctx context.Context) error
 }
 
-type checkResult struct {
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
-}
+// Overall states.
+const (
+	statusOK          = "ok"
+	statusDegraded    = "degraded"
+	statusUnavailable = "unavailable"
+)
 
-type readiness struct {
-	Status string                 `json:"status"` // ok, degraded or unavailable
-	Checks map[string]checkResult `json:"checks"`
+type checkResult struct {
+	Name     string
+	Required bool
+	Err      error
+	Latency  time.Duration
 }
 
 // checkTimeout bounds each readiness check, so a probe answers in time.
 const checkTimeout = 2 * time.Second
 
-func runChecks(ctx context.Context, checks []Check) readiness {
-	out := readiness{Status: "ok", Checks: make(map[string]checkResult, len(checks))}
-	var mu sync.Mutex
+// runChecks runs every check at once and returns the overall state and
+// the results in name order.
+func runChecks(ctx context.Context, checks []Check) (string, []checkResult) {
+	results := make([]checkResult, len(checks))
 	var wg sync.WaitGroup
-	for _, c := range checks {
+	for i, c := range checks {
 		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(ctx, checkTimeout)
 			defer cancel()
-			res := checkResult{Status: "ok"}
-			if err := c.Run(ctx); err != nil {
-				res = checkResult{Status: "failing", Error: err.Error()}
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			out.Checks[c.Name] = res
-			switch {
-			case res.Status == "ok":
-			case c.Required:
-				out.Status = "unavailable"
-			case out.Status == "ok":
-				out.Status = "degraded"
-			}
+			start := time.Now()
+			err := c.Run(ctx)
+			results[i] = checkResult{Name: c.Name, Required: c.Required, Err: err, Latency: time.Since(start)}
 		})
 	}
 	wg.Wait()
-	return out
+	slices.SortFunc(results, func(a, b checkResult) int { return strings.Compare(a.Name, b.Name) })
+	overall := statusOK
+	for _, r := range results {
+		switch {
+		case r.Err == nil:
+		case r.Required:
+			overall = statusUnavailable
+		case overall == statusOK:
+			overall = statusDegraded
+		}
+	}
+	return overall, results
 }
 
 // healthz answers liveness probes: the process is up and serving HTTP.
 func healthz(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": statusOK})
+}
+
+type readiness struct {
+	Status string                       `json:"status"`
+	Checks map[string]map[string]string `json:"checks"`
 }
 
 // readyz answers readiness probes: 200 when every required dependency
 // works (also while degraded), 503 otherwise. Error messages are left out:
-// the probe needs no authentication.
+// the probe needs no authentication. Admins see them in the detailed
+// health.
 func readyz(checks []Check) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		res := runChecks(r.Context(), checks)
-		for name, c := range res.Checks {
-			c.Error = ""
-			res.Checks[name] = c
+		overall, results := runChecks(r.Context(), checks)
+		out := readiness{Status: overall, Checks: make(map[string]map[string]string, len(results))}
+		for _, res := range results {
+			st := statusOK
+			if res.Err != nil {
+				st = "failing"
+			}
+			out.Checks[res.Name] = map[string]string{"status": st}
 		}
 		status := http.StatusOK
-		if res.Status == "unavailable" {
+		if overall == statusUnavailable {
 			status = http.StatusServiceUnavailable
 		}
-		writeJSON(w, status, res)
+		writeJSON(w, status, out)
 	}
 }
 

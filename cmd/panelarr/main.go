@@ -18,11 +18,13 @@ import (
 	"time"
 
 	"github.com/panelarr/server/internal/api"
+	"github.com/panelarr/server/internal/auth"
 	"github.com/panelarr/server/internal/buildinfo"
 	"github.com/panelarr/server/internal/config"
 	"github.com/panelarr/server/internal/logging"
 	"github.com/panelarr/server/internal/metrics"
 	"github.com/panelarr/server/internal/store"
+	"github.com/panelarr/server/internal/users"
 )
 
 const usage = `panelarr: the Panelarr server
@@ -130,16 +132,28 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	if cfg.Metrics.Enabled {
 		m = metrics.New()
 	}
-	handler := api.NewHandler(api.Deps{
-		Log:     logging.Component(log, "api"),
-		Metrics: m,
+	authSvc := auth.NewService(st, auth.NewHasher(auth.DefaultArgon2, 4), logging.Component(log, "auth"))
+	usersSvc := users.NewService(st, authSvc, logging.Component(log, "users"))
+	go authSvc.RunCleanup(ctx, time.Hour)
+
+	handler, err := api.NewHandler(api.Deps{
+		Log:          logging.Component(log, "api"),
+		Metrics:      m,
+		MetricsOnAPI: cfg.Metrics.Listen == "",
 		Checks: []api.Check{
 			{Name: "database", Required: true, Run: st.Pool.Ping},
 		},
+		Auth:           authSvc,
+		Users:          usersSvc,
+		SecureCookies:  cfg.SecureCookies(),
+		TrustedProxies: cfg.TrustedProxies,
 	})
+	if err != nil {
+		return err
+	}
 
 	servers := []*namedServer{{name: "api", addr: cfg.Listen, srv: newHTTPServer(handler)}}
-	if m != nil {
+	if m != nil && cfg.Metrics.Listen != "" {
 		mux := http.NewServeMux()
 		mux.Handle("GET /metrics", m.Handler())
 		servers = append(servers, &namedServer{name: "metrics", addr: cfg.Metrics.Listen, srv: newHTTPServer(mux)})

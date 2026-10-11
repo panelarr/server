@@ -56,7 +56,7 @@ func TestValidation(t *testing.T) {
 		"log format":      {EnvLogFormat: "xml"},
 		"log level":       {EnvLogLevel: "loud"},
 		"metrics bool":    {EnvMetricsEnabled: "maybe"},
-		"metrics listen":  {EnvMetricsEnabled: "true"},
+		"trusted proxies": {EnvTrustedProxies: "10.0.0.0/8,example"},
 		"metrics address": {EnvMetricsEnabled: "true", EnvMetricsListen: "9464"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -66,6 +66,28 @@ func TestValidation(t *testing.T) {
 				t.Fatalf("want a config error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestTrustedProxies(t *testing.T) {
+	cfg, err := load(t, map[string]string{EnvConfigDir: "/config"})
+	if err != nil || len(cfg.TrustedProxies) != 6 {
+		t.Fatalf("defaults: %v %v", cfg.TrustedProxies, err)
+	}
+	cfg, err = load(t, map[string]string{EnvConfigDir: "/config", EnvTrustedProxies: "203.0.113.7, 10.1.2.3/8"})
+	if err != nil || len(cfg.TrustedProxies) != 2 || cfg.TrustedProxies[0].String() != "203.0.113.7/32" || cfg.TrustedProxies[1].String() != "10.0.0.0/8" {
+		t.Fatalf("custom: %v %v", cfg.TrustedProxies, err)
+	}
+	cfg, err = load(t, map[string]string{EnvConfigDir: "/config"}, "--trusted-proxies", "none")
+	if err != nil || len(cfg.TrustedProxies) != 0 {
+		t.Fatalf("none: %v %v", cfg.TrustedProxies, err)
+	}
+}
+
+func TestMetricsOnAPIPort(t *testing.T) {
+	cfg, err := load(t, map[string]string{EnvConfigDir: "/config", EnvMetricsEnabled: "true"})
+	if err != nil || !cfg.Metrics.Enabled || cfg.Metrics.Listen != "" {
+		t.Fatalf("got %+v, %v", cfg.Metrics, err)
 	}
 }
 

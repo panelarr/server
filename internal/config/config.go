@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -35,6 +36,15 @@ type Config struct {
 	// "https://panelarr.example.com". Optional. It decides whether cookies
 	// are marked Secure and how absolute links are built.
 	BaseURL string
+	// SecretKey encrypts stored secrets (service and plugin keys, storage
+	// credentials): base64 of 32 bytes. Empty: a key file in ConfigDir,
+	// generated on first use.
+	SecretKey string
+	// TrustedProxies are the networks whose X-Forwarded-For header is
+	// believed when finding a client's address (for login limits and the
+	// session list). Default: loopback and private networks, where reverse
+	// proxies usually run.
+	TrustedProxies []netip.Prefix
 	// Log configures logging.
 	Log Log
 	// Metrics configures the Prometheus endpoint.
@@ -49,12 +59,13 @@ type Log struct {
 	Level string
 }
 
-// Metrics configures Prometheus metrics. They are off by default and, when
-// on, served on their own address so they aren't open on the API port.
+// Metrics configures Prometheus metrics. They are off by default. When on,
+// they are served on their own address, or on the API port to callers
+// whose API key has the metrics:read scope.
 type Metrics struct {
 	Enabled bool
-	// Listen is the metrics address, e.g. "127.0.0.1:9464". Required while
-	// metrics are on.
+	// Listen is the metrics address, e.g. "127.0.0.1:9464". Empty: /metrics
+	// on the API port, behind a metrics:read key.
 	Listen string
 }
 
@@ -69,7 +80,12 @@ const (
 	EnvLogLevel       = "PANELARR_LOG_LEVEL"
 	EnvMetricsEnabled = "PANELARR_METRICS_ENABLED"
 	EnvMetricsListen  = "PANELARR_METRICS_LISTEN"
+	EnvSecretKey      = "PANELARR_SECRET_KEY"
+	EnvTrustedProxies = "PANELARR_TRUSTED_PROXIES"
 )
+
+// DefaultTrustedProxies are loopback and private networks.
+const DefaultTrustedProxies = "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
 
 // DefaultListen is the server's port by convention.
 const DefaultListen = ":8900"
@@ -79,6 +95,7 @@ type Flags struct {
 	listen, databaseURL, configDir, dataDir, baseURL string
 	logFormat, logLevel                              string
 	metricsEnabled, metricsListen                    string
+	trustedProxies                                   string
 }
 
 // Register adds the flags to fs.
@@ -92,6 +109,7 @@ func (f *Flags) Register(fs *flag.FlagSet) {
 	fs.StringVar(&f.logLevel, "log-level", "", "debug, info, warn or error (env "+EnvLogLevel+")")
 	fs.StringVar(&f.metricsEnabled, "metrics", "", "serve Prometheus metrics: true or false (env "+EnvMetricsEnabled+")")
 	fs.StringVar(&f.metricsListen, "metrics-listen", "", "metrics listen address (env "+EnvMetricsListen+")")
+	fs.StringVar(&f.trustedProxies, "trusted-proxies", "", "comma-separated networks of trusted reverse proxies, or \"none\" (env "+EnvTrustedProxies+")")
 }
 
 // Load builds the configuration from defaults, then the environment (read
@@ -116,8 +134,14 @@ func (f *Flags) Load(getenv func(string) string) (Config, error) {
 			Format: strings.ToLower(pick(f.logFormat, EnvLogFormat, "json")),
 			Level:  strings.ToLower(pick(f.logLevel, EnvLogLevel, "info")),
 		},
-		Metrics: Metrics{Listen: pick(f.metricsListen, EnvMetricsListen, "")},
+		Metrics:   Metrics{Listen: pick(f.metricsListen, EnvMetricsListen, "")},
+		SecretKey: strings.TrimSpace(getenv(EnvSecretKey)),
 	}
+	proxies, err := parsePrefixes(pick(f.trustedProxies, EnvTrustedProxies, DefaultTrustedProxies))
+	if err != nil {
+		return cfg, fmt.Errorf("config: %s: %w", EnvTrustedProxies, err)
+	}
+	cfg.TrustedProxies = proxies
 	v := pick(f.metricsEnabled, EnvMetricsEnabled, "false")
 	b, err := strconv.ParseBool(v)
 	if err != nil {
@@ -158,10 +182,8 @@ func (c Config) Validate() error {
 	if err := lvl.UnmarshalText([]byte(c.Log.Level)); err != nil {
 		errs = append(errs, fmt.Errorf("%s: %q is not debug, info, warn or error", EnvLogLevel, c.Log.Level))
 	}
-	if c.Metrics.Enabled {
-		if c.Metrics.Listen == "" {
-			errs = append(errs, fmt.Errorf("%s: required while metrics are on, so they aren't open on the API port", EnvMetricsListen))
-		} else if _, _, err := net.SplitHostPort(c.Metrics.Listen); err != nil {
+	if c.Metrics.Enabled && c.Metrics.Listen != "" {
+		if _, _, err := net.SplitHostPort(c.Metrics.Listen); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %q: %w", EnvMetricsListen, c.Metrics.Listen, err))
 		}
 	}
@@ -177,6 +199,35 @@ func (c Config) RequireDatabase() error {
 		return fmt.Errorf("config: %s is required (a PostgreSQL URL, e.g. postgres://panelarr:secret@db:5432/panelarr)", EnvDatabaseURL)
 	}
 	return nil
+}
+
+// parsePrefixes parses a comma-separated list of networks (or single
+// addresses). "none" means an empty list.
+func parsePrefixes(s string) ([]netip.Prefix, error) {
+	if strings.EqualFold(strings.TrimSpace(s), "none") {
+		return nil, nil
+	}
+	var out []netip.Prefix
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if !strings.Contains(part, "/") {
+			a, err := netip.ParseAddr(part)
+			if err != nil {
+				return nil, fmt.Errorf("%q is not a network or address", part)
+			}
+			out = append(out, netip.PrefixFrom(a, a.BitLen()))
+			continue
+		}
+		p, err := netip.ParsePrefix(part)
+		if err != nil {
+			return nil, fmt.Errorf("%q is not a network or address", part)
+		}
+		out = append(out, p.Masked())
+	}
+	return out, nil
 }
 
 // SecureCookies reports whether the public URL is https.

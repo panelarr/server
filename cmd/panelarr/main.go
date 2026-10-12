@@ -176,6 +176,8 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	lib.SetChapterHooks(chs)
 	host.SetSourcesChanged(chs.SourcesChanged)
 	host.RegisterPackageTasks(q)
+	netSvc := network.New(st, box, logging.Component(log, "network"))
+	host.SetNetwork(netSvc, q)
 	// Connecting to plugins can take a while; the API serves meanwhile.
 	go func() {
 		if err := host.Load(ctx); err != nil {
@@ -242,7 +244,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		Reader:         rdr,
 		Downloads:      dl,
 		Storages:       storages,
-		Network:        network.New(st, box, logging.Component(log, "network")),
+		Network:        netSvc,
 		SecureCookies:  cfg.SecureCookies(),
 		TrustedProxies: cfg.TrustedProxies,
 		Web:            webui.Handler(webFiles),

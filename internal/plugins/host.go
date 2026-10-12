@@ -32,6 +32,7 @@ import (
 
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/limits"
+	"github.com/panelarr/server/internal/network"
 	"github.com/panelarr/server/internal/queue"
 	"github.com/panelarr/server/internal/secret"
 	"github.com/panelarr/server/internal/store"
@@ -96,6 +97,11 @@ type Host struct {
 	sourcesChanged func(ctx context.Context, sourceIDs []string)
 	// queue runs package tasks (packages.go).
 	queue *queue.Queue
+	// net is where network profiles come from (network.go); pushMu keeps
+	// pushes one at a time; instances are the plugins' last instance IDs.
+	net       *network.Service
+	pushMu    sync.Mutex
+	instances map[string]string
 }
 
 // SetHub makes the host tell admins about each plugin sync
@@ -127,7 +133,7 @@ func NewHost(st *store.Store, box *secret.Box, dial Dialer, log *slog.Logger) *H
 	return &Host{
 		st: st, box: box, dial: dial, log: log, clients: map[string]client.Client{},
 		recheck: slices.Clone(DefaultRecheck), grace: slices.Clone(DefaultStartupGrace),
-		followUp: slices.Clone(DefaultConfigFollowUp), rechecking: map[string]*chain{},
+		followUp: slices.Clone(DefaultConfigFollowUp), rechecking: map[string]*chain{}, instances: map[string]string{},
 	}
 }
 
@@ -444,10 +450,14 @@ func (h *Host) sync(ctx context.Context, id string) (Plugin, error) {
 		return h.saveState(ctx, cur, state)
 	}
 	state.Info, _ = protojson.Marshal(info)
+	instance := ""
 	if hr, err := c.Health(ctx); err != nil {
 		state.Health, state.HealthMessage = "down", errorMessage(err)
-	} else if hr.GetStatus() != sourcev1.HealthStatus_HEALTH_STATUS_SERVING {
-		state.Health, state.HealthMessage = "degraded", hr.GetMessage()
+	} else {
+		instance = hr.GetInstanceId()
+		if hr.GetStatus() != sourcev1.HealthStatus_HEALTH_STATUS_SERVING {
+			state.Health, state.HealthMessage = "degraded", hr.GetMessage()
+		}
 	}
 	res, err := c.ListSources(ctx, &sourcev1.ListSourcesRequest{})
 	if err != nil {
@@ -483,13 +493,45 @@ func (h *Host) sync(ctx context.Context, id string) (Plugin, error) {
 	if err := h.changedSince(ctx, id, before); err != nil {
 		return Plugin{}, err
 	}
-	if h.limits != nil {
+	// With network profiles, the push after the sync sets each source's
+	// cap (the profile's limits, else the plugin's).
+	if h.limits != nil && h.net == nil {
 		l := sourceLimit(info)
 		for _, s := range res.GetSources() {
 			h.limits.Set("source:"+id+":"+s.GetId(), l)
 		}
 	}
-	return h.saveState(ctx, cur, state)
+	p, err := h.saveState(ctx, cur, state)
+	if err == nil && state.Health != "down" {
+		h.afterSync(ctx, cur, instance)
+	}
+	return p, err
+}
+
+// afterSync re-pushes what a restarted plugin may have lost: its settings
+// when its instance ID changed (coming back from down already does), and
+// its sources' network profiles, all of them on the first sync since the
+// server started, after a restart or after being down, else only changes.
+func (h *Host) afterSync(ctx context.Context, before db.Plugin, instance string) {
+	h.mu.Lock()
+	prev, known := h.instances[before.ID]
+	h.instances[before.ID] = instance
+	h.mu.Unlock()
+	restarted := known && prev != "" && instance != "" && prev != instance
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pushTimeout)
+	defer cancel()
+	if restarted {
+		h.log.InfoContext(ctx, "plugin restarted", "plugin", before.ID)
+		if before.Health != "down" {
+			if err := h.pushConfig(ctx, before); err != nil {
+				h.log.WarnContext(ctx, "push config to a restarted plugin", "plugin", before.ID, "err", err)
+			}
+		}
+	}
+	force := !known || restarted || before.Health == "down"
+	if _, _, err := h.PushProfiles(ctx, before.ID, force); err != nil {
+		h.log.WarnContext(ctx, "push network profiles", "plugin", before.ID, "err", err)
+	}
 }
 
 func (h *Host) saveState(ctx context.Context, before db.Plugin, state db.SetPluginStateParams) (Plugin, error) {

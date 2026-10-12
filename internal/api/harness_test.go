@@ -122,6 +122,8 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	lib.SetChapterHooks(chs)
 	host.SetSourcesChanged(chs.SourcesChanged)
 	host.RegisterPackageTasks(q)
+	netSvc := network.New(st, box, nil)
+	host.SetNetwork(netSvc, q)
 	rdr := reader.NewService(st, host, lib, chs, nil, hub, nil)
 	storages := storage.NewManager(st, box, nil)
 	dataDir := t.TempDir()
@@ -170,7 +172,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		Reader:    rdr,
 		Downloads: dl,
 		Storages:  storages,
-		Network:   network.New(st, box, nil),
+		Network:   netSvc,
 		Checks: []Check{
 			{Name: "database", Required: true, Run: st.Pool.Ping},
 			{Name: "meta", Run: m.ReadyCheck},

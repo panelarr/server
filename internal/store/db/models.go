@@ -136,6 +136,15 @@ type NetworkProxy struct {
 	UpdatedAt      time.Time
 }
 
+type NetworkPush struct {
+	TargetKind string
+	TargetID   string
+	PluginID   pgtype.Text
+	Hash       string
+	Error      string
+	PushedAt   time.Time
+}
+
 type NetworkSolver struct {
 	ID                 string
 	Name               string

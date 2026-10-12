@@ -5,6 +5,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -446,6 +447,75 @@ func toEffective(e network.Effective) apigen.NetworkEffective {
 	return apigen.NetworkEffective{Level: apigen.NetworkEffectiveLevel(e.Level), ProfileId: nonEmpty(e.ProfileID), PluginDefault: e.ProfileID == ""}
 }
 
+// networkView computes sources' network rows: the profile in force and
+// whether the plugin has it.
+type networkView struct {
+	s      *Server
+	res    *network.Resolver
+	pushes map[string]network.Push
+	hashes map[string]string
+}
+
+func (s *Server) newNetworkView(ctx context.Context) (*networkView, error) {
+	res, err := s.deps.Network.Resolver(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pushes, err := s.deps.Network.Pushes(ctx, network.KindSource)
+	if err != nil {
+		return nil, err
+	}
+	return &networkView{s: s, res: res, pushes: pushes, hashes: map[string]string{}}, nil
+}
+
+// hash is the hash of a profile as the plugin would get it.
+func (v *networkView) hash(ctx context.Context, profileID string, solver bool) (string, error) {
+	if profileID == "" {
+		return network.UnsetHash, nil
+	}
+	key := fmt.Sprint(profileID, solver)
+	if h, ok := v.hashes[key]; ok {
+		return h, nil
+	}
+	prof, err := v.s.deps.Network.SourceProfile(ctx, profileID, solver)
+	if err != nil {
+		return "", err
+	}
+	v.hashes[key] = network.Hash(prof)
+	return v.hashes[key], nil
+}
+
+func (v *networkView) source(ctx context.Context, pl plugins.Plugin, src plugins.Source) (apigen.SourceNetwork, error) {
+	eff := v.res.Source(src.ID, pl.ID, src.PackageID)
+	out := apigen.SourceNetwork{
+		SourceId: src.ID, Name: src.Name, Lang: nonEmpty(src.Lang), PackageId: nonEmpty(src.PackageID), Present: ptr(src.Present),
+		Effective: toEffective(eff),
+	}
+	if a, ok := v.res.Assigned(network.KindSource, src.ID); ok {
+		out.Assignment = ptr(toAssignment(a))
+	}
+	push := apigen.NetworkPush{State: apigen.NetworkPushStateNotAccepted}
+	if plugins.AcceptsProfiles(pl.Info) {
+		want, err := v.hash(ctx, eff.ProfileID, plugins.AcceptsSolver(pl.Info))
+		if err != nil {
+			return apigen.SourceNetwork{}, err
+		}
+		last, seen := v.pushes[src.ID]
+		switch {
+		case seen && last.Error != "":
+			push = apigen.NetworkPush{State: apigen.NetworkPushStateFailed, Error: ptr(last.Error), PushedAt: &last.PushedAt}
+		case seen && last.Hash == want:
+			push = apigen.NetworkPush{State: apigen.NetworkPushStatePushed, PushedAt: &last.PushedAt}
+		case !seen && want == network.UnsetHash:
+			push = apigen.NetworkPush{State: apigen.NetworkPushStateNotNeeded}
+		default:
+			push = apigen.NetworkPush{State: apigen.NetworkPushStatePending}
+		}
+	}
+	out.Push = &push
+	return out, nil
+}
+
 // GetPluginNetwork shows the profile in force for each of a plugin's
 // sources.
 func (s *Server) GetPluginNetwork(ctx context.Context, req apigen.GetPluginNetworkRequestObject) (apigen.GetPluginNetworkResponseObject, error) {
@@ -453,7 +523,7 @@ func (s *Server) GetPluginNetwork(ctx context.Context, req apigen.GetPluginNetwo
 	if err != nil {
 		return nil, pluginError(ctx, err)
 	}
-	res, err := s.deps.Network.Resolver(ctx)
+	view, err := s.newNetworkView(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -465,7 +535,7 @@ func (s *Server) GetPluginNetwork(ctx context.Context, req apigen.GetPluginNetwo
 		PluginId: pl.ID, AcceptsProfiles: plugins.AcceptsProfiles(pl.Info), AcceptsSolver: plugins.AcceptsSolver(pl.Info),
 		Packages: []apigen.NetworkAssignment{}, Sources: []apigen.SourceNetwork{},
 	}
-	if a, ok := res.Assigned(network.KindPlugin, pl.ID); ok {
+	if a, ok := view.res.Assigned(network.KindPlugin, pl.ID); ok {
 		out.Assignment = ptr(toAssignment(a))
 	}
 	all, err := s.deps.Network.Assignments(ctx)
@@ -481,14 +551,37 @@ func (s *Server) GetPluginNetwork(ctx context.Context, req apigen.GetPluginNetwo
 		if src.PluginID != pl.ID {
 			continue
 		}
-		sn := apigen.SourceNetwork{
-			SourceId: src.ID, Name: src.Name, Lang: nonEmpty(src.Lang), PackageId: nonEmpty(src.PackageID), Present: ptr(src.Present),
-			Effective: toEffective(res.Source(src.ID, pl.ID, src.PackageID)),
-		}
-		if a, ok := res.Assigned(network.KindSource, src.ID); ok {
-			sn.Assignment = ptr(toAssignment(a))
+		sn, err := view.source(ctx, pl, src)
+		if err != nil {
+			return nil, err
 		}
 		out.Sources = append(out.Sources, sn)
 	}
 	return out, nil
+}
+
+// GetSourceNetwork shows one source's profile and what its plugin applies.
+func (s *Server) GetSourceNetwork(ctx context.Context, req apigen.GetSourceNetworkRequestObject) (apigen.GetSourceNetworkResponseObject, error) {
+	src, err := s.deps.Plugins.Source(ctx, req.SourceId, plugins.Viewer{Admin: true, AnyKnown: true})
+	if err != nil {
+		return nil, pluginError(ctx, err)
+	}
+	pl, err := s.deps.Plugins.Get(ctx, src.PluginID)
+	if err != nil {
+		return nil, pluginError(ctx, err)
+	}
+	view, err := s.newNetworkView(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out, err := view.source(ctx, pl, src)
+	if err != nil {
+		return nil, err
+	}
+	origin, name, err := s.deps.Plugins.Applied(ctx, src.ID)
+	if err != nil {
+		return nil, pluginError(ctx, err)
+	}
+	out.Applied = &apigen.NetworkApplied{Origin: apigen.NetworkAppliedOrigin(origin), ProfileName: nonEmpty(name)}
+	return apigen.GetSourceNetwork200JSONResponse(out), nil
 }

@@ -61,6 +61,9 @@ func fromPluginJob(j *jobsv1.Job) apigen.PluginJob {
 	}
 	if c := j.GetSchedule().GetCron(); c != "" {
 		out.Schedule.Cron = &c
+		if zone := cronZone(c); zone != "" {
+			out.Schedule.TimeZone = &zone
+		}
 	}
 	if iv := j.GetSchedule().GetInterval(); iv != nil {
 		out.Schedule.IntervalSeconds = ptr(int(iv.AsDuration().Seconds()))

@@ -38,7 +38,8 @@ func TestMetaJobs(t *testing.T) {
 
 	list := call[apigen.JobList](admin, http.MethodGet, "/api/v1/system/meta/jobs", nil, 200)
 	if len(list.Jobs) != 2 || list.Jobs[0].Schedule.Cron == nil || *list.Jobs[0].Schedule.Cron != "30 4 * * *" ||
-		*list.Jobs[0].Schedule.Source != "duplicates.schedule" || list.Jobs[0].Params[0].Name != "full" || list.Jobs[1].Schedule.Enabled {
+		*list.Jobs[0].Schedule.Source != "duplicates.schedule" || list.Jobs[0].Params[0].Name != "full" || list.Jobs[1].Schedule.Enabled ||
+		list.Jobs[0].Schedule.TimeZone == nil || *list.Jobs[0].Schedule.TimeZone != "UTC" || list.Jobs[1].Schedule.TimeZone != nil {
 		t.Fatalf("jobs %+v", list)
 	}
 
@@ -218,5 +219,18 @@ func TestMetaSearchEngine(t *testing.T) {
 	admin.expectProblem(http.MethodPut, "/api/v1/system/meta/search-engine", map[string]any{"backend": "elastic"}, 400, CodeInvalidRequest)
 	if r := call[apigen.MetaSearchEngine](admin, http.MethodPost, "/api/v1/system/meta/search-engine/reset", nil, 200); r.Settings.Origin != "config" || r.Settings.HasApiKey {
 		t.Fatalf("reset %+v", r)
+	}
+}
+
+func TestCronZone(t *testing.T) {
+	t.Parallel()
+	for expr, want := range map[string]string{
+		"0 3 * * *":                        "",
+		"CRON_TZ=Europe/Vilnius 0 3 * * *": "Europe/Vilnius",
+		"TZ=America/New_York 30 4 * * *":   "America/New_York",
+	} {
+		if got := cronZone(expr); got != want {
+			t.Errorf("cronZone(%q) = %q, want %q", expr, got, want)
+		}
 	}
 }

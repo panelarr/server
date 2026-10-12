@@ -71,6 +71,12 @@ func fromMetaJob(j *metav1.Job) apigen.Job {
 	}
 	if c := j.GetSchedule().GetCron(); c != "" {
 		out.Schedule.Cron = &c
+		// meta runs its cron in UTC unless an expression names a zone.
+		zone := cronZone(c)
+		if zone == "" {
+			zone = "UTC"
+		}
+		out.Schedule.TimeZone = &zone
 	}
 	if iv := j.GetSchedule().GetInterval(); iv != nil {
 		out.Schedule.IntervalSeconds = ptr(int(iv.AsDuration().Seconds()))
@@ -182,4 +188,16 @@ func (s *Server) CancelMetaJobRun(ctx context.Context, req apigen.CancelMetaJobR
 	}
 	s.deps.Log.InfoContext(ctx, "meta job run cancelled", "component", "audit", "run", req.RunId)
 	return apigen.CancelMetaJobRun202JSONResponse(fromMetaRunSummary(r)), nil
+}
+
+// cronZone is the zone a cron expression names with a CRON_TZ= or TZ=
+// prefix, or "".
+func cronZone(expr string) string {
+	for _, p := range []string{"CRON_TZ=", "TZ="} {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(expr), p); ok {
+			zone, _, _ := strings.Cut(rest, " ")
+			return zone
+		}
+	}
+	return ""
 }

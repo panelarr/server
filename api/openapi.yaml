@@ -5013,6 +5013,9 @@ components:
         cron:
           type: string
           description: A cron schedule (the connected services' jobs); absent otherwise.
+        time_zone:
+          type: string
+          description: The IANA time zone a cron schedule runs in (e.g. "UTC"); absent when the service doesn't say.
         enabled:
           type: boolean
         source:

@@ -1,0 +1,3 @@
+The server's own files: the encryption key for stored secrets (secret.key), caches and
+logs. Mount a volume here and back it up with the database: without secret.key, stored
+secrets (service, plugin and storage keys) can't be read.

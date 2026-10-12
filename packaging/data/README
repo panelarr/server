@@ -1,0 +1,2 @@
+The default storage for downloaded chapters (library/) and downloads in progress (.tmp/).
+Mount a volume here, or configure other storages in the app.

@@ -1,6 +1,5 @@
 # GoReleaser builds the release artifacts when release-please tags a
-# version: binaries, archives, checksums and SBOMs. Container images come
-# later.
+# version: binaries, archives, checksums, SBOMs and multi-arch images.
 version: 2
 project_name: panelarr
 
@@ -33,6 +32,30 @@ archives:
       - LICENSE
       - README.md
       - docs/*
+
+dockers_v2:
+  - id: image
+    ids: [panelarr]
+    dockerfile: Dockerfile.release
+    images:
+      - panelarr/server
+    tags:
+      - "{{ .Version }}"
+      - "{{ .Major }}.{{ .Minor }}"
+      - latest
+    extra_files:
+      - packaging/config
+      - packaging/data
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.title: server
+      org.opencontainers.image.description: Panelarr server with the web app
+      org.opencontainers.image.source: https://github.com/panelarr/server
+      org.opencontainers.image.licenses: GPL-3.0-or-later
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
 
 checksum:
   name_template: checksums.txt

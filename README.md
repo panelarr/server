@@ -24,7 +24,18 @@ curl -X POST http://localhost:8900/api/v1/setup/admin \
   -H 'Content-Type: application/json' -d '{"username":"admin","password":"choose a good one"}'
 ```
 
-A container image will follow.
+## Container image
+
+Releases publish `panelarr/server` (linux/amd64, linux/arm64): non-root, port 8900, volumes `/config` (the encryption key for stored secrets, caches; back it up with the database) and `/data` (the default library), with a built-in health check.
+
+```sh
+docker run -d --name panelarr -p 8900:8900 \
+  -e PANELARR_DB='postgres://panelarr:secret@db:5432/panelarr' \
+  -e PANELARR_META_URL='http://meta:8901' -e PANELARR_META_KEY='…' \
+  -v panelarr-config:/config -v panelarr-data:/data panelarr/server
+```
+
+The library needs the Panelarr metadata service and PostgreSQL next to it. To build the image from source, `make docker` (it passes the sibling `meta` and `source-api` clones as build contexts until those modules are published, and the web app from `../web/dist` when built).
 
 ## Configuration
 

@@ -1,0 +1,7 @@
+bin
+dist
+.git
+config
+data
+*.cbz
+coverage.out

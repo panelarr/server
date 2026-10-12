@@ -25,8 +25,13 @@ WEB_DIR     ?= ../web/dist
 WEB_DIST    := internal/webui/dist
 
 GENERATED := internal/store/db internal/api/apigen
+IMAGE    ?= panelarr/server:dev
+# Until the sibling modules are published, the image is built with them as
+# extra build contexts (go.mod's replace directives point at them).
+META_DIR       ?= ../meta
+SOURCE_API_DIR ?= ../source-api
 
-.PHONY: help setup build test test-short lint fmt fmt-check vet vuln gen gen-check api-breaking run clean check web web-local web-clean
+.PHONY: help setup build test test-short lint fmt fmt-check vet vuln gen gen-check api-breaking run clean check web web-local web-clean docker
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_.-]+:.*## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -98,6 +103,12 @@ web-clean: ## Remove the embedded web build (the placeholder page is served)
 run: build ## Run the server locally (needs PANELARR_DB)
 	@echo "Panelarr listening on http://localhost:8900"
 	$(BIN)/panelarr serve
+
+docker: ## Build the container image ($(IMAGE)), with the web app from WEB_DIR when it is built
+	docker build --build-arg VERSION=$(VERSION) \
+	  --build-context meta=$(META_DIR) --build-context source-api=$(SOURCE_API_DIR) \
+	  $(if $(wildcard $(WEB_DIR)/index.html),--build-context web=$(WEB_DIR),) \
+	  -t $(IMAGE) .
 
 clean: ## Remove build artifacts (keeps installed tools)
 	rm -f $(BIN)/panelarr $(BIN)/openapi.base.yaml

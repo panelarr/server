@@ -4,6 +4,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
@@ -115,4 +116,72 @@ func TestMetaProvidersAndSyncs(t *testing.T) {
 	}
 	admin.expectProblem(http.MethodPost, "/api/v1/system/meta/entries/missing/refresh", nil, 404, CodeNotFound)
 	user.expectProblem(http.MethodGet, "/api/v1/system/meta/providers", nil, 403, "forbidden")
+}
+
+func TestMetaDuplicatesReview(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	admin, _ := h.setupAdmin()
+	user, _ := h.createUser(admin, "reader", nil)
+	fake := connectedMeta(t, admin)
+	fake.AddPair(1, "e1", "e2", 0.95)
+	fake.AddPair(2, "e3", "e4", 0.4)
+	fake.AddPair(3, "e5", "e6", 0.8)
+
+	page := call[apigen.DuplicatePage](admin, http.MethodGet, "/api/v1/system/meta/duplicates", nil, 200)
+	if len(page.Pairs) != 3 || page.TotalSize != 3 || page.Pairs[0].EntryA.Id != "e1" || page.Pairs[0].Signals.SharedPeople[0] != "A. Author" ||
+		page.Pairs[0].Signals.YearA == nil || *page.Pairs[0].Signals.YearA != 2020 {
+		t.Fatalf("open pairs %+v", page)
+	}
+	if p := call[apigen.DuplicatePage](admin, http.MethodGet, "/api/v1/system/meta/duplicates?min_score=0.5", nil, 200); len(p.Pairs) != 2 {
+		t.Fatalf("min score %+v", p)
+	}
+	if p := call[apigen.DuplicatePair](admin, http.MethodGet, "/api/v1/system/meta/duplicates/2", nil, 200); p.Status != "open" || p.Score < 0.39 {
+		t.Fatalf("pair %+v", p)
+	}
+
+	// Confirm merges (for good), dismiss and reopen.
+	conf := call[apigen.ConfirmedDuplicate](admin, http.MethodPost, "/api/v1/system/meta/duplicates/1/confirm", map[string]string{"keep": "b", "note": "same"}, 200)
+	if conf.EntryId != "e2" || conf.Pair.Status != "confirmed" || conf.Pair.DecidedAt == nil || *conf.Pair.Note != "same" {
+		t.Fatalf("confirmed %+v", conf)
+	}
+	admin.expectProblem(http.MethodPost, "/api/v1/system/meta/duplicates/1/reopen", nil, 409, "pair_decided")
+	if d := call[apigen.DuplicatePair](admin, http.MethodPost, "/api/v1/system/meta/duplicates/2/dismiss", nil, 200); d.Status != "dismissed" {
+		t.Fatalf("dismissed %+v", d)
+	}
+	if p := call[apigen.DuplicatePage](admin, http.MethodGet, "/api/v1/system/meta/duplicates?status=dismissed", nil, 200); len(p.Pairs) != 1 || p.Pairs[0].Id != 2 {
+		t.Fatalf("dismissed list %+v", p)
+	}
+	if r := call[apigen.DuplicatePair](admin, http.MethodPost, "/api/v1/system/meta/duplicates/2/reopen", nil, 200); r.Status != "open" {
+		t.Fatalf("reopened %+v", r)
+	}
+	admin.expectProblem(http.MethodGet, "/api/v1/system/meta/duplicates/99", nil, 404, CodeNotFound)
+	admin.expectProblem(http.MethodGet, "/api/v1/system/meta/duplicates?page_size=500", nil, 400, CodeInvalidRequest)
+
+	// The decision model: the key is never shown, an empty one keeps it.
+	j := call[apigen.DuplicateJudge](admin, http.MethodGet, "/api/v1/system/meta/duplicate-judge", nil, 200)
+	if j.Enabled || j.Origin != "config" {
+		t.Fatalf("judge %+v", j)
+	}
+	j = call[apigen.DuplicateJudge](admin, http.MethodPut, "/api/v1/system/meta/duplicate-judge", map[string]any{"enabled": true, "kind": "local", "api_key": "sk-123", "covers": true}, 200)
+	if !j.Enabled || !j.HasApiKey || j.Origin != "admin" || fake.JudgeKey() != "sk-123" {
+		t.Fatalf("saved %+v", j)
+	}
+	call[apigen.DuplicateJudge](admin, http.MethodPut, "/api/v1/system/meta/duplicate-judge", map[string]any{"enabled": true, "kind": "local"}, 200)
+	if fake.JudgeKey() != "sk-123" {
+		t.Fatal("an empty key replaced the stored one")
+	}
+	if strings.Contains(string(admin.do(http.MethodGet, "/api/v1/system/meta/duplicate-judge", nil).body), "sk-123") {
+		t.Fatal("the key is shown")
+	}
+	if tr := call[apigen.DuplicateJudgeTest](admin, http.MethodPost, "/api/v1/system/meta/duplicate-judge/test", map[string]any{"enabled": true, "kind": "local"}, 200); !tr.Ok || tr.Verdict == nil || tr.Verdict.Choice != "same_work" {
+		t.Fatalf("test %+v", tr)
+	}
+	if tr := call[apigen.DuplicateJudgeTest](admin, http.MethodPost, "/api/v1/system/meta/duplicate-judge/test", map[string]any{"enabled": true, "kind": "broken"}, 200); tr.Ok || tr.Error == nil {
+		t.Fatalf("broken test %+v", tr)
+	}
+	if r := call[apigen.DuplicateJudge](admin, http.MethodPost, "/api/v1/system/meta/duplicate-judge/reset", nil, 200); r.Origin != "config" || r.HasApiKey {
+		t.Fatalf("reset %+v", r)
+	}
+	user.expectProblem(http.MethodGet, "/api/v1/system/meta/duplicates", nil, 403, "forbidden")
 }

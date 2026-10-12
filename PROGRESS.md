@@ -38,7 +38,7 @@ Solvers, proxies and network profiles live in Panelarr as options; admins assign
 
 Everything an admin does in mihon-source's or meta's own admin can be done from Panelarr's admin, on that plugin's page, apart from their API clients and keys. mihon-source is reached through source-mihon with generic plugin capabilities; meta through its admin API with the key Panelarr holds.
 
-- [ ] **S1. Meta admin:** providers and sync runs (done), jobs (the shared jobs view; done), duplicates review and its judge, the search engine.
+- [ ] **S1. Meta admin:** providers and sync runs (done), jobs (the shared jobs view; done), duplicates review and its judge (done), the search engine.
 - [x] **S2. Custom solvers and proxies:** solvers and proxies custom to one plugin, extension, source or provider, like profiles; usable only by that owner's profiles and removed with its plugin.
 - [ ] **S3. Plugin jobs:** the shared jobs view for plugins that declare jobs (source.v1).
 - [ ] **S4. Package origins and details:** stores' status and refresh, package load details.

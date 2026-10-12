@@ -38,6 +38,8 @@ type Client struct {
 	Jobs    metav1connect.MetaJobsServiceClient
 	// Integrations takes network profiles pushed by the server.
 	Integrations metav1connect.MetaIntegrationsServiceClient
+	// Duplicates is the duplicate entries review.
+	Duplicates metav1connect.MetaDuplicatesServiceClient
 }
 
 // newHTTPClient returns an HTTP/2 client: TLS for https and cleartext
@@ -70,6 +72,7 @@ func NewClient(conn Conn, hc *http.Client) *Client {
 		Clients:      metav1connect.NewMetaClientsServiceClient(hc, base, opts...),
 		Jobs:         metav1connect.NewMetaJobsServiceClient(hc, base, opts...),
 		Integrations: metav1connect.NewMetaIntegrationsServiceClient(hc, base, opts...),
+		Duplicates:   metav1connect.NewMetaDuplicatesServiceClient(hc, base, opts...),
 	}
 }
 

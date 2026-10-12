@@ -30,6 +30,7 @@ import (
 	"github.com/panelarr/source-api/sdk/client"
 	"github.com/panelarr/source-api/sdk/plugin"
 
+	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/limits"
 	"github.com/panelarr/server/internal/secret"
 	"github.com/panelarr/server/internal/store"
@@ -87,8 +88,14 @@ type Host struct {
 	bg         context.Context //nolint:containedctx // the host's lifetime, for rechecks
 	recheck    []time.Duration
 	grace      []time.Duration
-	rechecking map[string]bool
+	followUp   []time.Duration
+	rechecking map[string]*chain
+	hub        *events.Hub
 }
+
+// SetHub makes the host tell admins about each plugin sync
+// (plugin.health events).
+func (h *Host) SetHub(hub *events.Hub) { h.hub = hub }
 
 // SetLimits makes the host keep each source's limits (from its plugin's
 // declared limits) in reg.
@@ -114,7 +121,8 @@ func NewHost(st *store.Store, box *secret.Box, dial Dialer, log *slog.Logger) *H
 	}
 	return &Host{
 		st: st, box: box, dial: dial, log: log, clients: map[string]client.Client{},
-		recheck: slices.Clone(DefaultRecheck), grace: slices.Clone(DefaultStartupGrace), rechecking: map[string]bool{},
+		recheck: slices.Clone(DefaultRecheck), grace: slices.Clone(DefaultStartupGrace),
+		followUp: slices.Clone(DefaultConfigFollowUp), rechecking: map[string]*chain{},
 	}
 }
 
@@ -476,6 +484,10 @@ func (h *Host) saveState(ctx context.Context, before db.Plugin, state db.SetPlug
 	if err != nil {
 		return Plugin{}, err
 	}
+	// Every sync may change the plugin's or its sources' health: open
+	// admin pages refetch.
+	h.hub.Publish("plugin.health", map[string]any{"plugin_id": p.ID, "health": p.Health, "health_message": p.HealthMessage},
+		events.Audience{Admins: true})
 	return h.decode(p, counts), nil
 }
 
@@ -628,6 +640,9 @@ func (h *Host) SetConfig(ctx context.Context, id string, values map[string]any) 
 		return Config{}, err
 	}
 	h.log.InfoContext(ctx, "plugin config changed", "component", "audit", "plugin", id)
+	// The plugin applies the settings in the background; its health tells
+	// how that went.
+	h.scheduleFollowUp(id)
 	return Config{Schema: schema, Values: shown.AsMap()}, nil
 }
 

@@ -7,8 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/panelarr/source-api/sdk/plugin"
 	"github.com/panelarr/source-api/sdk/plugintest"
+	"github.com/panelarr/source-api/sdk/settings"
 
+	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/plugins"
 	"github.com/panelarr/server/internal/plugins/pluginstest"
 )
@@ -107,4 +110,85 @@ func TestStartupGrace(t *testing.T) {
 	if p, _ := restarted.Get(ctx, "fake"); p.Health != "ok" {
 		t.Fatalf("marked %s for being late", p.Health)
 	}
+}
+
+// configurable returns a fake plugin that takes settings.
+func configurable(t *testing.T) *plugintest.Fake {
+	t.Helper()
+	schema, err := settings.Parse(`{"type":"object","properties":{"stores":{"type":"string"}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := plugintest.New()
+	fake.Config = plugin.NewPluginConfig(schema, func(context.Context, map[string]any) error { return nil })
+	return fake
+}
+
+func TestConfigSaveFollowUp(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h, _ := newHost(t)
+	h.SetConfigFollowUp(50*time.Millisecond, 100*time.Millisecond)
+	hub := events.NewHub()
+	h.SetHub(hub)
+	fake := configurable(t)
+	if _, err := h.Register(ctx, plugins.NewPlugin{URL: pluginstest.Serve(t, fake, key), APIKey: key}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	sub := hub.Subscribe(events.Viewer{Admin: true})
+	defer sub.Close()
+	users := hub.Subscribe(events.Viewer{})
+	defer users.Close()
+
+	before := fake.Calls()["ListSources"]
+	if _, err := h.SetConfig(ctx, "fake", map[string]any{"stores": "a"}); err != nil {
+		t.Fatal(err)
+	}
+	// Both follow-up syncs run, and tell admins.
+	for i := range 2 {
+		select {
+		case e := <-sub.C:
+			if e.Type != "plugin.health" {
+				t.Fatalf("event %s", e.Type)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("no plugin.health event for sync %d", i+1)
+		}
+	}
+	time.Sleep(300 * time.Millisecond)
+	if n := fake.Calls()["ListSources"] - before; n != 2 {
+		t.Fatalf("%d syncs after the save, want 2", n)
+	}
+	if len(users.C) != 0 {
+		t.Fatal("a non-admin saw plugin health")
+	}
+}
+
+func TestConfigSaveFollowUpFindingItDown(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h, _ := newHost(t)
+	h.SetConfigFollowUp(30 * time.Millisecond)
+	h.SetRecheck(100*time.Millisecond, 100*time.Millisecond, 100*time.Millisecond)
+	svc := pluginstest.ServeSwitchable(t, configurable(t), key)
+	if _, err := h.Register(ctx, plugins.NewPlugin{URL: svc.URL, APIKey: key}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.SetConfig(ctx, "fake", map[string]any{"stores": "a"}); err != nil {
+		t.Fatal(err)
+	}
+	// Applying the settings takes the plugin down for a moment.
+	svc.Down.Store(true)
+	waitHealth(t, h, "fake", "down", time.Second)
+	svc.Down.Store(false)
+	// The follow-up carries on as rechecks.
+	waitHealth(t, h, "fake", "ok", 2*time.Second)
 }

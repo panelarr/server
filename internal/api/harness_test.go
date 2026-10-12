@@ -74,6 +74,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	m := meta.NewService(st, box, meta.Conn{}, nil)
 	host := plugins.NewHost(st, box, plugins.RemoteDialer, nil)
 	hub := events.NewHub()
+	host.SetHub(hub)
 	q := queue.New(st, hub, nil, nil, nil)
 	q.Poll = 20 * time.Millisecond
 	q.Backoff = func(int32) time.Duration { return time.Hour }

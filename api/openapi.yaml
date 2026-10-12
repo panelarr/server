@@ -1401,6 +1401,7 @@ paths:
         | `ready` | the caller | `{}` |
         | `task.queued`, `task.started`, `task.progress`, `task.updated` | admins, the task's requester | `TaskEvent` |
         | `job.started`, `job.progress`, `job.done`, `job.failed` | admins | `JobEvent` |
+        | `plugin.health` | admins | `PluginEvent` (after each check of a plugin; refetch it for its sources) |
         | `work.updated` | admins, the work's followers | `WorkEvent` |
         | `chapters.new` | admins, the work's followers | `WorkEvent` (`new`) |
         | `chapter.downloaded` | admins, the work's followers | `WorkEvent` (`chapter_id`) |
@@ -3222,6 +3223,18 @@ components:
           $ref: "#/components/schemas/JobRunStatus"
         progress:
           $ref: "#/components/schemas/JobProgress"
+    PluginEvent:
+      type: object
+      description: Data of `plugin.health`.
+      required: [plugin_id, health]
+      properties:
+        plugin_id:
+          type: string
+        health:
+          type: string
+          enum: [ok, degraded, down, unknown]
+        health_message:
+          type: string
     WorkEvent:
       type: object
       description: Data of `work.updated`, `chapters.new`, `chapter.downloaded`, `library.changed` and `progress.synced`.

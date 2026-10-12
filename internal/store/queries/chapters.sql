@@ -23,11 +23,18 @@ SELECT 1 FROM works WHERE id = $1 FOR UPDATE;
 -- Present chapters of a work's attached series, with what decides the
 -- preferred variant.
 SELECT sqlc.embed(source_chapters), source_series.source_id, source_series.priority AS series_priority,
-       sources.health AS source_health, sources.name AS source_name, sources.lang AS source_lang
+       sources.health AS source_health, sources.name AS source_name, sources.lang AS source_lang,
+       (sources.present AND sources.enabled AND plugins.enabled)::boolean AS source_usable
 FROM source_chapters
 JOIN source_series ON source_series.id = source_chapters.source_series_id
 JOIN sources ON sources.id = source_series.source_id
+JOIN plugins ON plugins.id = sources.plugin_id
 WHERE source_series.work_id = $1 AND source_series.state = 'attached' AND source_chapters.present;
+
+-- name: WorksOnSources :many
+-- Works with a series attached on any of these sources.
+SELECT DISTINCT work_id FROM source_series
+WHERE state = 'attached' AND source_id = ANY(@source_ids::text[]);
 
 -- name: ListChapters :many
 SELECT * FROM chapters WHERE work_id = $1;
@@ -53,10 +60,12 @@ UPDATE source_chapters SET chapter_id = @chapter_id WHERE id = ANY(@ids::uuid[])
 
 -- name: ChapterVariants :many
 SELECT sqlc.embed(source_chapters), source_series.source_id, source_series.priority AS series_priority,
-       sources.health AS source_health, sources.name AS source_name, sources.lang AS source_lang
+       sources.health AS source_health, sources.name AS source_name, sources.lang AS source_lang,
+       (sources.present AND sources.enabled AND plugins.enabled)::boolean AS source_usable
 FROM source_chapters
 JOIN source_series ON source_series.id = source_chapters.source_series_id
 JOIN sources ON sources.id = source_series.source_id
+JOIN plugins ON plugins.id = sources.plugin_id
 WHERE source_chapters.chapter_id = @chapter_id::uuid AND source_series.state = 'attached' AND source_chapters.present
 ORDER BY source_series.priority DESC, source_series.source_id;
 

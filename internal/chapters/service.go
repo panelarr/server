@@ -95,6 +95,20 @@ func (s *Service) WorkChanged(ctx context.Context, workID uuid.UUID) {
 	}
 }
 
+// SourcesChanged chooses the chapter copies again of every work with a
+// series on these sources, after they became usable or stopped being
+// usable: copies on an unusable source give way, and come back with it.
+func (s *Service) SourcesChanged(ctx context.Context, sourceIDs []string) {
+	works, err := s.st.WorksOnSources(ctx, sourceIDs)
+	if err != nil {
+		s.log.WarnContext(ctx, "works on changed sources", "sources", sourceIDs, "err", err)
+		return
+	}
+	for _, id := range works {
+		s.WorkChanged(ctx, id)
+	}
+}
+
 // Refresh queues chapter checks of every attached series of a work, ahead
 // of scheduled ones.
 func (s *Service) Refresh(ctx context.Context, workID, by uuid.UUID) (int, error) {
@@ -155,7 +169,9 @@ func (s *Service) handleUpdateSeries(ctx context.Context, t *queue.Task) (any, e
 		var pe *plugin.Error
 		switch {
 		case errors.Is(err, plugins.ErrNotFound):
-			return nil, queue.Permanent(err) // the source is gone or off
+			// The source is off or no longer listed: nothing to check
+			// until it's back (its chapters stay as they were).
+			return map[string]string{"skipped": "source unavailable"}, nil
 		case errors.As(err, &pe) && pe.Code == plugin.CodeResourceExhausted:
 			return nil, &queue.RetryAfterError{Err: err, After: pe.RetryAfter}
 		case errors.As(err, &pe) && pe.Code == plugin.CodeNotFound:
@@ -230,7 +246,7 @@ func variantOf(r db.WorkVariantsRow) Variant {
 	return Variant{
 		ID: c.ID, SeriesID: c.SourceSeriesID, SourceID: r.SourceID, Key: c.Key, Name: c.Name, Number: c.Number,
 		Volume: c.Volume, Scanlator: c.Scanlator, Lang: c.Lang, UploadedAt: c.UploadedAt, Position: c.Position,
-		Priority: r.SeriesPriority, Health: r.SourceHealth,
+		Priority: r.SeriesPriority, Health: r.SourceHealth, Unusable: !r.SourceUsable,
 	}
 }
 

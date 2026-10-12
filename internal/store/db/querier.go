@@ -181,6 +181,8 @@ type Querier interface {
 	// Present chapters of a work's attached series, with what decides the
 	// preferred variant.
 	WorkVariants(ctx context.Context, workID uuid.UUID) ([]WorkVariantsRow, error)
+	// Works with a series attached on any of these sources.
+	WorksOnSources(ctx context.Context, sourceIds []string) ([]uuid.UUID, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -28,6 +28,10 @@ type Viewer struct {
 	Admin  bool
 	// HideUnknown hides sources without a content rating from users.
 	HideUnknown bool
+	// Testing lets an admin browse a source turned off, to try it before
+	// turning it on. It never reaches sources no longer listed or of a
+	// plugin turned off.
+	Testing bool
 }
 
 // Source is a source with whether its plugin is enabled.
@@ -56,9 +60,11 @@ func ratingRank(r string) int {
 }
 
 // Visible reports whether v may see and use s. Admins see every usable
-// source; users only allowed ones within their ceiling.
+// source (testing, also ones turned off); users only allowed ones within
+// their ceiling.
 func (v Viewer) Visible(s Source) bool {
-	if !s.Usable() {
+	testing := v.Testing && v.Admin && s.Present && s.PluginEnabled
+	if !s.Usable() && !testing {
 		return false
 	}
 	if v.Admin {
@@ -107,8 +113,60 @@ func (h *Host) Source(ctx context.Context, id string, v Viewer) (Source, error) 
 	return s, nil
 }
 
+// SetSourcesChanged sets what runs when sources become usable or stop
+// being usable (turned on or off, listed again or no longer, their plugin
+// turned on or off), with their IDs; chapters choose their copies again.
+func (h *Host) SetSourcesChanged(fn func(ctx context.Context, sourceIDs []string)) {
+	h.sourcesChanged = fn
+}
+
+// usable maps a plugin's sources to whether they are usable.
+func (h *Host) usable(ctx context.Context, pluginID string) (map[string]bool, error) {
+	rows, err := h.st.ListSources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, r := range rows {
+		if r.Source.PluginID == pluginID {
+			out[r.Source.ID] = Source{Source: r.Source, PluginEnabled: r.PluginEnabled}.Usable()
+		}
+	}
+	return out, nil
+}
+
+// changedSince reports the plugin's sources whose usability differs from
+// before (nil: report them all).
+func (h *Host) changedSince(ctx context.Context, pluginID string, before map[string]bool) error {
+	if h.sourcesChanged == nil {
+		return nil
+	}
+	now, err := h.usable(ctx, pluginID)
+	if err != nil {
+		return err
+	}
+	var changed []string
+	for id, ok := range now {
+		if before == nil || before[id] != ok {
+			changed = append(changed, id)
+		}
+	}
+	if len(changed) > 0 {
+		slices.Sort(changed)
+		h.sourcesChanged(ctx, changed)
+	}
+	return nil
+}
+
 // SetSourceEnabled turns a source on or off for everyone.
 func (h *Host) SetSourceEnabled(ctx context.Context, id string, enabled bool) (Source, error) {
+	before, err := h.st.GetSource(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Source{}, ErrNotFound
+	}
+	if err != nil {
+		return Source{}, err
+	}
 	n, err := h.st.SetSourceEnabled(ctx, db.SetSourceEnabledParams{ID: id, Enabled: enabled})
 	if err != nil {
 		return Source{}, err
@@ -121,7 +179,11 @@ func (h *Host) SetSourceEnabled(ctx context.Context, id string, enabled bool) (S
 	if err != nil {
 		return Source{}, err
 	}
-	return Source{Source: r.Source, PluginEnabled: r.PluginEnabled}, nil
+	out := Source{Source: r.Source, PluginEnabled: r.PluginEnabled}
+	if was := (Source{Source: before.Source, PluginEnabled: before.PluginEnabled}).Usable(); was != out.Usable() && h.sourcesChanged != nil {
+		h.sourcesChanged(ctx, []string{id})
+	}
+	return out, nil
 }
 
 // call resolves a source v may use and the plugin client serving it.

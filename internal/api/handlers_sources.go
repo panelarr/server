@@ -30,6 +30,14 @@ func (s *Server) sourceViewer(ctx context.Context) plugins.Viewer {
 	return plugins.Viewer{Grants: users.Effective(p.User), Admin: p.IsAdmin(), HideUnknown: s.deps.Meta.HideUnknown(ctx)}
 }
 
+// browseViewer is sourceViewer for browsing a source directly (admins):
+// an admin may also try a source turned off.
+func (s *Server) browseViewer(ctx context.Context) plugins.Viewer {
+	v := s.sourceViewer(ctx)
+	v.Testing = v.Admin
+	return v
+}
+
 // imageURL is the server's signed URL for an image of a source.
 func (s *Server) imageURL(sourceID, ref string) *string {
 	if ref == "" {
@@ -54,7 +62,7 @@ func (s *Server) toSourceInfo(src plugins.Source) apigen.SourceInfo {
 	return out
 }
 
-// ListSources lists the sources the caller may use.
+// ListSources lists the sources (admins), filtered.
 func (s *Server) ListSources(ctx context.Context, req apigen.ListSourcesRequestObject) (apigen.ListSourcesResponseObject, error) {
 	rows, err := s.deps.Plugins.Sources(ctx, s.sourceViewer(ctx), deref(req.Params.All))
 	if err != nil {
@@ -62,7 +70,11 @@ func (s *Server) ListSources(ctx context.Context, req apigen.ListSourcesRequestO
 	}
 	out := apigen.ListSources200JSONResponse{Sources: make([]apigen.SourceInfo, 0, len(rows))}
 	for _, src := range rows {
-		if l := deref(req.Params.Lang); l != "" && src.Lang != l {
+		pr := req.Params
+		if (pr.Lang != nil && *pr.Lang != "" && src.Lang != *pr.Lang) ||
+			(pr.PluginId != nil && src.PluginID != *pr.PluginId) ||
+			(pr.Enabled != nil && src.Enabled != *pr.Enabled) ||
+			(pr.Present != nil && src.Present != *pr.Present) {
 			continue
 		}
 		out.Sources = append(out.Sources, s.toSourceInfo(src))
@@ -106,7 +118,7 @@ func page(p *int) uint32 {
 
 // SourcePopular lists a source's popular series.
 func (s *Server) SourcePopular(ctx context.Context, req apigen.SourcePopularRequestObject) (apigen.SourcePopularResponseObject, error) {
-	p, err := s.deps.Plugins.Popular(ctx, s.sourceViewer(ctx), req.SourceId, page(req.Params.Page))
+	p, err := s.deps.Plugins.Popular(ctx, s.browseViewer(ctx), req.SourceId, page(req.Params.Page))
 	if err != nil {
 		return nil, pluginError(ctx, err)
 	}
@@ -115,7 +127,7 @@ func (s *Server) SourcePopular(ctx context.Context, req apigen.SourcePopularRequ
 
 // SourceLatest lists a source's latest updates.
 func (s *Server) SourceLatest(ctx context.Context, req apigen.SourceLatestRequestObject) (apigen.SourceLatestResponseObject, error) {
-	p, err := s.deps.Plugins.Latest(ctx, s.sourceViewer(ctx), req.SourceId, page(req.Params.Page))
+	p, err := s.deps.Plugins.Latest(ctx, s.browseViewer(ctx), req.SourceId, page(req.Params.Page))
 	if err != nil {
 		return nil, pluginError(ctx, err)
 	}
@@ -124,34 +136,42 @@ func (s *Server) SourceLatest(ctx context.Context, req apigen.SourceLatestReques
 
 // SourceSearch searches a source.
 func (s *Server) SourceSearch(ctx context.Context, req apigen.SourceSearchRequestObject) (apigen.SourceSearchResponseObject, error) {
-	b := req.Body
-	var filters []*sourcev1.FilterValue
-	if b.Filters != nil {
-		for i, raw := range *b.Filters {
-			j, err := json.Marshal(raw)
-			if err != nil {
-				return nil, err
-			}
-			fv := &sourcev1.FilterValue{}
-			if err := protojson.Unmarshal(j, fv); err != nil {
-				return nil, fieldProblem("filters["+strconv.Itoa(i)+"]", "not a filter value: "+err.Error())
-			}
-			filters = append(filters, fv)
-		}
+	query, filters, err := searchRequest(req.Body)
+	if err != nil {
+		return nil, err
 	}
-	if deref(b.Query) == "" && len(filters) == 0 {
-		return nil, fieldProblem("query", "give a query or filters")
-	}
-	p, err := s.deps.Plugins.Search(ctx, s.sourceViewer(ctx), req.SourceId, deref(b.Query), page(b.Page), filters)
+	p, err := s.deps.Plugins.Search(ctx, s.browseViewer(ctx), req.SourceId, query, page(req.Body.Page), filters)
 	if err != nil {
 		return nil, pluginError(ctx, err)
 	}
 	return apigen.SourceSearch200JSONResponse(s.toPage(req.SourceId, p)), nil
 }
 
+// searchRequest reads a source search's query and filters.
+func searchRequest(b *apigen.SourceSearchRequest) (string, []*sourcev1.FilterValue, error) {
+	var filters []*sourcev1.FilterValue
+	if b.Filters != nil {
+		for i, raw := range *b.Filters {
+			j, err := json.Marshal(raw)
+			if err != nil {
+				return "", nil, err
+			}
+			fv := &sourcev1.FilterValue{}
+			if err := protojson.Unmarshal(j, fv); err != nil {
+				return "", nil, fieldProblem("filters["+strconv.Itoa(i)+"]", "not a filter value: "+err.Error())
+			}
+			filters = append(filters, fv)
+		}
+	}
+	if deref(b.Query) == "" && len(filters) == 0 {
+		return "", nil, fieldProblem("query", "give a query or filters")
+	}
+	return deref(b.Query), filters, nil
+}
+
 // SourceFilters returns a source's filters in the contract's JSON form.
 func (s *Server) SourceFilters(ctx context.Context, req apigen.SourceFiltersRequestObject) (apigen.SourceFiltersResponseObject, error) {
-	res, err := s.deps.Plugins.Filters(ctx, s.sourceViewer(ctx), req.SourceId)
+	res, err := s.deps.Plugins.Filters(ctx, s.browseViewer(ctx), req.SourceId)
 	if err != nil {
 		return nil, pluginError(ctx, err)
 	}
@@ -171,7 +191,7 @@ func (s *Server) SourceFilters(ctx context.Context, req apigen.SourceFiltersRequ
 
 // SourceSeries returns a series' details.
 func (s *Server) SourceSeries(ctx context.Context, req apigen.SourceSeriesRequestObject) (apigen.SourceSeriesResponseObject, error) {
-	se, err := s.deps.Plugins.Series(ctx, s.sourceViewer(ctx), req.SourceId, req.Params.Key)
+	se, err := s.deps.Plugins.Series(ctx, s.browseViewer(ctx), req.SourceId, req.Params.Key)
 	if err != nil {
 		return nil, pluginError(ctx, err)
 	}
@@ -180,7 +200,7 @@ func (s *Server) SourceSeries(ctx context.Context, req apigen.SourceSeriesReques
 
 // SourceChapters lists a series' chapters.
 func (s *Server) SourceChapters(ctx context.Context, req apigen.SourceChaptersRequestObject) (apigen.SourceChaptersResponseObject, error) {
-	chs, err := s.deps.Plugins.Chapters(ctx, s.sourceViewer(ctx), req.SourceId, req.Params.Key)
+	chs, err := s.deps.Plugins.Chapters(ctx, s.browseViewer(ctx), req.SourceId, req.Params.Key)
 	if err != nil {
 		return nil, pluginError(ctx, err)
 	}
@@ -208,7 +228,7 @@ func (s *Server) SourceImage(ctx context.Context, req apigen.SourceImageRequestO
 	if !s.deps.Signer.Verify(req.Params.Sig, req.SourceId, req.Params.Ref) {
 		return nil, NewProblem(http.StatusForbidden, "bad_signature", "not an image link from this server")
 	}
-	v := s.sourceViewer(ctx)
+	v := s.browseViewer(ctx)
 	if _, err := s.deps.Plugins.Source(ctx, req.SourceId, v); err != nil {
 		return nil, pluginError(ctx, err)
 	}

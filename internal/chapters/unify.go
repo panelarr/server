@@ -30,6 +30,9 @@ type Variant struct {
 	Priority int32
 	// Health is the source's: ok, failing or unknown.
 	Health string
+	// Unusable is a source that is turned off, no longer listed by its
+	// plugin, or whose plugin is turned off.
+	Unusable bool
 }
 
 // Group is one canonical chapter: a number (or, for chapters without one,
@@ -139,14 +142,18 @@ type Choice struct {
 }
 
 // Choose picks a group's preferred variant: a pinned one that still
-// exists; else by preferred language (languages, in order; others after),
-// a healthy source over a failing one, the series' priority, the newest
-// upload, then the source's own order. The reason is the first of these
-// that set the winner apart from the runner-up.
+// exists and is on a usable source (or nothing else is); else a usable
+// source over an unusable one (turned off, no longer listed), then by
+// preferred language (languages, in order; others after), a healthy source
+// over a failing one, the series' priority, the newest upload, then the
+// source's own order. The reason is the first of these that set the winner
+// apart from the runner-up (an unusable source losing counts as
+// healthier_source).
 func Choose(g Group, pinned *uuid.UUID, languages []string) Choice {
 	if pinned != nil {
+		usable := slices.ContainsFunc(g.Variants, func(v Variant) bool { return !v.Unusable })
 		for _, v := range g.Variants {
-			if v.ID == *pinned {
+			if v.ID == *pinned && (!v.Unusable || !usable) {
 				return Choice{Variant: v, Reason: ReasonPinned}
 			}
 		}
@@ -168,6 +175,12 @@ func Choose(g Group, pinned *uuid.UUID, languages []string) Choice {
 		}
 		return 0
 	}
+	usableRank := func(v Variant) int {
+		if v.Unusable {
+			return 1
+		}
+		return 0
+	}
 	uploaded := func(v Variant) int64 {
 		if v.UploadedAt == nil {
 			return 0
@@ -179,6 +192,7 @@ func Choose(g Group, pinned *uuid.UUID, languages []string) Choice {
 		cmp    func(a, b Variant) int
 	}
 	criteria := []criterion{
+		{ReasonHealthier, func(a, b Variant) int { return usableRank(a) - usableRank(b) }},
 		{ReasonLanguage, func(a, b Variant) int { return langRank(a) - langRank(b) }},
 		{ReasonHealthier, func(a, b Variant) int { return healthRank(a) - healthRank(b) }},
 		{ReasonPriority, func(a, b Variant) int { return int(b.Priority) - int(a.Priority) }},

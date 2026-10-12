@@ -73,10 +73,12 @@ func (q *Queries) AttachedSeriesOfFollowedWorks(ctx context.Context) ([]SourceSe
 
 const chapterVariants = `-- name: ChapterVariants :many
 SELECT source_chapters.id, source_chapters.source_series_id, source_chapters.key, source_chapters.name, source_chapters.number, source_chapters.volume, source_chapters.scanlator, source_chapters.lang, source_chapters.url, source_chapters.uploaded_at, source_chapters.position, source_chapters.present, source_chapters.chapter_id, source_chapters.first_seen_at, source_chapters.last_seen_at, source_series.source_id, source_series.priority AS series_priority,
-       sources.health AS source_health, sources.name AS source_name, sources.lang AS source_lang
+       sources.health AS source_health, sources.name AS source_name, sources.lang AS source_lang,
+       (sources.present AND sources.enabled AND plugins.enabled)::boolean AS source_usable
 FROM source_chapters
 JOIN source_series ON source_series.id = source_chapters.source_series_id
 JOIN sources ON sources.id = source_series.source_id
+JOIN plugins ON plugins.id = sources.plugin_id
 WHERE source_chapters.chapter_id = $1::uuid AND source_series.state = 'attached' AND source_chapters.present
 ORDER BY source_series.priority DESC, source_series.source_id
 `
@@ -88,6 +90,7 @@ type ChapterVariantsRow struct {
 	SourceHealth   string
 	SourceName     string
 	SourceLang     string
+	SourceUsable   bool
 }
 
 func (q *Queries) ChapterVariants(ctx context.Context, chapterID uuid.UUID) ([]ChapterVariantsRow, error) {
@@ -120,6 +123,7 @@ func (q *Queries) ChapterVariants(ctx context.Context, chapterID uuid.UUID) ([]C
 			&i.SourceHealth,
 			&i.SourceName,
 			&i.SourceLang,
+			&i.SourceUsable,
 		); err != nil {
 			return nil, err
 		}
@@ -488,10 +492,12 @@ func (q *Queries) UpsertSourceChapter(ctx context.Context, arg UpsertSourceChapt
 
 const workVariants = `-- name: WorkVariants :many
 SELECT source_chapters.id, source_chapters.source_series_id, source_chapters.key, source_chapters.name, source_chapters.number, source_chapters.volume, source_chapters.scanlator, source_chapters.lang, source_chapters.url, source_chapters.uploaded_at, source_chapters.position, source_chapters.present, source_chapters.chapter_id, source_chapters.first_seen_at, source_chapters.last_seen_at, source_series.source_id, source_series.priority AS series_priority,
-       sources.health AS source_health, sources.name AS source_name, sources.lang AS source_lang
+       sources.health AS source_health, sources.name AS source_name, sources.lang AS source_lang,
+       (sources.present AND sources.enabled AND plugins.enabled)::boolean AS source_usable
 FROM source_chapters
 JOIN source_series ON source_series.id = source_chapters.source_series_id
 JOIN sources ON sources.id = source_series.source_id
+JOIN plugins ON plugins.id = sources.plugin_id
 WHERE source_series.work_id = $1 AND source_series.state = 'attached' AND source_chapters.present
 `
 
@@ -502,6 +508,7 @@ type WorkVariantsRow struct {
 	SourceHealth   string
 	SourceName     string
 	SourceLang     string
+	SourceUsable   bool
 }
 
 // Present chapters of a work's attached series, with what decides the
@@ -536,10 +543,37 @@ func (q *Queries) WorkVariants(ctx context.Context, workID uuid.UUID) ([]WorkVar
 			&i.SourceHealth,
 			&i.SourceName,
 			&i.SourceLang,
+			&i.SourceUsable,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const worksOnSources = `-- name: WorksOnSources :many
+SELECT DISTINCT work_id FROM source_series
+WHERE state = 'attached' AND source_id = ANY($1::text[])
+`
+
+// Works with a series attached on any of these sources.
+func (q *Queries) WorksOnSources(ctx context.Context, sourceIds []string) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, worksOnSources, sourceIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var work_id uuid.UUID
+		if err := rows.Scan(&work_id); err != nil {
+			return nil, err
+		}
+		items = append(items, work_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

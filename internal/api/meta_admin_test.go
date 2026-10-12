@@ -35,9 +35,10 @@ func TestMetaJobs(t *testing.T) {
 		Params:   []*metav1.JobParam{{Name: "full", Type: "bool", Default: "false"}},
 	})
 	fake.AddJob(&metav1.Job{Id: "search-rebuild", Name: "Rebuild the search index"})
+	fake.AddJob(&metav1.Job{Id: "search-indexer", Name: "Index changes", Schedule: &metav1.Schedule{Kind: &metav1.Schedule_Cron{Cron: "@every 1m"}, Enabled: true}})
 
 	list := call[apigen.JobList](admin, http.MethodGet, "/api/v1/system/meta/jobs", nil, 200)
-	if len(list.Jobs) != 2 || list.Jobs[0].Schedule.Cron == nil || *list.Jobs[0].Schedule.Cron != "30 4 * * *" ||
+	if len(list.Jobs) != 3 || list.Jobs[2].Schedule.TimeZone != nil || list.Jobs[0].Schedule.Cron == nil || *list.Jobs[0].Schedule.Cron != "30 4 * * *" ||
 		*list.Jobs[0].Schedule.Source != "duplicates.schedule" || list.Jobs[0].Params[0].Name != "full" || list.Jobs[1].Schedule.Enabled ||
 		list.Jobs[0].Schedule.TimeZone == nil || *list.Jobs[0].Schedule.TimeZone != "UTC" || list.Jobs[1].Schedule.TimeZone != nil {
 		t.Fatalf("jobs %+v", list)

@@ -5,8 +5,8 @@ SELECT * FROM network_solvers ORDER BY lower(name), id;
 SELECT * FROM network_solvers WHERE id = $1;
 
 -- name: InsertSolver :one
-INSERT INTO network_solvers (id, name, type, url, session_ttl_seconds, max_timeout_seconds, as_response_fallback)
-VALUES (@id, @name, @type, @url, @session_ttl_seconds, @max_timeout_seconds, @as_response_fallback)
+INSERT INTO network_solvers (id, name, type, url, session_ttl_seconds, max_timeout_seconds, as_response_fallback, owner_kind, owner_id, owner_plugin)
+VALUES (@id, @name, @type, @url, @session_ttl_seconds, @max_timeout_seconds, @as_response_fallback, @owner_kind, @owner_id, @owner_plugin)
 RETURNING *;
 
 -- name: UpdateSolver :one
@@ -25,8 +25,8 @@ SELECT * FROM network_proxies ORDER BY lower(name), id;
 SELECT * FROM network_proxies WHERE id = $1;
 
 -- name: InsertProxy :one
-INSERT INTO network_proxies (id, name, url, username, password_sealed)
-VALUES (@id, @name, @url, @username, @password_sealed)
+INSERT INTO network_proxies (id, name, url, username, password_sealed, owner_kind, owner_id, owner_plugin)
+VALUES (@id, @name, @url, @username, @password_sealed, @owner_kind, @owner_id, @owner_plugin)
 RETURNING *;
 
 -- name: UpdateProxy :one

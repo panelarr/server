@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/types/known/durationpb"
+
 	sourcev1 "github.com/panelarr/source-api/gen/panelarr/source/v1"
 	"github.com/panelarr/source-api/sdk/plugin"
 	"github.com/panelarr/source-api/sdk/plugintest"
@@ -225,9 +227,20 @@ func TestBookmarks(t *testing.T) {
 }
 
 // slowImages takes a while per image and records how many run at once.
+// It declares a slow API rate (2 calls a second) that images must not
+// wait for.
 type slowImages struct {
 	*plugintest.Fake
 	inFlight, most atomic.Int64
+}
+
+func (f *slowImages) GetInfo(ctx context.Context, r *sourcev1.GetInfoRequest) (*sourcev1.GetInfoResponse, error) {
+	res, err := f.Fake.GetInfo(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	res.Info.Limits.DefaultRateLimit = &sourcev1.RateLimit{Requests: 2, Period: durationpb.New(time.Second), Scope: sourcev1.RateLimitScope_RATE_LIMIT_SCOPE_SOURCE}
+	return res, nil
 }
 
 func (f *slowImages) FetchImage(ctx context.Context, r *sourcev1.FetchImageRequest, send plugin.ImageSendFunc) error {
@@ -258,7 +271,7 @@ func TestPageImagesUseTheImageBudget(t *testing.T) {
 	pages := call[apigen.ChapterPages](user, http.MethodGet, "/api/v1/chapters/"+chs[0].Id.String()+"/pages", nil, 200)
 
 	// The plugin declares no image rate and 4 images at a time per source
-	// (its API rate, 10 a second, would take 2 s for 20 images).
+	// (its API rate, 2 a second, would take 10 s for 20 images).
 	start := time.Now()
 	var wg sync.WaitGroup
 	failed := atomic.Int64{}
@@ -277,8 +290,9 @@ func TestPageImagesUseTheImageBudget(t *testing.T) {
 	if most := slow.most.Load(); most > 4 || most < 2 {
 		t.Fatalf("%d images at once, want 2 to 4", most)
 	}
-	// 20 images, 4 at a time, 100 ms each: about half a second, no pacing.
-	if took > 1500*time.Millisecond {
+	// 20 images, 4 at a time, 100 ms each: about half a second, never the
+	// API rate's 10 s, even on a busy machine.
+	if took > 5*time.Second {
 		t.Fatalf("20 images took %s", took)
 	}
 }

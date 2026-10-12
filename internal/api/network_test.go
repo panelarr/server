@@ -266,3 +266,70 @@ func TestNetworkProfilesAndAssignments(t *testing.T) {
 		t.Fatalf("after removing the plugin %+v", l)
 	}
 }
+
+func TestCustomSolversAndProxies(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	admin, _ := h.setupAdmin()
+	call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins", map[string]string{"url": pluginstest.Serve(t, plugintest.New(), pluginKey), "api_key": pluginKey}, 201)
+	other := plugintest.New()
+	other.ID = "other"
+	call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins", map[string]string{"url": pluginstest.Serve(t, other, pluginKey), "api_key": pluginKey}, 201)
+
+	call[apigen.Proxy](admin, http.MethodPost, "/api/v1/network/proxies", map[string]any{"id": "shared", "name": "Shared", "url": "http://gluetun:8888"}, 201)
+	px := call[apigen.Proxy](admin, http.MethodPost, "/api/v1/network/proxies", map[string]any{
+		"id": "fake-px", "name": "Fake's proxy", "url": "socks5://fake-vpn:1080", "owner": map[string]any{"kind": "plugin", "id": "fake"},
+	}, 201)
+	if px.Owner == nil || px.Owner.Id != "fake" {
+		t.Fatalf("custom proxy %+v", px)
+	}
+	call[apigen.Solver](admin, http.MethodPost, "/api/v1/network/solvers", map[string]any{
+		"id": "fake-fs", "name": "Fake's solver", "type": "flaresolverr", "url": "http://fs:8191", "owner": map[string]any{"kind": "source", "id": "fake:1001"},
+	}, 201)
+	call[apigen.Proxy](admin, http.MethodPost, "/api/v1/network/proxies", map[string]any{
+		"id": "books-px", "name": "Books' proxy", "url": "http://books-vpn:8888", "owner": map[string]any{"kind": "provider", "id": "books"},
+	}, 201)
+	admin.expectProblem(http.MethodPost, "/api/v1/network/proxies", map[string]any{
+		"id": "x", "name": "x", "url": "http://x:1", "owner": map[string]any{"kind": "plugin", "id": "nope"},
+	}, 404, CodeNotFound)
+
+	// Lists show shared ones unless asked.
+	if l := call[apigen.ProxyList](admin, http.MethodGet, "/api/v1/network/proxies", nil, 200); len(l.Proxies) != 1 {
+		t.Fatalf("shared %+v", l)
+	}
+	if l := call[apigen.ProxyList](admin, http.MethodGet, "/api/v1/network/proxies?include_custom=true", nil, 200); len(l.Proxies) != 3 {
+		t.Fatalf("all %+v", l)
+	}
+	if l := call[apigen.ProxyList](admin, http.MethodGet, "/api/v1/network/proxies?owner_kind=plugin&owner_id=fake", nil, 200); len(l.Proxies) != 1 || l.Proxies[0].Id != "fake-px" {
+		t.Fatalf("fake's %+v", l)
+	}
+	if l := call[apigen.SolverList](admin, http.MethodGet, "/api/v1/network/solvers?owner_kind=source&owner_id=fake:1001", nil, 200); len(l.Solvers) != 1 {
+		t.Fatalf("solvers %+v", l)
+	}
+
+	// A plugin's custom items serve its own profiles (its extensions' and
+	// sources' too), not shared profiles nor other plugins'.
+	call[apigen.NetworkProfile](admin, http.MethodPost, "/api/v1/network/profiles", map[string]any{
+		"id": "fake-ext", "name": "Example", "proxy_id": "fake-px", "solver_id": "fake-fs", "owner": map[string]any{"kind": "package", "id": "fake:example.comics"},
+	}, 201)
+	admin.expectProblem(http.MethodPost, "/api/v1/network/profiles", map[string]any{"id": "x", "name": "x", "proxy_id": "fake-px"}, 400, CodeInvalidRequest)
+	admin.expectProblem(http.MethodPost, "/api/v1/network/profiles", map[string]any{
+		"id": "x", "name": "x", "solver_id": "fake-fs", "owner": map[string]any{"kind": "plugin", "id": "other"},
+	}, 400, CodeInvalidRequest)
+	call[apigen.NetworkProfile](admin, http.MethodPost, "/api/v1/network/profiles", map[string]any{"id": "plain", "name": "Plain", "proxy_id": "shared"}, 201)
+	admin.expectProblem(http.MethodPut, "/api/v1/network/profiles/plain", map[string]any{"name": "Plain", "proxy_id": "fake-px"}, 400, CodeInvalidRequest)
+	call[apigen.NetworkProfile](admin, http.MethodPost, "/api/v1/network/profiles", map[string]any{
+		"id": "books", "name": "Books", "proxy_id": "books-px", "owner": map[string]any{"kind": "provider", "id": "books"},
+	}, 201)
+	admin.expectProblem(http.MethodPost, "/api/v1/network/profiles", map[string]any{
+		"id": "comics", "name": "Comics", "proxy_id": "books-px", "owner": map[string]any{"kind": "provider", "id": "comics"},
+	}, 400, CodeInvalidRequest)
+
+	// Removing the plugin removes its custom items; shared ones stay.
+	call[struct{}](admin, http.MethodDelete, "/api/v1/plugins/fake", nil, 204)
+	admin.expectProblem(http.MethodGet, "/api/v1/network/proxies/fake-px", nil, 404, CodeNotFound)
+	admin.expectProblem(http.MethodGet, "/api/v1/network/solvers/fake-fs", nil, 404, CodeNotFound)
+	admin.expectProblem(http.MethodGet, "/api/v1/network/profiles/fake-ext", nil, 404, CodeNotFound)
+	call[apigen.Proxy](admin, http.MethodGet, "/api/v1/network/proxies/shared", nil, 200)
+	call[apigen.Proxy](admin, http.MethodGet, "/api/v1/network/proxies/books-px", nil, 200)
+}

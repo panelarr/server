@@ -99,7 +99,7 @@ func (q *Queries) GetProfile(ctx context.Context, id string) (NetworkProfile, er
 }
 
 const getProxy = `-- name: GetProxy :one
-SELECT id, name, url, username, password_sealed, created_at, updated_at FROM network_proxies WHERE id = $1
+SELECT id, name, url, username, password_sealed, created_at, updated_at, owner_kind, owner_id, owner_plugin FROM network_proxies WHERE id = $1
 `
 
 func (q *Queries) GetProxy(ctx context.Context, id string) (NetworkProxy, error) {
@@ -113,12 +113,15 @@ func (q *Queries) GetProxy(ctx context.Context, id string) (NetworkProxy, error)
 		&i.PasswordSealed,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerKind,
+		&i.OwnerID,
+		&i.OwnerPlugin,
 	)
 	return i, err
 }
 
 const getSolver = `-- name: GetSolver :one
-SELECT id, name, type, url, session_ttl_seconds, max_timeout_seconds, as_response_fallback, created_at, updated_at FROM network_solvers WHERE id = $1
+SELECT id, name, type, url, session_ttl_seconds, max_timeout_seconds, as_response_fallback, created_at, updated_at, owner_kind, owner_id, owner_plugin FROM network_solvers WHERE id = $1
 `
 
 func (q *Queries) GetSolver(ctx context.Context, id string) (NetworkSolver, error) {
@@ -134,6 +137,9 @@ func (q *Queries) GetSolver(ctx context.Context, id string) (NetworkSolver, erro
 		&i.AsResponseFallback,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerKind,
+		&i.OwnerID,
+		&i.OwnerPlugin,
 	)
 	return i, err
 }
@@ -226,9 +232,9 @@ func (q *Queries) InsertProfile(ctx context.Context, arg InsertProfileParams) (N
 }
 
 const insertProxy = `-- name: InsertProxy :one
-INSERT INTO network_proxies (id, name, url, username, password_sealed)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, name, url, username, password_sealed, created_at, updated_at
+INSERT INTO network_proxies (id, name, url, username, password_sealed, owner_kind, owner_id, owner_plugin)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, name, url, username, password_sealed, created_at, updated_at, owner_kind, owner_id, owner_plugin
 `
 
 type InsertProxyParams struct {
@@ -237,6 +243,9 @@ type InsertProxyParams struct {
 	Url            string
 	Username       string
 	PasswordSealed string
+	OwnerKind      string
+	OwnerID        string
+	OwnerPlugin    pgtype.Text
 }
 
 func (q *Queries) InsertProxy(ctx context.Context, arg InsertProxyParams) (NetworkProxy, error) {
@@ -246,6 +255,9 @@ func (q *Queries) InsertProxy(ctx context.Context, arg InsertProxyParams) (Netwo
 		arg.Url,
 		arg.Username,
 		arg.PasswordSealed,
+		arg.OwnerKind,
+		arg.OwnerID,
+		arg.OwnerPlugin,
 	)
 	var i NetworkProxy
 	err := row.Scan(
@@ -256,14 +268,17 @@ func (q *Queries) InsertProxy(ctx context.Context, arg InsertProxyParams) (Netwo
 		&i.PasswordSealed,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerKind,
+		&i.OwnerID,
+		&i.OwnerPlugin,
 	)
 	return i, err
 }
 
 const insertSolver = `-- name: InsertSolver :one
-INSERT INTO network_solvers (id, name, type, url, session_ttl_seconds, max_timeout_seconds, as_response_fallback)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, name, type, url, session_ttl_seconds, max_timeout_seconds, as_response_fallback, created_at, updated_at
+INSERT INTO network_solvers (id, name, type, url, session_ttl_seconds, max_timeout_seconds, as_response_fallback, owner_kind, owner_id, owner_plugin)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, name, type, url, session_ttl_seconds, max_timeout_seconds, as_response_fallback, created_at, updated_at, owner_kind, owner_id, owner_plugin
 `
 
 type InsertSolverParams struct {
@@ -274,6 +289,9 @@ type InsertSolverParams struct {
 	SessionTtlSeconds  int32
 	MaxTimeoutSeconds  int32
 	AsResponseFallback bool
+	OwnerKind          string
+	OwnerID            string
+	OwnerPlugin        pgtype.Text
 }
 
 func (q *Queries) InsertSolver(ctx context.Context, arg InsertSolverParams) (NetworkSolver, error) {
@@ -285,6 +303,9 @@ func (q *Queries) InsertSolver(ctx context.Context, arg InsertSolverParams) (Net
 		arg.SessionTtlSeconds,
 		arg.MaxTimeoutSeconds,
 		arg.AsResponseFallback,
+		arg.OwnerKind,
+		arg.OwnerID,
+		arg.OwnerPlugin,
 	)
 	var i NetworkSolver
 	err := row.Scan(
@@ -297,6 +318,9 @@ func (q *Queries) InsertSolver(ctx context.Context, arg InsertSolverParams) (Net
 		&i.AsResponseFallback,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerKind,
+		&i.OwnerID,
+		&i.OwnerPlugin,
 	)
 	return i, err
 }
@@ -379,7 +403,7 @@ func (q *Queries) ListProfiles(ctx context.Context) ([]NetworkProfile, error) {
 }
 
 const listProxies = `-- name: ListProxies :many
-SELECT id, name, url, username, password_sealed, created_at, updated_at FROM network_proxies ORDER BY lower(name), id
+SELECT id, name, url, username, password_sealed, created_at, updated_at, owner_kind, owner_id, owner_plugin FROM network_proxies ORDER BY lower(name), id
 `
 
 func (q *Queries) ListProxies(ctx context.Context) ([]NetworkProxy, error) {
@@ -399,6 +423,9 @@ func (q *Queries) ListProxies(ctx context.Context) ([]NetworkProxy, error) {
 			&i.PasswordSealed,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.OwnerKind,
+			&i.OwnerID,
+			&i.OwnerPlugin,
 		); err != nil {
 			return nil, err
 		}
@@ -442,7 +469,7 @@ func (q *Queries) ListPushes(ctx context.Context, targetKind string) ([]NetworkP
 }
 
 const listSolvers = `-- name: ListSolvers :many
-SELECT id, name, type, url, session_ttl_seconds, max_timeout_seconds, as_response_fallback, created_at, updated_at FROM network_solvers ORDER BY lower(name), id
+SELECT id, name, type, url, session_ttl_seconds, max_timeout_seconds, as_response_fallback, created_at, updated_at, owner_kind, owner_id, owner_plugin FROM network_solvers ORDER BY lower(name), id
 `
 
 func (q *Queries) ListSolvers(ctx context.Context) ([]NetworkSolver, error) {
@@ -464,6 +491,9 @@ func (q *Queries) ListSolvers(ctx context.Context) ([]NetworkSolver, error) {
 			&i.AsResponseFallback,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.OwnerKind,
+			&i.OwnerID,
+			&i.OwnerPlugin,
 		); err != nil {
 			return nil, err
 		}
@@ -558,7 +588,7 @@ const updateProxy = `-- name: UpdateProxy :one
 UPDATE network_proxies SET name = $1, url = $2, username = $3, password_sealed = $4,
     updated_at = now()
 WHERE id = $5
-RETURNING id, name, url, username, password_sealed, created_at, updated_at
+RETURNING id, name, url, username, password_sealed, created_at, updated_at, owner_kind, owner_id, owner_plugin
 `
 
 type UpdateProxyParams struct {
@@ -586,6 +616,9 @@ func (q *Queries) UpdateProxy(ctx context.Context, arg UpdateProxyParams) (Netwo
 		&i.PasswordSealed,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerKind,
+		&i.OwnerID,
+		&i.OwnerPlugin,
 	)
 	return i, err
 }
@@ -594,7 +627,7 @@ const updateSolver = `-- name: UpdateSolver :one
 UPDATE network_solvers SET name = $1, type = $2, url = $3, session_ttl_seconds = $4,
     max_timeout_seconds = $5, as_response_fallback = $6, updated_at = now()
 WHERE id = $7
-RETURNING id, name, type, url, session_ttl_seconds, max_timeout_seconds, as_response_fallback, created_at, updated_at
+RETURNING id, name, type, url, session_ttl_seconds, max_timeout_seconds, as_response_fallback, created_at, updated_at, owner_kind, owner_id, owner_plugin
 `
 
 type UpdateSolverParams struct {
@@ -628,6 +661,9 @@ func (q *Queries) UpdateSolver(ctx context.Context, arg UpdateSolverParams) (Net
 		&i.AsResponseFallback,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerKind,
+		&i.OwnerID,
+		&i.OwnerPlugin,
 	)
 	return i, err
 }

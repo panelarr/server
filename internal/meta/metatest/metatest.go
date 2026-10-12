@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 
 	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
 	"github.com/panelarr/meta/gen/panelarr/meta/v1/metav1connect"
@@ -33,6 +34,12 @@ type Fake struct {
 	syncs     []*metav1.RunSyncRequest
 	lastQuery *metav1.EntryFilter
 	down      bool
+	// providerDown: RunSync answers that the provider's plugin is down,
+	// with the explicit reason when explicit is set.
+	providerDown map[string]bool
+	explicit     bool
+	// failWith makes catalogue calls answer with this error code.
+	failWith connect.Code
 }
 
 // New starts a fake with one admin key, AdminKey, and no providers.
@@ -44,7 +51,17 @@ func New(t testing.TB) *Fake {
 	mux.Handle(metav1connect.NewMetaServiceHandler(&metaHandler{f: f}, opts))
 	mux.Handle(metav1connect.NewMetaAdminServiceHandler(&adminHandler{f: f}, opts))
 	mux.Handle(metav1connect.NewMetaClientsServiceHandler(&clientsHandler{f: f}, opts))
-	srv := httptest.NewUnstartedServer(mux)
+	// Down means no answer at all: the connection is cut.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		down := f.down
+		f.mu.Unlock()
+		if down {
+			panic(http.ErrAbortHandler)
+		}
+		mux.ServeHTTP(w, r)
+	})
+	srv := httptest.NewUnstartedServer(handler)
 	srv.Config.Protocols = new(http.Protocols)
 	srv.Config.Protocols.SetHTTP1(true)
 	srv.Config.Protocols.SetUnencryptedHTTP2(true)
@@ -84,7 +101,29 @@ func (f *Fake) AddEntry(e *metav1.Entry) {
 	f.entries = append(f.entries, e)
 }
 
-// SetDown makes every call fail as unavailable.
+// SetProviderDown makes RunSync for a provider answer that its plugin
+// can't be reached, as the metadata service does; explicit adds the
+// structured reason (ErrorInfo PROVIDER_UNAVAILABLE with the provider).
+func (f *Fake) SetProviderDown(provider string, explicit bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.providerDown == nil {
+		f.providerDown = map[string]bool{}
+	}
+	f.providerDown[provider] = true
+	f.explicit = explicit
+}
+
+// FailWith makes catalogue calls (search, browse, entries) answer with an
+// error of this code; 0 stops it.
+func (f *Fake) FailWith(code connect.Code) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failWith = code
+}
+
+// SetDown makes the service unreachable: connections are cut without an
+// answer.
 func (f *Fake) SetDown(down bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -109,12 +148,8 @@ func (f *Fake) auth() connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			f.mu.Lock()
-			down := f.down
 			scopes, ok := f.keys[strings.TrimPrefix(req.Header().Get("Authorization"), "Bearer ")]
 			f.mu.Unlock()
-			if down {
-				return nil, connect.NewError(connect.CodeUnavailable, errors.New("down for the test"))
-			}
 			if !ok {
 				return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("unknown key"))
 			}
@@ -167,6 +202,17 @@ func (h *adminHandler) RunSync(ctx context.Context, req *connect.Request[metav1.
 	if !found {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("no such provider"))
 	}
+	if h.f.providerDown[req.Msg.GetProvider()] {
+		cerr := connect.NewError(connect.CodeUnavailable, errors.New("plugin is not connected"))
+		if h.f.explicit {
+			if d, err := connect.NewErrorDetail(&errdetails.ErrorInfo{
+				Reason: "PROVIDER_UNAVAILABLE", Domain: "panelarr.meta", Metadata: map[string]string{"provider": req.Msg.GetProvider()},
+			}); err == nil {
+				cerr.AddDetail(d)
+			}
+		}
+		return nil, cerr
+	}
 	h.f.syncs = append(h.f.syncs, req.Msg)
 	return connect.NewResponse(&metav1.RunSyncResponse{Run: &metav1.SyncRun{Id: "run-1", Provider: req.Msg.GetProvider(), Kind: req.Msg.GetKind()}}), nil
 }
@@ -188,6 +234,15 @@ func summary(e *metav1.Entry) *metav1.EntrySummary {
 		Id: e.GetId(), Title: e.GetTitle(), Type: e.GetType(), Status: e.GetStatus(),
 		ContentRating: e.GetContentRating(), Year: e.GetDates().GetStart().GetYear(), Cover: cover,
 	}
+}
+
+func (h *metaHandler) failure() error {
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	if h.f.failWith != 0 {
+		return connect.NewError(h.f.failWith, errors.New("failing for the test"))
+	}
+	return nil
 }
 
 func (h *metaHandler) match(f *metav1.EntryFilter, text string) ([]*metav1.Entry, bool) {
@@ -214,6 +269,9 @@ func (h *metaHandler) match(f *metav1.EntryFilter, text string) ([]*metav1.Entry
 }
 
 func (h *metaHandler) Search(_ context.Context, req *connect.Request[metav1.SearchRequest]) (*connect.Response[metav1.SearchResponse], error) {
+	if err := h.failure(); err != nil {
+		return nil, err
+	}
 	entries, noProviders := h.match(req.Msg.GetFilter(), req.Msg.GetQuery())
 	res := &metav1.SearchResponse{NoProviders: noProviders}
 	for _, e := range entries {
@@ -224,6 +282,9 @@ func (h *metaHandler) Search(_ context.Context, req *connect.Request[metav1.Sear
 }
 
 func (h *metaHandler) Browse(_ context.Context, req *connect.Request[metav1.BrowseRequest]) (*connect.Response[metav1.BrowseResponse], error) {
+	if err := h.failure(); err != nil {
+		return nil, err
+	}
 	entries, noProviders := h.match(req.Msg.GetFilter(), "")
 	res := &metav1.BrowseResponse{NoProviders: noProviders}
 	for _, e := range entries {
@@ -234,6 +295,9 @@ func (h *metaHandler) Browse(_ context.Context, req *connect.Request[metav1.Brow
 }
 
 func (h *metaHandler) GetEntry(_ context.Context, req *connect.Request[metav1.GetEntryRequest]) (*connect.Response[metav1.GetEntryResponse], error) {
+	if err := h.failure(); err != nil {
+		return nil, err
+	}
 	h.f.mu.Lock()
 	defer h.f.mu.Unlock()
 	for _, e := range h.f.entries {

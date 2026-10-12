@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"connectrpc.com/connect"
 	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
 	metadatav1 "github.com/panelarr/meta/gen/panelarr/metadata/v1"
 
@@ -221,5 +222,45 @@ func TestNames(t *testing.T) {
 	}
 	if meta.StatusName(metadatav1.EntryStatus_ENTRY_STATUS_RELEASING) != "releasing" {
 		t.Fatal("status names")
+	}
+}
+
+func TestErrorClassification(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	fake := metatest.New(t)
+	fake.SetProviders(map[string]int64{"books": 1, "comics": 1})
+	s := newService(t, meta.Conn{URL: fake.URL, APIKey: metatest.AdminKey})
+	if err := s.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// The service answers that a provider's plugin is down: not "meta down".
+	fake.SetProviderDown("books", false)
+	_, err := s.RunSync(ctx, "books", "dump")
+	var pu *meta.ProviderUnavailableError
+	if !errors.As(err, &pu) || pu.Provider != "books" || meta.Unreachable(err) {
+		t.Fatalf("implicit: %v", err)
+	}
+	fake.SetProviderDown("comics", true)
+	if _, err := s.RunSync(ctx, "comics", "dump"); !errors.As(err, &pu) || pu.Provider != "comics" {
+		t.Fatalf("explicit: %v", err)
+	}
+
+	// Other answered errors stay what they are.
+	fake.FailWith(connect.CodeInternal)
+	_, err = s.Search(ctx, meta.Query{Text: "x"}, meta.Viewer{Admin: true})
+	if err == nil || meta.Unreachable(err) || errors.As(err, &pu) {
+		t.Fatalf("internal: %v", err)
+	}
+	fake.FailWith(0)
+
+	// No answer at all.
+	fake.SetDown(true)
+	if _, err := s.RunSync(ctx, "books", "dump"); !meta.Unreachable(err) || errors.As(err, &pu) {
+		t.Fatalf("down: %v", err)
+	}
+	if c := s.Check(ctx, true); c.Reachable || !strings.Contains(c.Problem, "Can't reach") {
+		t.Fatalf("check while down: %+v", c)
 	}
 }

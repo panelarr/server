@@ -16,6 +16,7 @@ import (
 // metaError maps metadata service errors to problems.
 func metaError(err error) error {
 	var bad *meta.BadFilterError
+	var provider *meta.ProviderUnavailableError
 	var ce *connect.Error
 	switch {
 	case err == nil:
@@ -30,7 +31,14 @@ func metaError(err error) error {
 		return NewProblem(http.StatusConflict, "managed_by_env", "the connection is set by PANELARR_META_URL")
 	case errors.Is(err, meta.ErrInvalidURL):
 		return fieldProblem("url", "must be http(s)://host[:port]")
+	case errors.As(err, &provider):
+		// The metadata service is up; one of its provider plugins isn't.
+		return NewProblem(http.StatusBadGateway, "meta_provider_unavailable",
+			"The metadata provider '"+provider.Provider+"' isn't reachable from the metadata service. Check that its plugin is running.")
+	case meta.Unreachable(err):
+		return NewProblem(http.StatusServiceUnavailable, "meta_unavailable", "Can't reach the metadata service ("+connect.CodeOf(err).String()+"). Check that it is running.")
 	case errors.As(err, &ce):
+		// The metadata service answered with an error.
 		switch ce.Code() {
 		case connect.CodeNotFound:
 			return NewProblem(http.StatusNotFound, CodeNotFound, ce.Message())
@@ -38,8 +46,10 @@ func metaError(err error) error {
 			return NewProblem(http.StatusConflict, "meta_conflict", ce.Message())
 		case connect.CodeInvalidArgument:
 			return NewProblem(http.StatusBadRequest, CodeInvalidRequest, ce.Message())
+		case connect.CodeUnauthenticated, connect.CodePermissionDenied:
+			return NewProblem(http.StatusBadGateway, "meta_key_rejected", "The metadata service refused the server's API key. Reconnect it with a key that has the admin scope.")
 		}
-		return NewProblem(http.StatusServiceUnavailable, "meta_unavailable", "the metadata service didn't answer: "+ce.Code().String())
+		return NewProblem(http.StatusBadGateway, "meta_error", "The metadata service answered with an error: "+ce.Message())
 	}
 	return err
 }

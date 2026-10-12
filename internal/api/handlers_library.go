@@ -40,6 +40,7 @@ func mayManageMatches(g users.Grants) bool { return g.MayManageMatches }
 
 func libraryError(ctx context.Context, err error) error {
 	var bad *meta.BadFilterError
+	var metaErr *meta.Error
 	switch {
 	case err == nil:
 		return nil
@@ -47,7 +48,7 @@ func libraryError(ctx context.Context, err error) error {
 		return NewProblem(http.StatusNotFound, CodeNotFound, "no such work")
 	case errors.Is(err, library.ErrNotInLibrary):
 		return NewProblem(http.StatusNotFound, "not_in_library", "the work isn't in your library")
-	case errors.Is(err, meta.ErrNotFound), errors.Is(err, meta.ErrNotConfigured), errors.As(err, &bad):
+	case errors.Is(err, meta.ErrNotFound), errors.Is(err, meta.ErrNotConfigured), errors.As(err, &bad), errors.As(err, &metaErr):
 		return metaError(err)
 	}
 	if p := pluginError(ctx, err); p != err { //nolint:errorlint // identity: was it mapped

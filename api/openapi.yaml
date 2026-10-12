@@ -625,7 +625,13 @@ paths:
       operationId: runMetaProviderSync
       tags: [meta]
       summary: Start a sync of a metadata provider
-      description: Starts a sync in the metadata service and returns at once. A first full import can take a while; check the connection to see entries arrive.
+      description: |
+        Starts a sync in the metadata service and returns at once. A first
+        full import can take a while; check the connection to see entries
+        arrive. When the metadata service is up but the provider's plugin
+        isn't reachable from it, the answer is `502` with code
+        `meta_provider_unavailable` (start the plugin); `503`
+        `meta_unavailable` means the metadata service itself didn't answer.
       x-panelarr-access: admin
       parameters:
         - name: provider
@@ -656,7 +662,13 @@ paths:
       operationId: searchCatalog
       tags: [catalog]
       summary: Search the catalogue by title
-      description: Searches every title (all languages and romanizations). Only entries within the caller's content-rating ceiling are returned. While the metadata service is unavailable this answers `503` with code `meta_unavailable`.
+      description: |
+        Searches every title (all languages and romanizations). Only
+        entries within the caller's content-rating ceiling are returned.
+        Errors from the metadata service, for every catalogue call: `503`
+        `meta_unavailable` when it can't be reached or isn't connected yet;
+        `502` `meta_key_rejected` when it refuses the server's key; `502`
+        `meta_error` when it answers with another error.
       x-panelarr-access: user
       parameters:
         - name: q

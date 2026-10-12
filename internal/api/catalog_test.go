@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"connectrpc.com/connect"
 	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
 	metadatav1 "github.com/panelarr/meta/gen/panelarr/metadata/v1"
 
@@ -210,4 +211,37 @@ func TestCatalogWithoutMeta(t *testing.T) {
 	f := newCatalogFixture(t)
 	f.fake.SetDown(true)
 	f.user.expectProblem(http.MethodGet, "/api/v1/catalog/search?q=x", nil, 503, "meta_unavailable")
+}
+
+func TestMetaErrorMapping(t *testing.T) {
+	t.Parallel()
+	f := newCatalogFixture(t)
+	admin, user, fake := f.admin, f.user, f.fake
+	fake.SetProviders(map[string]int64{"books": 3})
+
+	// Meta is up; its provider plugin isn't. Say so, not "meta is down".
+	fake.SetProviderDown("books", false)
+	p := admin.expectProblem(http.MethodPost, "/api/v1/system/meta/providers/books/sync", nil, 502, "meta_provider_unavailable")
+	if p.Detail == nil || !strings.Contains(*p.Detail, "'books'") || !strings.Contains(*p.Detail, "plugin is running") {
+		t.Fatalf("detail %+v", p.Detail)
+	}
+	admin.expectProblem(http.MethodPost, "/api/v1/system/meta/providers/nope/sync", nil, 404, CodeNotFound)
+
+	// Meta answering with other errors.
+	fake.FailWith(connect.CodeInternal)
+	user.expectProblem(http.MethodGet, "/api/v1/catalog/search?q=story", nil, 502, "meta_error")
+	fake.FailWith(connect.CodePermissionDenied)
+	user.expectProblem(http.MethodGet, "/api/v1/catalog/entries/e1", nil, 502, "meta_key_rejected")
+	fake.FailWith(0)
+
+	// Meta not answering at all.
+	fake.SetDown(true)
+	admin.expectProblem(http.MethodPost, "/api/v1/system/meta/providers/books/sync", nil, 503, "meta_unavailable")
+	user.expectProblem(http.MethodGet, "/api/v1/catalog/browse", nil, 503, "meta_unavailable")
+	// Not mistaken for a source problem when adding a work.
+	user.expectProblem(http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 503, "meta_unavailable")
+	conn := call[apigen.MetaConnection](admin, http.MethodPost, "/api/v1/system/meta/check", nil, 200)
+	if conn.Check.Reachable || conn.Check.Problem == nil || !strings.Contains(*conn.Check.Problem, "Can't reach") {
+		t.Fatalf("check %+v", conn.Check)
+	}
 }

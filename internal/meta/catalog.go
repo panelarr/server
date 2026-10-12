@@ -182,7 +182,7 @@ func (s *Service) Search(ctx context.Context, q Query, v Viewer) (*metav1.Search
 		PageSize: q.PageSize, PageToken: q.PageToken, Language: q.Language,
 	}))
 	if err != nil {
-		return nil, err
+		return nil, wrap("search", err)
 	}
 	rememberCovers(s, res.Msg.GetHits(), func(h *metav1.SearchHit) *metav1.EntrySummary { return h.GetEntry() })
 	return res.Msg, nil
@@ -203,7 +203,7 @@ func (s *Service) Browse(ctx context.Context, q Query, v Viewer) (*metav1.Browse
 		PageSize: q.PageSize, PageToken: q.PageToken, Language: q.Language,
 	}))
 	if err != nil {
-		return nil, err
+		return nil, wrap("browse", err)
 	}
 	rememberCovers(s, res.Msg.GetEntries(), func(e *metav1.EntrySummary) *metav1.EntrySummary { return e })
 	return res.Msg, nil
@@ -221,7 +221,7 @@ func (s *Service) GetEntry(ctx context.Context, id, language string, v Viewer) (
 		return nil, ErrNotFound
 	}
 	if err != nil {
-		return nil, err
+		return nil, wrap("get entry", err)
 	}
 	e := res.Msg.GetEntry()
 	if !slices.Contains(s.allowedRatings(ctx, v), e.GetContentRating()) {

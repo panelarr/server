@@ -202,12 +202,16 @@ func (s *Service) check(ctx context.Context, client *Client) Check {
 	switch code := connect.CodeOf(err); {
 	case err == nil:
 		c.Reachable, c.KeyValid = true, true
+	case !connect.IsWireError(err): // no answer at all
+		c.Problem = "Can't reach the metadata service: " + errorMessage(err) + ". Check the URL and that the service is running."
+		return c
 	case code == connect.CodeUnauthenticated || code == connect.CodePermissionDenied:
 		c.Reachable = true
 		c.Problem = "The metadata service refused the API key. Create a client with the admin scope in its admin and use that key."
 		return c
 	default:
-		c.Problem = "Can't reach the metadata service: " + errorMessage(err) + ". Check the URL and that the service is running."
+		c.Reachable = true
+		c.Problem = "The metadata service answered with an error: " + errorMessage(err) + "."
 		return c
 	}
 	if !slices.Contains(who.Msg.GetScopes(), scopeAdmin) {
@@ -287,7 +291,7 @@ func (s *Service) RunSync(ctx context.Context, provider, kind string) (string, e
 	}
 	res, err := client.Admin.RunSync(ctx, connect.NewRequest(&metav1.RunSyncRequest{Provider: provider, Kind: kind}))
 	if err != nil {
-		return "", err
+		return "", wrap("run sync", providerError(err, provider))
 	}
 	s.mu.Lock()
 	s.last = Check{} // the next check sees the new state

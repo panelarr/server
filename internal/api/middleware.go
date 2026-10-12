@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -88,10 +89,10 @@ func observe(log *slog.Logger, m *metrics.Metrics) func(http.Handler) http.Handl
 			m.HTTP(route, r.Method, status, d)
 			level := slog.LevelInfo
 			switch {
-			case status == http.StatusBadGateway || status == http.StatusGatewayTimeout:
-				// A plugin, site or service behind the server failed; the
-				// handler logs why (at most once in a while for images),
-				// so a page of failing images doesn't flood the log.
+			case (status == http.StatusBadGateway || status == http.StatusGatewayTimeout) && imageRoute(route):
+				// An image or icon behind the server failed; its handler
+				// logs why at most once in a while, so a page of failing
+				// images doesn't flood the log.
 				level = slog.LevelInfo
 			case status >= 500:
 				level = slog.LevelError
@@ -104,6 +105,13 @@ func observe(log *slog.Logger, m *metrics.Metrics) func(http.Handler) http.Handl
 				"bytes", ww.BytesWritten(), "duration_ms", d.Milliseconds(), "request_id", RequestID(r.Context()))
 		})
 	}
+}
+
+// imageRoute reports whether route serves images whose handlers log their
+// failures themselves (source images and icons, package icons).
+func imageRoute(route string) bool {
+	return strings.HasSuffix(route, "/sources/{source_id}/image") ||
+		strings.HasSuffix(route, "/packages/{package_id}/icon")
 }
 
 // recoverer turns a panic into a 500 problem and logs the stack.

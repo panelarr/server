@@ -5,8 +5,10 @@ package api
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -175,7 +177,8 @@ func waitTaskAttempted(t *testing.T, c *client, id string) apigen.Task {
 
 func TestPackageFailures(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t)
+	logs := &logRecorder{}
+	h := newHarness(t, withLog(slog.New(logs)))
 	admin, _ := h.setupAdmin()
 	fake := &failingFake{Fake: plugintest.New()}
 	u := pluginstest.Serve(t, fake, pluginKey)
@@ -190,6 +193,11 @@ func TestPackageFailures(t *testing.T) {
 	fake.fail(&fake.list, plugin.ErrStoreInvalid("store-a's index is broken"))
 	admin.expectProblem(http.MethodGet, base, nil, 502, "store_invalid")
 	fake.fail(&fake.list, nil)
+	// Outside the image routes, a 502 is an error in the request log:
+	// not every handler logs its cause.
+	if n := len(slices.DeleteFunc(logs.warnings(), func(m string) bool { return m != "request" })); n != 2 {
+		t.Fatalf("%d request errors for two 502s, want 2", n)
+	}
 
 	// A request the plugin refuses.
 	fake.fail(&fake.langs, plugin.ErrInvalidArgument("the package has no language xx"))

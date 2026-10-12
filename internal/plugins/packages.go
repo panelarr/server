@@ -289,16 +289,18 @@ func (h *Host) installedPackages(ctx context.Context, c client.Client, info *sou
 	return out
 }
 
-// MaxIconBytes caps a package icon.
+// MaxIconBytes caps an icon (of a package or a source).
 const MaxIconBytes = 2 << 20
 
-// iconClient fetches package icons.
+// iconClient fetches icons.
 var iconClient = &http.Client{Timeout: callTimeout}
 
-// PackageIcon fetches a package's icon from ref, its icon URL as the plugin
-// gave it: a path relative to the plugin's address, or an absolute URL. The
-// plugin's key goes only to the plugin's own address.
-func (h *Host) PackageIcon(ctx context.Context, id, ref string) (string, io.Reader, error) {
+// Icon fetches a package's or a source's icon from ref, its icon URL as
+// the plugin gave it: a path relative to the plugin's address (served by
+// the plugin over HTTP with the API's credentials), or an absolute URL.
+// The plugin's key goes only to the plugin's own address. Icons never go
+// through the image RPC, which is for covers and pages.
+func (h *Host) Icon(ctx context.Context, id, ref string) (string, io.Reader, error) {
 	p, err := h.st.GetPlugin(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil, ErrNotFound

@@ -333,7 +333,7 @@ func (s *Server) GetPackageIcon(ctx context.Context, req apigen.GetPackageIconRe
 	}
 	key := "package-icon\x00" + req.PluginId + "\x00" + req.Params.Ref
 	img, err := s.deps.Images.GetFresh(ctx, key, iconMaxAge, func(ctx context.Context) (string, io.Reader, error) {
-		return s.deps.Plugins.PackageIcon(ctx, req.PluginId, req.Params.Ref)
+		return s.deps.Plugins.Icon(ctx, req.PluginId, req.Params.Ref)
 	})
 	if errors.Is(err, imagecache.ErrNotImage) {
 		return nil, NewProblem(http.StatusNotFound, CodeNotFound, "not a usable image")

@@ -5,6 +5,7 @@ package plugins
 import (
 	"context"
 	"errors"
+	"io"
 	"slices"
 
 	"github.com/jackc/pgx/v5"
@@ -32,6 +33,9 @@ type Viewer struct {
 	// turning it on. It never reaches sources no longer listed or of a
 	// plugin turned off.
 	Testing bool
+	// AnyKnown lets an admin see every known source, absent ones too (for
+	// their icons on the admin's source list; nothing is called on them).
+	AnyKnown bool
 }
 
 // Source is a source with whether its plugin is enabled.
@@ -63,6 +67,9 @@ func ratingRank(r string) int {
 // source (testing, also ones turned off); users only allowed ones within
 // their ceiling.
 func (v Viewer) Visible(s Source) bool {
+	if v.AnyKnown && v.Admin {
+		return true
+	}
 	testing := v.Testing && v.Admin && s.Present && s.PluginEnabled
 	if !s.Usable() && !testing {
 		return false
@@ -303,6 +310,15 @@ func (h *Host) Image(ctx context.Context, v Viewer, id, ref string) (string, []b
 		return "", nil, err
 	}
 	return client.ReadImage(ctx, c, &sourcev1.FetchImageRequest{SourceId: s.SourceID, Ref: ref}, MaxImageBytes)
+}
+
+// SourceIcon fetches the icon of a source v may see (see [Host.Icon]).
+func (h *Host) SourceIcon(ctx context.Context, v Viewer, id, ref string) (string, io.Reader, error) {
+	s, err := h.Source(ctx, id, v)
+	if err != nil {
+		return "", nil, err
+	}
+	return h.Icon(ctx, s.PluginID, ref)
 }
 
 // Resolved is a series found from a pasted URL.

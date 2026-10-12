@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
+
 	"github.com/panelarr/server/internal/api/apigen"
 	"github.com/panelarr/server/internal/network"
 	"github.com/panelarr/server/internal/plugins"
@@ -584,4 +586,73 @@ func (s *Server) GetSourceNetwork(ctx context.Context, req apigen.GetSourceNetwo
 	}
 	out.Applied = &apigen.NetworkApplied{Origin: apigen.NetworkAppliedOrigin(origin), ProfileName: nonEmpty(name)}
 	return apigen.GetSourceNetwork200JSONResponse(out), nil
+}
+
+// GetMetaNetwork shows each metadata provider's profile in force and what
+// meta applies.
+func (s *Server) GetMetaNetwork(ctx context.Context, _ apigen.GetMetaNetworkRequestObject) (apigen.GetMetaNetworkResponseObject, error) {
+	list, err := s.deps.Meta.Assignments(ctx)
+	if err != nil {
+		return nil, metaError(err)
+	}
+	res, err := s.deps.Network.Resolver(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pushes, err := s.deps.Network.Pushes(ctx, network.KindProvider)
+	if err != nil {
+		return nil, err
+	}
+	out := apigen.GetMetaNetwork200JSONResponse{Providers: []apigen.ProviderNetwork{}}
+	if a, ok := res.Assigned(network.KindMeta, ""); ok {
+		out.Assignment = ptr(toAssignment(a))
+	}
+	hashes := map[string]string{}
+	for _, a := range list {
+		id := a.GetProviderId()
+		eff := res.Provider(id)
+		pn := apigen.ProviderNetwork{ProviderId: id, AcceptsProfiles: a.GetSupported(), Effective: toEffective(eff)}
+		if as, ok := res.Assigned(network.KindProvider, id); ok {
+			pn.Assignment = ptr(toAssignment(as))
+		}
+		want := network.UnsetHash
+		if eff.ProfileID != "" {
+			if want = hashes[eff.ProfileID]; want == "" {
+				prof, err := s.deps.Network.MetaProfile(ctx, eff.ProfileID)
+				if err != nil {
+					return nil, err
+				}
+				want = network.Hash(prof)
+				hashes[eff.ProfileID] = want
+			}
+		}
+		has := a.GetPushedProfile() != nil || a.GetPushedProfileName() != ""
+		last, seen := pushes[id]
+		switch {
+		case seen && last.Error != "":
+			pn.Push = apigen.NetworkPush{State: apigen.NetworkPushStateFailed, Error: ptr(last.Error), PushedAt: &last.PushedAt}
+		case want == network.UnsetHash && !has:
+			pn.Push = apigen.NetworkPush{State: apigen.NetworkPushStateNotNeeded}
+		case seen && last.Hash == want && (want != network.UnsetHash) == has:
+			pn.Push = apigen.NetworkPush{State: apigen.NetworkPushStatePushed, PushedAt: &last.PushedAt}
+		default:
+			pn.Push = apigen.NetworkPush{State: apigen.NetworkPushStatePending}
+		}
+		switch a.GetEffective() {
+		case metav1.ProfileOrigin_PROFILE_ORIGIN_PUSHED:
+			pn.Applied.Origin, pn.Applied.ProfileName = apigen.ProviderNetworkAppliedOriginPushed, nonEmpty(a.GetPushedProfileName())
+		case metav1.ProfileOrigin_PROFILE_ORIGIN_ASSIGNED:
+			pn.Applied.Origin, pn.Applied.ProfileName = apigen.ProviderNetworkAppliedOriginMeta, nonEmpty(a.GetEffectiveProfileId())
+		case metav1.ProfileOrigin_PROFILE_ORIGIN_DEFAULT:
+			pn.Applied.Origin, pn.Applied.ProfileName = apigen.ProviderNetworkAppliedOriginMetaDefault, nonEmpty(a.GetEffectiveProfileId())
+		default:
+			pn.Applied.Origin = apigen.ProviderNetworkAppliedOriginNone
+		}
+		if a.GetPushedAt() != nil {
+			at := a.GetPushedAt().AsTime()
+			pn.Applied.PushedAt = &at
+		}
+		out.Providers = append(out.Providers, pn)
+	}
+	return out, nil
 }

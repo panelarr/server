@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
+	metadatav1 "github.com/panelarr/meta/gen/panelarr/metadata/v1"
 
 	"github.com/panelarr/server/internal/secret"
 	"github.com/panelarr/server/internal/store"
@@ -353,4 +354,33 @@ func healthName(s string) string {
 		return "unknown"
 	}
 	return strings.ToLower(s)
+}
+
+// Assignments lists every provider meta has, with the network profile the
+// server pushed to it (password left out) and whether its plugin takes
+// profiles.
+func (s *Service) Assignments(ctx context.Context) ([]*metav1.Assignment, error) {
+	client, err := s.Client()
+	if err != nil {
+		return nil, err
+	}
+	res, err := client.Integrations.ListAssignments(ctx, connect.NewRequest(&metav1.ListAssignmentsRequest{}))
+	if err != nil {
+		return nil, wrap("list assignments", err)
+	}
+	return res.Msg.GetAssignments(), nil
+}
+
+// PushProfile gives a provider its network profile; nil removes the
+// pushed one (meta's own settings apply again).
+func (s *Service) PushProfile(ctx context.Context, provider string, p *metadatav1.NetworkProfile) error {
+	client, err := s.Client()
+	if err != nil {
+		return err
+	}
+	_, err = client.Integrations.SetPushedProfile(ctx, connect.NewRequest(&metav1.SetPushedProfileRequest{ProviderId: provider, Profile: p}))
+	if err != nil {
+		return wrap("push network profile", providerError(err, provider))
+	}
+	return nil
 }

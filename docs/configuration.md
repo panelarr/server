@@ -69,6 +69,8 @@ They are options: nothing is assigned by default, so plugins keep their own sett
 
 The server **pushes** each source's profile to its plugin, with the proxy's password and the solver inline, and only to plugins that declare they take network profiles (the solver only to those that take solvers too). A plugin whose source falls back to "the plugin's own settings" is told so. Changes are pushed within seconds (a `network.push` task); each plugin sync pushes what changed or failed, and everything is pushed again after a plugin restarts (its `instance_id` changes, it comes back from down, or the server starts). The plugin page shows each source's push state, and `GET /api/v1/sources/{id}/network` asks the plugin what it actually applies. The server's own per-source limits follow the profile's rate limit and concurrency where it sets them, else the plugin's declared limits.
 
+**Metadata providers** get their profile through the metadata service: the server pushes each provider's profile in force (the solver inline) and meta keeps it, hands it only to providers whose plugin takes profiles, and gives it again whenever a plugin reconnects. The server pushes changes within seconds, again when meta is (re)connected, and checks every 5 minutes (the `network.meta` job) that meta still has what it should. `GET /api/v1/system/meta/network` shows each provider's profile in force, its push state and what meta applies.
+
 A source's **own settings** (e.g. an extension's preferences), for sources with the `settings` capability, are read and changed through `GET`/`PATCH /api/v1/sources/{id}/settings` (admins), in the schema the plugin gives. The plugin keeps them; secret fields are never shown and keep their value when left empty.
 
 ## Background work

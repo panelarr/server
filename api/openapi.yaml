@@ -1590,6 +1590,27 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /system/meta/network:
+    get:
+      operationId: getMetaNetwork
+      tags: [network]
+      summary: The network profile in force for each metadata provider
+      description: |
+        For each provider meta has: what is assigned (at the provider, all
+        of meta, or global), whether its plugin takes profiles, whether
+        meta has the profile, and what meta applies. Calls meta: `502`
+        when it can't be reached.
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The providers' network settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaNetwork"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /sources/{source_id}/settings:
     parameters:
       - $ref: "#/components/parameters/SourceId"
@@ -5233,6 +5254,45 @@ components:
           description: "`pushed`: Panelarr's profile; `plugin`: the plugin's own settings; `none`: a direct connection; `unknown`: the plugin can't say."
         profile_name:
           type: string
+    MetaNetwork:
+      type: object
+      required: [providers]
+      properties:
+        assignment:
+          $ref: "#/components/schemas/NetworkAssignment"
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProviderNetwork"
+    ProviderNetwork:
+      type: object
+      required: [provider_id, accepts_profiles, effective, push, applied]
+      properties:
+        provider_id:
+          type: string
+        accepts_profiles:
+          type: boolean
+          description: Its plugin takes network profiles (meta gives them only to those).
+        assignment:
+          $ref: "#/components/schemas/NetworkAssignment"
+        effective:
+          $ref: "#/components/schemas/NetworkEffective"
+        push:
+          $ref: "#/components/schemas/NetworkPush"
+        applied:
+          type: object
+          required: [origin]
+          description: What meta applies to the provider.
+          properties:
+            origin:
+              type: string
+              enum: [pushed, meta, meta_default, none]
+              description: "`pushed`: Panelarr's profile; `meta`/`meta_default`: meta's own assignment or default; `none`: a direct connection."
+            profile_name:
+              type: string
+            pushed_at:
+              type: string
+              format: date-time
     PluginNetwork:
       type: object
       required: [plugin_id, accepts_profiles, accepts_solver, packages, sources]

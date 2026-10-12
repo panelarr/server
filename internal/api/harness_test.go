@@ -127,7 +127,10 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	host.SetSourcesChanged(chs.SourcesChanged)
 	host.RegisterPackageTasks(q)
 	netSvc := network.New(st, box, nil)
-	host.SetNetwork(netSvc, q)
+	host.SetNetwork(netSvc, q, func(ctx context.Context) error {
+		_, _, err := netSvc.PushMeta(ctx, m, false)
+		return err
+	})
 	rdr := reader.NewService(st, host, lib, chs, lim, hub, nil)
 	storages := storage.NewManager(st, box, nil)
 	dataDir := t.TempDir()

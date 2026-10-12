@@ -88,6 +88,11 @@ func observe(log *slog.Logger, m *metrics.Metrics) func(http.Handler) http.Handl
 			m.HTTP(route, r.Method, status, d)
 			level := slog.LevelInfo
 			switch {
+			case status == http.StatusBadGateway || status == http.StatusGatewayTimeout:
+				// A plugin, site or service behind the server failed; the
+				// handler logs why (at most once in a while for images),
+				// so a page of failing images doesn't flood the log.
+				level = slog.LevelInfo
 			case status >= 500:
 				level = slog.LevelError
 			case route == "/healthz" || route == "/readyz":

@@ -14,7 +14,9 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -60,6 +62,32 @@ type harness struct {
 type harnessOpt func(*Deps)
 
 func withChecks(c ...Check) harnessOpt { return func(d *Deps) { d.Checks = c } }
+
+func withLog(l *slog.Logger) harnessOpt { return func(d *Deps) { d.Log = l } }
+
+// logRecorder keeps the messages logged at warning level or above.
+type logRecorder struct {
+	mu    sync.Mutex
+	warns []string
+}
+
+func (r *logRecorder) Enabled(context.Context, slog.Level) bool { return true }
+func (r *logRecorder) WithAttrs([]slog.Attr) slog.Handler       { return r }
+func (r *logRecorder) WithGroup(string) slog.Handler            { return r }
+func (r *logRecorder) Handle(_ context.Context, rec slog.Record) error {
+	if rec.Level >= slog.LevelWarn {
+		r.mu.Lock()
+		r.warns = append(r.warns, rec.Message)
+		r.mu.Unlock()
+	}
+	return nil
+}
+
+func (r *logRecorder) warnings() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.warns)
+}
 
 func withMetricsOnAPI() harnessOpt {
 	return func(d *Deps) { d.Metrics = metrics.New(); d.MetricsOnAPI = true }

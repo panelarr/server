@@ -339,11 +339,7 @@ func (s *Server) GetPackageIcon(ctx context.Context, req apigen.GetPackageIconRe
 		return nil, NewProblem(http.StatusNotFound, CodeNotFound, "not a usable image")
 	}
 	if err != nil {
-		if p := pluginError(ctx, err); p != err { //nolint:errorlint // identity: was it mapped
-			return nil, p
-		}
-		s.deps.Log.WarnContext(ctx, "package icon failed", "plugin", req.PluginId, "package", req.PackageId, "err", err)
-		return nil, NewProblem(http.StatusBadGateway, "icon_failed", "the icon couldn't be fetched")
+		return nil, s.imageError(ctx, err, true, "package", req.PluginId+"/"+req.PackageId)
 	}
 	f, err := os.Open(img.Path)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -74,6 +75,8 @@ type Deps struct {
 type Server struct {
 	deps     Deps
 	policies policies
+	// iconWarnings rate-limits warnings about icons that fail to load.
+	iconWarnings *logThrottle
 }
 
 var _ apigen.StrictServerInterface = (*Server)(nil)
@@ -92,7 +95,7 @@ func NewHandler(deps Deps) (http.Handler, error) {
 		deps.Downloads == nil || deps.Storages == nil {
 		return nil, fmt.Errorf("api: every service dependency is required")
 	}
-	s := &Server{deps: deps, policies: pols}
+	s := &Server{deps: deps, policies: pols, iconWarnings: newLogThrottle(10 * time.Minute)}
 
 	r := chi.NewRouter()
 	r.Use(withRequestID, observe(deps.Log, deps.Metrics), recoverer(deps.Log))

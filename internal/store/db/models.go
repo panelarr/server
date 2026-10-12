@@ -134,6 +134,9 @@ type NetworkProxy struct {
 	PasswordSealed string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	OwnerKind      string
+	OwnerID        string
+	OwnerPlugin    pgtype.Text
 }
 
 type NetworkPush struct {
@@ -155,6 +158,9 @@ type NetworkSolver struct {
 	AsResponseFallback bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	OwnerKind          string
+	OwnerID            string
+	OwnerPlugin        pgtype.Text
 }
 
 type Plugin struct {

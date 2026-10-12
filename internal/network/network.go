@@ -77,7 +77,9 @@ type Solver struct {
 	ID, Name, Type, URL    string
 	SessionTTL, MaxTimeout time.Duration
 	AsResponseFallback     bool
-	CreatedAt, UpdatedAt   time.Time
+	// Owner is set on custom solvers.
+	Owner                *Owner
+	CreatedAt, UpdatedAt time.Time
 }
 
 // SolverPatch changes some of a solver's fields.
@@ -91,8 +93,27 @@ func solverOf(r db.NetworkSolver) Solver {
 	return Solver{
 		ID: r.ID, Name: r.Name, Type: r.Type, URL: r.Url,
 		SessionTTL: time.Duration(r.SessionTtlSeconds) * time.Second, MaxTimeout: time.Duration(r.MaxTimeoutSeconds) * time.Second,
-		AsResponseFallback: r.AsResponseFallback, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		AsResponseFallback: r.AsResponseFallback, Owner: ownerOf(r.OwnerKind, r.OwnerID), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
+}
+
+func ownerOf(kind, id string) *Owner {
+	if kind == "" {
+		return nil
+	}
+	return &Owner{Kind: kind, ID: id}
+}
+
+// visible reports whether a list shows an item with this owner: shared
+// ones always, custom ones with withCustom, only owner's with owner.
+func visible(kind, id string, owner *Owner, withCustom bool) bool {
+	switch {
+	case owner != nil:
+		return kind == owner.Kind && id == owner.ID
+	case kind != "":
+		return withCustom
+	}
+	return true
 }
 
 func checkSolver(s Solver) error {
@@ -124,15 +145,18 @@ func checkHTTPURL(raw string) error {
 
 func seconds(d time.Duration) int32 { return int32(d / time.Second) } //nolint:gosec // bounded by the API
 
-// Solvers lists the solvers.
-func (s *Service) Solvers(ctx context.Context) ([]Solver, error) {
+// Solvers lists shared solvers, and custom ones when withCustom; owner
+// narrows the list to one owner's custom solvers.
+func (s *Service) Solvers(ctx context.Context, owner *Owner, withCustom bool) ([]Solver, error) {
 	rows, err := s.st.ListSolvers(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Solver, len(rows))
-	for i, r := range rows {
-		out[i] = solverOf(r)
+	out := []Solver{}
+	for _, r := range rows {
+		if visible(r.OwnerKind, r.OwnerID, owner, withCustom) {
+			out = append(out, solverOf(r))
+		}
 	}
 	return out, nil
 }
@@ -157,10 +181,19 @@ func (s *Service) CreateSolver(ctx context.Context, in Solver) (Solver, error) {
 	if err := checkSolver(in); err != nil {
 		return Solver{}, err
 	}
-	r, err := s.st.InsertSolver(ctx, db.InsertSolverParams{
+	plugin, err := s.ownerPlugin(ctx, in.Owner)
+	if err != nil {
+		return Solver{}, err
+	}
+	params := db.InsertSolverParams{
 		ID: in.ID, Name: strings.TrimSpace(in.Name), Type: in.Type, Url: in.URL,
 		SessionTtlSeconds: seconds(in.SessionTTL), MaxTimeoutSeconds: seconds(in.MaxTimeout), AsResponseFallback: in.AsResponseFallback,
-	})
+		OwnerPlugin: text(plugin),
+	}
+	if in.Owner != nil {
+		params.OwnerKind, params.OwnerID = in.Owner.Kind, in.Owner.ID
+	}
+	r, err := s.st.InsertSolver(ctx, params)
 	if isUniqueViolation(err) {
 		return Solver{}, ErrIDTaken
 	}

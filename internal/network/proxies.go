@@ -21,12 +21,16 @@ import (
 type Proxy struct {
 	ID, Name, URL, Username string
 	HasPassword             bool
-	CreatedAt, UpdatedAt    time.Time
+	// Owner is set on custom proxies.
+	Owner                *Owner
+	CreatedAt, UpdatedAt time.Time
 }
 
 // ProxyInput is a proxy as given: Password is plain.
 type ProxyInput struct {
 	ID, Name, URL, Username, Password string
+	// Owner makes a custom proxy (on creation only).
+	Owner *Owner
 }
 
 // ProxyPatch changes some of a proxy's fields. An empty Password keeps the
@@ -38,7 +42,7 @@ type ProxyPatch struct {
 func proxyOf(r db.NetworkProxy) Proxy {
 	return Proxy{
 		ID: r.ID, Name: r.Name, URL: r.Url, Username: r.Username, HasPassword: r.PasswordSealed != "",
-		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		Owner: ownerOf(r.OwnerKind, r.OwnerID), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
 }
 
@@ -67,15 +71,18 @@ func checkProxy(in ProxyInput) error {
 	return nil
 }
 
-// Proxies lists the proxies.
-func (s *Service) Proxies(ctx context.Context) ([]Proxy, error) {
+// Proxies lists shared proxies, and custom ones when withCustom; owner
+// narrows the list to one owner's custom proxies.
+func (s *Service) Proxies(ctx context.Context, owner *Owner, withCustom bool) ([]Proxy, error) {
 	rows, err := s.st.ListProxies(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Proxy, len(rows))
-	for i, r := range rows {
-		out[i] = proxyOf(r)
+	out := []Proxy{}
+	for _, r := range rows {
+		if visible(r.OwnerKind, r.OwnerID, owner, withCustom) {
+			out = append(out, proxyOf(r))
+		}
 	}
 	return out, nil
 }
@@ -125,13 +132,22 @@ func (s *Service) CreateProxy(ctx context.Context, in ProxyInput) (Proxy, error)
 	if err := checkProxy(in); err != nil {
 		return Proxy{}, err
 	}
+	plugin, err := s.ownerPlugin(ctx, in.Owner)
+	if err != nil {
+		return Proxy{}, err
+	}
 	sealed, err := s.seal(in.Password)
 	if err != nil {
 		return Proxy{}, err
 	}
-	r, err := s.st.InsertProxy(ctx, db.InsertProxyParams{
+	params := db.InsertProxyParams{
 		ID: in.ID, Name: strings.TrimSpace(in.Name), Url: in.URL, Username: in.Username, PasswordSealed: sealed,
-	})
+		OwnerPlugin: text(plugin),
+	}
+	if in.Owner != nil {
+		params.OwnerKind, params.OwnerID = in.Owner.Kind, in.Owner.ID
+	}
+	r, err := s.st.InsertProxy(ctx, params)
 	if isUniqueViolation(err) {
 		return Proxy{}, ErrIDTaken
 	}

@@ -98,24 +98,46 @@ func profileOf(r db.NetworkProfile) Profile {
 	return p
 }
 
+// scope is where custom items may be used: "" for shared ones,
+// "plugin:<id>" for a plugin's (and its extensions' and sources'),
+// "provider:<id>" for a metadata provider's.
+func scope(kind, id string, plugin pgtype.Text) string {
+	switch {
+	case kind == KindProvider:
+		return "provider:" + id
+	case plugin.Valid:
+		return "plugin:" + plugin.String
+	}
+	return ""
+}
+
 // checkProfile checks a profile's fields and that its proxy and solver
-// exist.
-func (s *Service) checkProfile(ctx context.Context, p Profile) error {
+// exist and may be used there: shared ones anywhere, custom ones only in
+// their owner's scope (in).
+func (s *Service) checkProfile(ctx context.Context, p Profile, in string) error {
 	if strings.TrimSpace(p.Name) == "" {
 		return invalid("name", "give it a name")
 	}
 	if p.ProxyID != "" {
-		if _, err := s.st.GetProxy(ctx, p.ProxyID); errors.Is(err, pgx.ErrNoRows) {
+		r, err := s.st.GetProxy(ctx, p.ProxyID)
+		if errors.Is(err, pgx.ErrNoRows) {
 			return invalid("proxy_id", "no such proxy")
 		} else if err != nil {
 			return err
 		}
+		if sc := scope(r.OwnerKind, r.OwnerID, r.OwnerPlugin); sc != "" && sc != in {
+			return invalid("proxy_id", "a custom proxy of another owner")
+		}
 	}
 	if p.SolverID != "" {
-		if _, err := s.st.GetSolver(ctx, p.SolverID); errors.Is(err, pgx.ErrNoRows) {
+		r, err := s.st.GetSolver(ctx, p.SolverID)
+		if errors.Is(err, pgx.ErrNoRows) {
 			return invalid("solver_id", "no such solver")
 		} else if err != nil {
 			return err
+		}
+		if sc := scope(r.OwnerKind, r.OwnerID, r.OwnerPlugin); sc != "" && sc != in {
+			return invalid("solver_id", "a custom solver of another owner")
 		}
 	}
 	if rl := p.RateLimit; rl != nil {
@@ -265,11 +287,11 @@ func (s *Service) CreateProfile(ctx context.Context, p Profile) (Profile, error)
 	if p.UserAgentMode == "" {
 		p.UserAgentMode = UAPluginDefault
 	}
-	if err := s.checkProfile(ctx, p); err != nil {
-		return Profile{}, err
-	}
 	plugin, err := s.ownerPlugin(ctx, p.Owner)
 	if err != nil {
+		return Profile{}, err
+	}
+	if err := s.checkProfile(ctx, p, profileScope(p.Owner, plugin)); err != nil {
 		return Profile{}, err
 	}
 	params, err := profileParams(p)
@@ -298,7 +320,11 @@ func (s *Service) ReplaceProfile(ctx context.Context, id string, p Profile) (Pro
 	if p.UserAgentMode == "" {
 		p.UserAgentMode = UAPluginDefault
 	}
-	if err := s.checkProfile(ctx, p); err != nil {
+	row, err := s.st.GetProfile(ctx, id)
+	if err != nil {
+		return Profile{}, err
+	}
+	if err := s.checkProfile(ctx, p, scope(row.OwnerKind, row.OwnerID, row.OwnerPlugin)); err != nil {
 		return Profile{}, err
 	}
 	in, err := profileParams(p)
@@ -334,4 +360,12 @@ func (s *Service) DeleteProfile(ctx context.Context, id string) error {
 	}
 	s.log.InfoContext(ctx, "network profile removed", "component", "audit", "profile", id)
 	return nil
+}
+
+// profileScope is the scope of a profile being created.
+func profileScope(o *Owner, plugin string) string {
+	if o == nil {
+		return ""
+	}
+	return scope(o.Kind, o.ID, text(plugin))
 }

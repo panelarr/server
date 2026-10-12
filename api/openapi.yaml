@@ -1148,7 +1148,22 @@ paths:
       operationId: listSolvers
       tags: [network]
       summary: The solvers
+      description: Shared ones; with `include_custom` also custom ones; with `owner_kind` and `owner_id` only that owner's custom ones.
       x-panelarr-access: admin
+      parameters:
+        - name: include_custom
+          in: query
+          schema:
+            type: boolean
+        - name: owner_kind
+          in: query
+          schema:
+            $ref: "#/components/schemas/ProfileOwnerKind"
+        - name: owner_id
+          in: query
+          schema:
+            type: string
+            maxLength: 300
       responses:
         "200":
           description: The solvers.
@@ -1274,7 +1289,22 @@ paths:
       operationId: listProxies
       tags: [network]
       summary: The proxys
+      description: Shared ones; with `include_custom` also custom ones; with `owner_kind` and `owner_id` only that owner's custom ones.
       x-panelarr-access: admin
+      parameters:
+        - name: include_custom
+          in: query
+          schema:
+            type: boolean
+        - name: owner_kind
+          in: query
+          schema:
+            $ref: "#/components/schemas/ProfileOwnerKind"
+        - name: owner_id
+          in: query
+          schema:
+            type: string
+            maxLength: 300
       responses:
         "200":
           description: The proxys.
@@ -4723,9 +4753,11 @@ components:
             maxLength: 35
     Solver:
       type: object
-      description: A challenge solver (FlareSolverr-compatible).
+      description: A challenge solver (FlareSolverr-compatible), shared or custom to one owner.
       required: [id, name, type, url, as_response_fallback, created_at, updated_at]
       properties:
+        owner:
+          $ref: "#/components/schemas/ProfileOwner"
         id:
           type: string
         name:
@@ -4765,6 +4797,9 @@ components:
       type: object
       required: [id, name, type, url]
       properties:
+        owner:
+          $ref: "#/components/schemas/ProfileOwner"
+          description: Makes it custom to one plugin, extension, source or provider (only usable by profiles of that owner, removed with its plugin).
         id:
           type: string
           pattern: "^[a-z0-9][a-z0-9_-]{0,39}$"
@@ -4811,9 +4846,11 @@ components:
           type: boolean
     Proxy:
       type: object
-      description: An HTTP, HTTPS or SOCKS5 proxy. The password is never returned.
+      description: An HTTP, HTTPS or SOCKS5 proxy, shared or custom to one owner. The password is never returned.
       required: [id, name, url, has_password, created_at, updated_at]
       properties:
+        owner:
+          $ref: "#/components/schemas/ProfileOwner"
         id:
           type: string
         name:
@@ -4843,6 +4880,9 @@ components:
       type: object
       required: [id, name, url]
       properties:
+        owner:
+          $ref: "#/components/schemas/ProfileOwner"
+          description: Makes it custom to one plugin, extension, source or provider (only usable by profiles of that owner, removed with its plugin).
         id:
           type: string
           pattern: "^[a-z0-9][a-z0-9_-]{0,39}$"

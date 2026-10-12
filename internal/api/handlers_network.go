@@ -53,11 +53,33 @@ func durationOf(seconds *int) time.Duration {
 	return time.Duration(*seconds) * time.Second
 }
 
+// ownerFilter narrows a network list to one owner's custom items.
+func ownerFilter(kind *apigen.ProfileOwnerKind, id *string) *network.Owner {
+	if kind == nil {
+		return nil
+	}
+	return &network.Owner{Kind: string(*kind), ID: deref(id)}
+}
+
+func toOwner(o *network.Owner) *apigen.ProfileOwner {
+	if o == nil {
+		return nil
+	}
+	return &apigen.ProfileOwner{Kind: apigen.ProfileOwnerKind(o.Kind), Id: o.ID}
+}
+
+func ownerInput(o *apigen.ProfileOwner) *network.Owner {
+	if o == nil {
+		return nil
+	}
+	return &network.Owner{Kind: string(o.Kind), ID: o.Id}
+}
+
 func toSolver(s network.Solver) apigen.Solver {
 	return apigen.Solver{
 		Id: s.ID, Name: s.Name, Type: apigen.SolverType(s.Type), Url: s.URL,
 		SessionTtlSeconds: secondsPtr(s.SessionTTL), MaxTimeoutSeconds: secondsPtr(s.MaxTimeout),
-		AsResponseFallback: s.AsResponseFallback, CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
+		AsResponseFallback: s.AsResponseFallback, Owner: toOwner(s.Owner), CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 	}
 }
 
@@ -65,6 +87,7 @@ func solverInput(b apigen.NewSolver) network.Solver {
 	return network.Solver{
 		ID: b.Id, Name: b.Name, Type: string(b.Type), URL: b.Url,
 		SessionTTL: durationOf(b.SessionTtlSeconds), MaxTimeout: durationOf(b.MaxTimeoutSeconds), AsResponseFallback: deref(b.AsResponseFallback),
+		Owner: ownerInput(b.Owner),
 	}
 }
 
@@ -73,8 +96,8 @@ func toNetworkTest(r network.TestResult) apigen.NetworkTest {
 }
 
 // ListSolvers lists the solvers.
-func (s *Server) ListSolvers(ctx context.Context, _ apigen.ListSolversRequestObject) (apigen.ListSolversResponseObject, error) {
-	list, err := s.deps.Network.Solvers(ctx)
+func (s *Server) ListSolvers(ctx context.Context, req apigen.ListSolversRequestObject) (apigen.ListSolversResponseObject, error) {
+	list, err := s.deps.Network.Solvers(ctx, ownerFilter(req.Params.OwnerKind, req.Params.OwnerId), deref(req.Params.IncludeCustom))
 	if err != nil {
 		return nil, err
 	}
@@ -156,17 +179,17 @@ func (s *Server) TestSolver(ctx context.Context, req apigen.TestSolverRequestObj
 func toProxy(p network.Proxy) apigen.Proxy {
 	return apigen.Proxy{
 		Id: p.ID, Name: p.Name, Url: p.URL, Username: nonEmpty(p.Username), HasPassword: p.HasPassword,
-		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+		Owner: toOwner(p.Owner), CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 }
 
 func proxyInput(b apigen.NewProxy) network.ProxyInput {
-	return network.ProxyInput{ID: b.Id, Name: b.Name, URL: b.Url, Username: deref(b.Username), Password: deref(b.Password)}
+	return network.ProxyInput{ID: b.Id, Name: b.Name, URL: b.Url, Username: deref(b.Username), Password: deref(b.Password), Owner: ownerInput(b.Owner)}
 }
 
 // ListProxies lists the proxies.
-func (s *Server) ListProxies(ctx context.Context, _ apigen.ListProxiesRequestObject) (apigen.ListProxiesResponseObject, error) {
-	list, err := s.deps.Network.Proxies(ctx)
+func (s *Server) ListProxies(ctx context.Context, req apigen.ListProxiesRequestObject) (apigen.ListProxiesResponseObject, error) {
+	list, err := s.deps.Network.Proxies(ctx, ownerFilter(req.Params.OwnerKind, req.Params.OwnerId), deref(req.Params.IncludeCustom))
 	if err != nil {
 		return nil, err
 	}
@@ -333,11 +356,7 @@ func (s *Server) profileResponse(ctx context.Context, p network.Profile) (apigen
 
 // ListNetworkProfiles lists profiles.
 func (s *Server) ListNetworkProfiles(ctx context.Context, req apigen.ListNetworkProfilesRequestObject) (apigen.ListNetworkProfilesResponseObject, error) {
-	var owner *network.Owner
-	if req.Params.OwnerKind != nil {
-		owner = &network.Owner{Kind: string(*req.Params.OwnerKind), ID: deref(req.Params.OwnerId)}
-	}
-	list, err := s.deps.Network.Profiles(ctx, owner, deref(req.Params.IncludeCustom))
+	list, err := s.deps.Network.Profiles(ctx, ownerFilter(req.Params.OwnerKind, req.Params.OwnerId), deref(req.Params.IncludeCustom))
 	if err != nil {
 		return nil, err
 	}

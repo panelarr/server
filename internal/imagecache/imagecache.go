@@ -83,12 +83,20 @@ func (c *Cache) Get(ctx context.Context, rawURL string) (Image, error) {
 // GetWith returns the image cached under key, calling fetch on first use.
 // Concurrent requests for the same key share one fetch.
 func (c *Cache) GetWith(ctx context.Context, key string, fetch Fetcher) (Image, error) {
+	return c.GetFresh(ctx, key, 0, fetch)
+}
+
+// GetFresh is GetWith for images that may change: one cached longer than
+// maxAge (0: forever) is fetched again, and kept when that fails.
+func (c *Cache) GetFresh(ctx context.Context, key string, maxAge time.Duration, fetch Fetcher) (Image, error) {
 	data, meta := c.paths(key)
-	if img, ok := c.cached(data, meta); ok {
-		return img, nil
+	fresh := func(img Image) bool { return maxAge <= 0 || time.Since(img.ModTime) < maxAge }
+	stale, cached := c.cached(data, meta)
+	if cached && fresh(stale) {
+		return stale, nil
 	}
 	v, err, _ := c.group.Do(data, func() (any, error) {
-		if img, ok := c.cached(data, meta); ok {
+		if img, ok := c.cached(data, meta); ok && fresh(img) {
 			return img, nil
 		}
 		// The fetch outlives a cancelled caller: others may wait for it.
@@ -96,6 +104,9 @@ func (c *Cache) GetWith(ctx context.Context, key string, fetch Fetcher) (Image, 
 		defer cancel()
 		ct, body, err := fetch(fctx)
 		if err != nil {
+			if cached {
+				return stale, nil // better an old image than none
+			}
 			return nil, err
 		}
 		if rc, ok := body.(io.Closer); ok {

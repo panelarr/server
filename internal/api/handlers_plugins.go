@@ -5,9 +5,13 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
 	"math"
 	"net/http"
+	"net/url"
+	"os"
 	"strconv"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -17,6 +21,7 @@ import (
 
 	"github.com/panelarr/server/internal/api/apigen"
 	"github.com/panelarr/server/internal/auth"
+	"github.com/panelarr/server/internal/imagecache"
 	"github.com/panelarr/server/internal/plugins"
 )
 
@@ -190,13 +195,14 @@ func (s *Server) SetPluginConfig(ctx context.Context, req apigen.SetPluginConfig
 	return apigen.SetPluginConfig200JSONResponse(toPluginConfig(c)), nil
 }
 
-func toPackage(pluginID string, p *sourcev1.Package, task *uuid.UUID) apigen.Package {
+func (s *Server) toPackage(pluginID string, p *sourcev1.Package, task *uuid.UUID) apigen.Package {
 	out := apigen.Package{
 		Id: p.GetId(), Name: p.GetName(), Langs: nonNil(p.GetLangs()), Version: p.GetVersion(),
 		Installed: p.GetInstalled(), InstalledVersion: nonEmpty(p.GetInstalledVersion()),
 		UpdateAvailable: p.GetUpdateAvailable(), ContentRating: apigen.PackageContentRating(plugins.RatingName(p.GetContentRating())),
 		Supported: p.GetSupported(), Offers: []apigen.PackageOffer{}, Sources: []apigen.PackageSource{},
 		EnabledLangs: nonNil(p.GetSettings().GetEnabledLangs()), Error: nonEmpty(p.GetError()), TaskId: task,
+		IconUrl: s.packageIconURL(pluginID, p.GetId(), p.GetIconUrl()),
 	}
 	for _, o := range p.GetOffers() {
 		out.Offers = append(out.Offers, apigen.PackageOffer{
@@ -227,7 +233,7 @@ func (s *Server) ListPackages(ctx context.Context, req apigen.ListPackagesReques
 		InstalledOnly: deref(pr.Installed), UpdatesOnly: deref(pr.Updates),
 	})
 	if err != nil {
-		return nil, pluginError(ctx, err)
+		return nil, packageError(ctx, err)
 	}
 	pending, err := s.deps.Plugins.PendingPackageTasks(ctx, req.PluginId)
 	if err != nil {
@@ -235,7 +241,7 @@ func (s *Server) ListPackages(ctx context.Context, req apigen.ListPackagesReques
 	}
 	out := apigen.ListPackages200JSONResponse{Packages: make([]apigen.Package, len(list))}
 	for i, p := range list {
-		out.Packages[i] = toPackage(req.PluginId, p, pendingTask(pending, p.GetId()))
+		out.Packages[i] = s.toPackage(req.PluginId, p, pendingTask(pending, p.GetId()))
 	}
 	return out, nil
 }
@@ -244,13 +250,13 @@ func (s *Server) ListPackages(ctx context.Context, req apigen.ListPackagesReques
 func (s *Server) GetPackage(ctx context.Context, req apigen.GetPackageRequestObject) (apigen.GetPackageResponseObject, error) {
 	p, err := s.deps.Plugins.Package(ctx, req.PluginId, req.PackageId)
 	if err != nil {
-		return nil, pluginError(ctx, err)
+		return nil, packageError(ctx, err)
 	}
 	pending, err := s.deps.Plugins.PendingPackageTasks(ctx, req.PluginId)
 	if err != nil {
 		return nil, err
 	}
-	return apigen.GetPackage200JSONResponse(toPackage(req.PluginId, p, pendingTask(pending, p.GetId()))), nil
+	return apigen.GetPackage200JSONResponse(s.toPackage(req.PluginId, p, pendingTask(pending, p.GetId()))), nil
 }
 
 func (s *Server) queuePackage(ctx context.Context, pluginID, pkg, action, origin string) (apigen.TaskRef, error) {
@@ -258,7 +264,7 @@ func (s *Server) queuePackage(ctx context.Context, pluginID, pkg, action, origin
 		PluginID: pluginID, PackageID: pkg, Action: action, OriginID: origin,
 	})
 	if err != nil {
-		return apigen.TaskRef{}, pluginError(ctx, err)
+		return apigen.TaskRef{}, packageError(ctx, err)
 	}
 	return apigen.TaskRef{TaskId: t.ID}, nil
 }
@@ -298,11 +304,68 @@ func (s *Server) UninstallPackage(ctx context.Context, req apigen.UninstallPacka
 func (s *Server) SetPackageLanguages(ctx context.Context, req apigen.SetPackageLanguagesRequestObject) (apigen.SetPackageLanguagesResponseObject, error) {
 	p, err := s.deps.Plugins.SetPackageLanguages(ctx, req.PluginId, req.PackageId, req.Body.EnabledLangs)
 	if err != nil {
-		return nil, pluginError(ctx, err)
+		return nil, packageError(ctx, err)
 	}
 	pending, err := s.deps.Plugins.PendingPackageTasks(ctx, req.PluginId)
 	if err != nil {
 		return nil, err
 	}
-	return apigen.SetPackageLanguages200JSONResponse(toPackage(req.PluginId, p, pendingTask(pending, p.GetId()))), nil
+	return apigen.SetPackageLanguages200JSONResponse(s.toPackage(req.PluginId, p, pendingTask(pending, p.GetId()))), nil
+}
+
+// packageIconURL is the server's signed URL for a package's icon.
+func (s *Server) packageIconURL(pluginID, pkg, ref string) *string {
+	if ref == "" {
+		return nil
+	}
+	q := url.Values{"ref": {ref}, "sig": {s.deps.Signer.Sign("package-icon", pluginID, pkg, ref)}}
+	u := BasePath + "/plugins/" + url.PathEscape(pluginID) + "/packages/" + url.PathEscape(pkg) + "/icon?" + q.Encode()
+	return &u
+}
+
+// iconMaxAge is how long a package icon is kept before it is fetched again.
+const iconMaxAge = 7 * 24 * time.Hour
+
+// GetPackageIcon serves a package's icon through the server, cached.
+func (s *Server) GetPackageIcon(ctx context.Context, req apigen.GetPackageIconRequestObject) (apigen.GetPackageIconResponseObject, error) {
+	if !s.deps.Signer.Verify(req.Params.Sig, "package-icon", req.PluginId, req.PackageId, req.Params.Ref) {
+		return nil, NewProblem(http.StatusForbidden, "bad_signature", "not an image link from this server")
+	}
+	key := "package-icon\x00" + req.PluginId + "\x00" + req.Params.Ref
+	img, err := s.deps.Images.GetFresh(ctx, key, iconMaxAge, func(ctx context.Context) (string, io.Reader, error) {
+		return s.deps.Plugins.PackageIcon(ctx, req.PluginId, req.Params.Ref)
+	})
+	if errors.Is(err, imagecache.ErrNotImage) {
+		return nil, NewProblem(http.StatusNotFound, CodeNotFound, "not a usable image")
+	}
+	if err != nil {
+		if p := pluginError(ctx, err); p != err { //nolint:errorlint // identity: was it mapped
+			return nil, p
+		}
+		s.deps.Log.WarnContext(ctx, "package icon failed", "plugin", req.PluginId, "package", req.PackageId, "err", err)
+		return nil, NewProblem(http.StatusBadGateway, "icon_failed", "the icon couldn't be fetched")
+	}
+	f, err := os.Open(img.Path)
+	if err != nil {
+		return nil, err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return apigen.GetPackageIcon200ImageResponse{
+		Body: f, ContentType: img.ContentType, ContentLength: st.Size(),
+		Headers: apigen.GetPackageIcon200ResponseHeaders{CacheControl: ptr("private, max-age=86400")},
+	}, nil
+}
+
+// packageError is pluginError for package calls: a request the plugin
+// refuses (e.g. a language the package doesn't have) is 422.
+func packageError(ctx context.Context, err error) error {
+	var pe *plugin.Error
+	if errors.As(err, &pe) && pe.Code == plugin.CodeInvalidArgument && pe.Reason == "" {
+		return NewProblem(http.StatusUnprocessableEntity, "package_rejected", pe.Message)
+	}
+	return pluginError(ctx, err)
 }

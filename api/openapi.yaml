@@ -1014,6 +1014,51 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /plugins/{plugin_id}/packages/{package_id}/icon:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+      - $ref: "#/components/parameters/PackageId"
+    get:
+      operationId: getPackageIcon
+      tags: [plugins]
+      summary: A package's icon
+      description: |
+        Use the package's `icon_url`; only links the server handed out
+        work (they are signed). The server fetches the icon from the plugin
+        (with the plugin's key, only to the plugin's own address), keeps
+        raster images up to 2 MiB and refreshes them weekly, so the browser
+        never contacts a site.
+      x-panelarr-access: admin
+      parameters:
+        - name: ref
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 4000
+        - name: sig
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+      responses:
+        "200":
+          description: The icon.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: "#/components/responses/Problem"
+
   /plugins/{plugin_id}/packages/{package_id}/install:
     parameters:
       - $ref: "#/components/parameters/PluginId"
@@ -4011,6 +4056,9 @@ components:
         error:
           type: string
           description: Why an installed package isn't working.
+        icon_url:
+          type: string
+          description: The server's URL for the package's icon, when it has one.
         task_id:
           type: string
           format: uuid

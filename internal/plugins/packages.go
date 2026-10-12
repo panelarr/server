@@ -3,13 +3,18 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"slices"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	sourcev1 "github.com/panelarr/source-api/gen/panelarr/source/v1"
 	"github.com/panelarr/source-api/sdk/client"
@@ -224,16 +229,23 @@ func (h *Host) handlePackage(ctx context.Context, t *queue.Task) (any, error) {
 		return nil, queue.Permanent(fmt.Errorf("unknown package action %q", p.Action))
 	}
 	if err != nil {
+		// The task's error keeps the plugin's reason (e.g.
+		// STORE_FETCH_FAILED: …) for clients to tell failures apart.
+		msg := errorMessage(err)
 		var pe *plugin.Error
 		if errors.As(err, &pe) {
+			if pe.Reason != "" {
+				msg = string(pe.Reason) + ": " + msg
+			}
 			switch pe.Code {
 			case plugin.CodeNotFound, plugin.CodeInvalidArgument, plugin.CodeFailedPrecondition, plugin.CodeUnimplemented:
 				// Unknown package, bad signature or checksum, a broken
-				// store: trying again won't help.
-				return nil, queue.Permanent(errors.New(errorMessage(err)))
+				// store: trying again won't help. A store that couldn't
+				// be reached (unavailable) is tried again.
+				return nil, queue.Permanent(errors.New(msg))
 			}
 		}
-		return nil, errors.New(errorMessage(err))
+		return nil, errors.New(msg)
 	}
 	h.log.InfoContext(ctx, "package changed", "component", "audit", "action", p.Action, "plugin", p.PluginID, "package", p.PackageID,
 		"version", pkg.GetInstalledVersion())
@@ -275,4 +287,68 @@ func (h *Host) installedPackages(ctx context.Context, c client.Client, info *sou
 		}
 	}
 	return out
+}
+
+// MaxIconBytes caps a package icon.
+const MaxIconBytes = 2 << 20
+
+// iconClient fetches package icons.
+var iconClient = &http.Client{Timeout: callTimeout}
+
+// PackageIcon fetches a package's icon from ref, its icon URL as the plugin
+// gave it: a path relative to the plugin's address, or an absolute URL. The
+// plugin's key goes only to the plugin's own address.
+func (h *Host) PackageIcon(ctx context.Context, id, ref string) (string, io.Reader, error) {
+	p, err := h.st.GetPlugin(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, ErrNotFound
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	if !p.Enabled {
+		return "", nil, ErrDisabled
+	}
+	base, err := url.Parse(p.Url)
+	if err != nil {
+		return "", nil, err
+	}
+	rel, err := url.Parse(ref)
+	if err != nil {
+		return "", nil, ErrNotFound
+	}
+	u := base.ResolveReference(rel)
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", nil, ErrNotFound
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return "", nil, err
+	}
+	req.Header.Set("Accept", "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8")
+	if u.Scheme == base.Scheme && u.Host == base.Host {
+		key, err := h.open(p.ApiKey)
+		if err != nil {
+			return "", nil, err
+		}
+		if key != "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
+	}
+	res, err := iconClient.Do(req)
+	if err != nil {
+		return "", nil, fmt.Errorf("plugins: icon: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("plugins: icon: status %d", res.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(res.Body, MaxIconBytes+1))
+	if err != nil {
+		return "", nil, fmt.Errorf("plugins: icon: %w", err)
+	}
+	if len(data) > MaxIconBytes {
+		return "", nil, fmt.Errorf("plugins: icon larger than %d bytes", MaxIconBytes)
+	}
+	return res.Header.Get("Content-Type"), bytes.NewReader(data), nil
 }

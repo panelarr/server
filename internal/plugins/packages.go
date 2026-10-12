@@ -289,6 +289,22 @@ func (h *Host) installedPackages(ctx context.Context, c client.Client, info *sou
 	return out
 }
 
+// PackageIcon fetches a package's own icon. ErrNotFound when it has none.
+func (h *Host) PackageIcon(ctx context.Context, id, pkg string) (string, io.Reader, error) {
+	p, err := h.Package(ctx, id, pkg)
+	if err != nil {
+		var pe *plugin.Error
+		if errors.As(err, &pe) && pe.Code == plugin.CodeNotFound {
+			return "", nil, ErrNotFound
+		}
+		return "", nil, err
+	}
+	if p.GetIconUrl() == "" {
+		return "", nil, ErrNotFound
+	}
+	return h.Icon(ctx, id, p.GetIconUrl())
+}
+
 // MaxIconBytes caps an icon (of a package or a source).
 const MaxIconBytes = 2 << 20
 
@@ -342,6 +358,10 @@ func (h *Host) Icon(ctx context.Context, id, ref string) (string, io.Reader, err
 		return "", nil, fmt.Errorf("plugins: icon: %w", err)
 	}
 	defer res.Body.Close()
+	if res.StatusCode == http.StatusNotFound || res.StatusCode == http.StatusGone {
+		// E.g. a plugin hiding sources in a language turned off.
+		return "", nil, fmt.Errorf("%w: no icon there", ErrNotFound)
+	}
 	if res.StatusCode != http.StatusOK {
 		return "", nil, fmt.Errorf("plugins: icon: status %d", res.StatusCode)
 	}

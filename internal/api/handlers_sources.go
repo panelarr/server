@@ -50,8 +50,12 @@ func (s *Server) imageURL(sourceID, ref string) *string {
 
 // iconURL is the server's signed URL for a source's icon. Icons are fetched
 // from the plugin's address, not through the source (see Host.Icon); the
-// kind is part of the signature.
-func (s *Server) iconURL(sourceID, ref string) *string {
+// kind is part of the signature. A source without an icon of its own shows
+// its package's.
+func (s *Server) iconURL(sourceID, ref, packageID string) *string {
+	if ref == "" && packageID != "" {
+		ref = plugins.PackageIconRef
+	}
 	if ref == "" {
 		return nil
 	}
@@ -64,7 +68,7 @@ func (s *Server) toSourceInfo(src plugins.Source) apigen.SourceInfo {
 	out := apigen.SourceInfo{
 		Id: src.ID, PluginId: src.PluginID, Name: src.Name, Lang: src.Lang,
 		ContentRating: apigen.SourceInfoContentRating(src.ContentRating),
-		IconUrl:       s.iconURL(src.ID, src.IconUrl), HomeUrl: nonEmpty(src.HomeUrl),
+		IconUrl:       s.iconURL(src.ID, src.IconUrl, src.PackageID), HomeUrl: nonEmpty(src.HomeUrl),
 		Capabilities: nonNil(src.Capabilities), Enabled: src.Enabled, Present: src.Present,
 		PackageId: nonEmpty(src.PackageID), PackageName: nonEmpty(src.PackageName),
 		Health: apigen.SourceHealth{
@@ -280,11 +284,7 @@ func (s *Server) SourceImage(ctx context.Context, req apigen.SourceImageRequestO
 		return nil, NewProblem(http.StatusNotFound, CodeNotFound, "not a usable image")
 	}
 	if err != nil {
-		s.deps.Log.WarnContext(ctx, "source image failed", "source", req.SourceId, "icon", icon, "err", err)
-		if p := pluginError(ctx, err); p != err || !icon { //nolint:errorlint // identity: was it mapped
-			return nil, p
-		}
-		return nil, NewProblem(http.StatusBadGateway, "icon_failed", "the icon couldn't be fetched")
+		return nil, s.imageError(ctx, err, icon, "source", req.SourceId)
 	}
 	f, err := os.Open(img.Path)
 	if err != nil {
@@ -299,4 +299,23 @@ func (s *Server) SourceImage(ctx context.Context, req apigen.SourceImageRequestO
 		Body: f, ContentType: img.ContentType, ContentLength: st.Size(),
 		Headers: apigen.SourceImage200ResponseHeaders{CacheControl: ptr("private, max-age=604800")},
 	}, nil
+}
+
+// imageError answers a failed image or icon fetch. Nothing there (the
+// plugin answered 404) is a 404 logged at debug; a real failure is a
+// warning, once in a while per subject.
+func (s *Server) imageError(ctx context.Context, err error, icon bool, kind, subject string) error {
+	if errors.Is(err, plugins.ErrNotFound) {
+		s.deps.Log.DebugContext(ctx, kind+" image not found", kind, subject, "icon", icon, "err", err)
+		return NewProblem(http.StatusNotFound, CodeNotFound, "no such image")
+	}
+	if s.iconWarnings.allow(kind + "\x00" + subject) {
+		s.deps.Log.WarnContext(ctx, kind+" image failed", kind, subject, "icon", icon, "err", err)
+	} else {
+		s.deps.Log.DebugContext(ctx, kind+" image failed", kind, subject, "icon", icon, "err", err)
+	}
+	if p := pluginError(ctx, err); p != err || !icon { //nolint:errorlint // identity: was it mapped
+		return p
+	}
+	return NewProblem(http.StatusBadGateway, "icon_failed", "the icon couldn't be fetched")
 }

@@ -312,13 +312,31 @@ func (h *Host) Image(ctx context.Context, v Viewer, id, ref string) (string, []b
 	return client.ReadImage(ctx, c, &sourcev1.FetchImageRequest{SourceId: s.SourceID, Ref: ref}, MaxImageBytes)
 }
 
+// PackageIconRef is a source's icon ref meaning "its package's icon", for
+// sources without an icon of their own. It isn't an http(s) URL, so it
+// never names a real icon.
+const PackageIconRef = "package:"
+
 // SourceIcon fetches the icon of a source v may see (see [Host.Icon]).
+// When the plugin has no icon at ref (it answers 404, e.g. for a source in
+// a language turned off) or ref is [PackageIconRef], the icon of the
+// package that provides the source stands in. ErrNotFound when neither
+// exists.
 func (h *Host) SourceIcon(ctx context.Context, v Viewer, id, ref string) (string, io.Reader, error) {
 	s, err := h.Source(ctx, id, v)
 	if err != nil {
 		return "", nil, err
 	}
-	return h.Icon(ctx, s.PluginID, ref)
+	if ref != PackageIconRef {
+		ct, body, err := h.Icon(ctx, s.PluginID, ref)
+		if !errors.Is(err, ErrNotFound) {
+			return ct, body, err
+		}
+	}
+	if s.PackageID == "" {
+		return "", nil, ErrNotFound
+	}
+	return h.PackageIcon(ctx, s.PluginID, s.PackageID)
 }
 
 // Resolved is a series found from a pasted URL.

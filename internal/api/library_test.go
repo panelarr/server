@@ -10,6 +10,7 @@ import (
 
 	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
 	metadatav1 "github.com/panelarr/meta/gen/panelarr/metadata/v1"
+	"github.com/panelarr/source-api/sdk/plugin"
 	"github.com/panelarr/source-api/sdk/plugintest"
 
 	"github.com/panelarr/server/internal/api/apigen"
@@ -24,7 +25,9 @@ type libraryFixture struct {
 	plugin *plugintest.Fake
 }
 
-func newLibraryFixture(t *testing.T) libraryFixture {
+// newLibraryFixture sets up a catalogue and the fake plugin; wrap, when
+// given, serves the plugin through a wrapper (e.g. one that slows calls).
+func newLibraryFixture(t *testing.T, wrap ...func(*plugintest.Fake) plugin.Plugin) libraryFixture {
 	t.Helper()
 	h := newHarness(t)
 	admin, _ := h.setupAdmin()
@@ -48,7 +51,11 @@ func newLibraryFixture(t *testing.T) libraryFixture {
 	add("e2", "Salt and Iron", "Somebody Else")
 	call[apigen.MetaConnection](admin, http.MethodPut, "/api/v1/system/meta", map[string]string{"url": fake.URL, "api_key": metatest.AdminKey}, 200)
 	plug := plugintest.New()
-	call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins", map[string]string{"url": pluginstest.Serve(t, plug, "k"), "api_key": "k"}, 201)
+	var served plugin.Plugin = plug
+	for _, w := range wrap {
+		served = w(plug)
+	}
+	call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins", map[string]string{"url": pluginstest.Serve(t, served, "k"), "api_key": "k"}, 201)
 	user, _ := h.createUser(admin, "reader", nil)
 	return libraryFixture{h: h, admin: admin, user: user, plugin: plug}
 }

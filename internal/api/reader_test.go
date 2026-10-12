@@ -151,3 +151,67 @@ func TestReaderSettingsAndPreferences(t *testing.T) {
 		t.Fatalf("prefs %+v", p)
 	}
 }
+
+func TestBookmarks(t *testing.T) {
+	t.Parallel()
+	f := newLibraryFixture(t)
+	user := f.user
+	entry := call[apigen.LibraryEntry](user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 201)
+	id := entry.Work.Id.String()
+	waitWorkMatched(t, user, id)
+	chs := waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool { return len(cs) == 3 })
+	c1, c2, c3 := chs[0].Id, chs[1].Id, chs[2].Id
+	base := "/api/v1/works/" + id + "/bookmarks"
+
+	if l := call[apigen.BookmarkList](user, http.MethodGet, base, nil, 200); len(l.ChapterIds) != 0 {
+		t.Fatalf("empty %+v", l)
+	}
+	// One, then a batch (again for the first: no harm).
+	call[apigen.BookmarkList](user, http.MethodPost, base, map[string]any{"chapter_ids": []string{c2.String()}, "bookmarked": true}, 200)
+	l := call[apigen.BookmarkList](user, http.MethodPost, base, map[string]any{"chapter_ids": []string{c2.String(), c3.String()}, "bookmarked": true}, 200)
+	if len(l.ChapterIds) != 2 || l.ChapterIds[0] != c2 || l.ChapterIds[1] != c3 {
+		t.Fatalf("bookmarked %+v", l)
+	}
+
+	// The chapter list shows and filters them, in either order.
+	list := call[apigen.ChapterList](user, http.MethodGet, "/api/v1/works/"+id+"/chapters", nil, 200)
+	if list.Chapters[0].Bookmarked || !list.Chapters[1].Bookmarked || !list.Chapters[2].Bookmarked {
+		t.Fatalf("flags %+v", list.Chapters)
+	}
+	only := call[apigen.ChapterList](user, http.MethodGet, "/api/v1/works/"+id+"/chapters?bookmarked=true&order=desc", nil, 200)
+	if len(only.Chapters) != 2 || only.Chapters[0].Id != c3 || only.Chapters[1].Id != c2 {
+		t.Fatalf("bookmarked only %+v", only.Chapters)
+	}
+	if rest := call[apigen.ChapterList](user, http.MethodGet, "/api/v1/works/"+id+"/chapters?bookmarked=false", nil, 200); len(rest.Chapters) != 1 || rest.Chapters[0].Id != c1 {
+		t.Fatalf("not bookmarked %+v", rest.Chapters)
+	}
+	if d := call[apigen.ChapterDetail](user, http.MethodGet, "/api/v1/works/"+id+"/chapters/"+c3.String(), nil, 200); !d.Chapter.Bookmarked {
+		t.Fatal("detail without the bookmark")
+	}
+	if p := call[apigen.ChapterPages](user, http.MethodGet, "/api/v1/chapters/"+c2.String()+"/pages", nil, 200); !p.Chapter.Bookmarked {
+		t.Fatal("reader without the bookmark")
+	}
+	// The library counts them.
+	lib := call[apigen.LibraryPage](user, http.MethodGet, "/api/v1/library", nil, 200)
+	if len(lib.Entries) != 1 || lib.Entries[0].Bookmarks != 2 {
+		t.Fatalf("library %+v", lib.Entries)
+	}
+
+	// Bookmarks are each user's own.
+	f.admin.expectProblem(http.MethodPost, base, map[string]any{"chapter_ids": []string{"00000000-0000-0000-0000-000000000001"}, "bookmarked": true}, 404, CodeNotFound)
+	if l := call[apigen.BookmarkList](f.admin, http.MethodGet, base, nil, 200); len(l.ChapterIds) != 0 {
+		t.Fatalf("someone else's bookmarks %+v", l)
+	}
+
+	// Other devices hear about it; removing works in batches too.
+	got := readEvents(t, user, 2, func() {
+		call[apigen.BookmarkList](user, http.MethodPost, base, map[string]any{"chapter_ids": []string{c2.String(), c3.String()}, "bookmarked": false}, 200)
+	})
+	if len(got) < 2 || got[1] != "bookmarks.changed" {
+		t.Fatalf("events %v", got)
+	}
+	if l := call[apigen.BookmarkList](user, http.MethodGet, base, nil, 200); len(l.ChapterIds) != 0 {
+		t.Fatalf("after removing %+v", l)
+	}
+	user.expectProblem(http.MethodPost, base, map[string]any{"chapter_ids": []string{}, "bookmarked": true}, 400, CodeInvalidRequest)
+}

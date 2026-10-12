@@ -1930,6 +1930,7 @@ paths:
         | `chapter.downloaded` | admins, the work's followers | `WorkEvent` (`chapter_id`) |
         | `library.changed` | the user | `WorkEvent` |
         | `progress.synced` | the user (all devices) | `WorkEvent` (`chapter_id`, `page`, `completed` when one chapter changed) |
+        | `bookmarks.changed` | the user (all devices) | `WorkEvent` |
       x-panelarr-access: user
       responses:
         "200":
@@ -2263,6 +2264,11 @@ paths:
           schema:
             type: string
             enum: [asc, desc]
+        - name: bookmarked
+          in: query
+          description: Only chapters you bookmarked (`true`) or didn't (`false`).
+          schema:
+            type: boolean
       responses:
         "200":
           description: The chapters.
@@ -2447,6 +2453,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ChapterProgress"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}/bookmarks:
+    parameters:
+      - $ref: "#/components/parameters/WorkId"
+    get:
+      operationId: listBookmarks
+      tags: [reader]
+      summary: Your bookmarked chapters of a work
+      x-panelarr-access: user
+      responses:
+        "200":
+          description: The bookmarked chapters, oldest bookmark first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookmarkList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: setBookmarks
+      tags: [reader]
+      summary: Bookmark chapters, or remove their bookmarks
+      description: One chapter or many at once, like marking chapters read. Bookmarks are yours; other devices hear `bookmarks.changed`.
+      x-panelarr-access: user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetBookmarksRequest"
+      responses:
+        "200":
+          description: The work's bookmarked chapters now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookmarkList"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -3420,8 +3465,11 @@ components:
           enum: [ok, failing, unknown]
     UnifiedChapter:
       type: object
-      required: [id, title, extra, available, new, variants, reason, pinned, downloaded, created_at]
+      required: [id, title, extra, available, new, variants, reason, pinned, downloaded, bookmarked, created_at]
       properties:
+        bookmarked:
+          type: boolean
+          description: You bookmarked it.
         id:
           type: string
           format: uuid
@@ -3559,7 +3607,7 @@ components:
           description: Sources a series is attached on.
     LibraryEntry:
       type: object
-      required: [work, added_at, new_chapters, auto_download]
+      required: [work, added_at, new_chapters, bookmarks, auto_download]
       properties:
         auto_download:
           type: boolean
@@ -3572,6 +3620,9 @@ components:
         new_chapters:
           type: integer
           description: Chapters found since you last marked the work seen.
+        bookmarks:
+          type: integer
+          description: Chapters of it you bookmarked.
     LibraryPage:
       type: object
       required: [entries, next_page_token]
@@ -4576,6 +4627,28 @@ components:
           description: The solver's version, when it says.
         latency_ms:
           type: integer
+    SetBookmarksRequest:
+      type: object
+      required: [chapter_ids, bookmarked]
+      properties:
+        chapter_ids:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          items:
+            type: string
+            format: uuid
+        bookmarked:
+          type: boolean
+    BookmarkList:
+      type: object
+      required: [chapter_ids]
+      properties:
+        chapter_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
     SeriesMatchRef:
       type: object
       description: How a work already knows a series.

@@ -44,3 +44,19 @@ SELECT * FROM user_preferences WHERE user_id = $1;
 INSERT INTO user_preferences (user_id, preferences) VALUES (@user_id, @preferences)
 ON CONFLICT (user_id) DO UPDATE SET preferences = EXCLUDED.preferences, updated_at = now()
 RETURNING *;
+
+-- name: AddBookmarks :exec
+INSERT INTO bookmarks (user_id, chapter_id, work_id)
+SELECT @user_id, unnest(@chapter_ids::uuid[]), @work_id
+ON CONFLICT (user_id, chapter_id) DO NOTHING;
+
+-- name: DeleteBookmarks :exec
+DELETE FROM bookmarks WHERE user_id = @user_id AND chapter_id = ANY(@chapter_ids::uuid[]);
+
+-- name: ListBookmarks :many
+SELECT chapter_id FROM bookmarks WHERE user_id = @user_id AND work_id = @work_id ORDER BY created_at, chapter_id;
+
+-- name: CountBookmarks :many
+SELECT work_id, count(*) AS bookmarks FROM bookmarks
+WHERE user_id = @user_id AND work_id = ANY(@work_ids::uuid[])
+GROUP BY work_id;

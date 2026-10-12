@@ -22,6 +22,13 @@ type ApiKey struct {
 	ExpiresAt  *time.Time
 }
 
+type Bookmark struct {
+	UserID    uuid.UUID
+	ChapterID uuid.UUID
+	WorkID    uuid.UUID
+	CreatedAt time.Time
+}
+
 type Chapter struct {
 	ID                 uuid.UUID
 	WorkID             uuid.UUID

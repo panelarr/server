@@ -8,7 +8,10 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/google/uuid"
+
 	"github.com/panelarr/server/internal/api/apigen"
+	"github.com/panelarr/server/internal/auth"
 	"github.com/panelarr/server/internal/chapters"
 )
 
@@ -86,9 +89,18 @@ func (s *Server) ListWorkChapters(ctx context.Context, req apigen.ListWorkChapte
 	if err != nil {
 		return nil, err
 	}
-	out := apigen.ListWorkChapters200JSONResponse{Chapters: make([]apigen.UnifiedChapter, len(list))}
-	for i, c := range list {
-		out.Chapters[i] = toUnified(c, visible, have[c.ID])
+	marks, err := s.bookmarked(ctx, v.UserID, req.WorkId)
+	if err != nil {
+		return nil, err
+	}
+	out := apigen.ListWorkChapters200JSONResponse{Chapters: make([]apigen.UnifiedChapter, 0, len(list))}
+	for _, c := range list {
+		if req.Params.Bookmarked != nil && marks[c.ID] != *req.Params.Bookmarked {
+			continue
+		}
+		u := toUnified(c, visible, have[c.ID])
+		u.Bookmarked = marks[c.ID]
+		out.Chapters = append(out.Chapters, u)
 	}
 	if req.Params.Order != nil && *req.Params.Order == apigen.ListWorkChaptersParamsOrderDesc {
 		slices.Reverse(out.Chapters)
@@ -105,7 +117,12 @@ func (s *Server) chapterDetail(ctx context.Context, d chapters.Detail) (apigen.C
 	if err != nil {
 		return apigen.ChapterDetail{}, err
 	}
+	marks, err := s.bookmarked(ctx, auth.FromContext(ctx).User.ID, d.WorkID)
+	if err != nil {
+		return apigen.ChapterDetail{}, err
+	}
 	out := apigen.ChapterDetail{Chapter: toUnified(d.Chapter, visible, have[d.ID]), Variants: []apigen.ChapterVariant{}}
+	out.Chapter.Bookmarked = marks[d.ID]
 	for _, v := range d.All {
 		if visible[v.SourceID] {
 			out.Variants = append(out.Variants, toVariant(v))
@@ -213,4 +230,17 @@ func (s *Server) MarkWorkSeen(ctx context.Context, req apigen.MarkWorkSeenReques
 		return nil, NewProblem(http.StatusNotFound, "not_in_library", "the work isn't in your library")
 	}
 	return apigen.MarkWorkSeen204Response{}, nil
+}
+
+// bookmarked is the set of a user's bookmarked chapters of a work.
+func (s *Server) bookmarked(ctx context.Context, userID, workID uuid.UUID) (map[uuid.UUID]bool, error) {
+	ids, err := s.deps.Reader.Bookmarks(ctx, userID, workID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, nil
 }

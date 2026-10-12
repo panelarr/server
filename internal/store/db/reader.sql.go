@@ -12,6 +12,73 @@ import (
 	"github.com/google/uuid"
 )
 
+const addBookmarks = `-- name: AddBookmarks :exec
+INSERT INTO bookmarks (user_id, chapter_id, work_id)
+SELECT $1, unnest($2::uuid[]), $3
+ON CONFLICT (user_id, chapter_id) DO NOTHING
+`
+
+type AddBookmarksParams struct {
+	UserID     uuid.UUID
+	ChapterIds []uuid.UUID
+	WorkID     uuid.UUID
+}
+
+func (q *Queries) AddBookmarks(ctx context.Context, arg AddBookmarksParams) error {
+	_, err := q.db.Exec(ctx, addBookmarks, arg.UserID, arg.ChapterIds, arg.WorkID)
+	return err
+}
+
+const countBookmarks = `-- name: CountBookmarks :many
+SELECT work_id, count(*) AS bookmarks FROM bookmarks
+WHERE user_id = $1 AND work_id = ANY($2::uuid[])
+GROUP BY work_id
+`
+
+type CountBookmarksParams struct {
+	UserID  uuid.UUID
+	WorkIds []uuid.UUID
+}
+
+type CountBookmarksRow struct {
+	WorkID    uuid.UUID
+	Bookmarks int64
+}
+
+func (q *Queries) CountBookmarks(ctx context.Context, arg CountBookmarksParams) ([]CountBookmarksRow, error) {
+	rows, err := q.db.Query(ctx, countBookmarks, arg.UserID, arg.WorkIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountBookmarksRow{}
+	for rows.Next() {
+		var i CountBookmarksRow
+		if err := rows.Scan(&i.WorkID, &i.Bookmarks); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const deleteBookmarks = `-- name: DeleteBookmarks :exec
+DELETE FROM bookmarks WHERE user_id = $1 AND chapter_id = ANY($2::uuid[])
+`
+
+type DeleteBookmarksParams struct {
+	UserID     uuid.UUID
+	ChapterIds []uuid.UUID
+}
+
+func (q *Queries) DeleteBookmarks(ctx context.Context, arg DeleteBookmarksParams) error {
+	_, err := q.db.Exec(ctx, deleteBookmarks, arg.UserID, arg.ChapterIds)
+	return err
+}
+
 const deleteProgress = `-- name: DeleteProgress :exec
 DELETE FROM progress WHERE user_id = $1 AND chapter_id = ANY($2::uuid[])
 `
@@ -144,6 +211,35 @@ func (q *Queries) History(ctx context.Context, arg HistoryParams) ([]HistoryRow,
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBookmarks = `-- name: ListBookmarks :many
+SELECT chapter_id FROM bookmarks WHERE user_id = $1 AND work_id = $2 ORDER BY created_at, chapter_id
+`
+
+type ListBookmarksParams struct {
+	UserID uuid.UUID
+	WorkID uuid.UUID
+}
+
+func (q *Queries) ListBookmarks(ctx context.Context, arg ListBookmarksParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listBookmarks, arg.UserID, arg.WorkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var chapter_id uuid.UUID
+		if err := rows.Scan(&chapter_id); err != nil {
+			return nil, err
+		}
+		items = append(items, chapter_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

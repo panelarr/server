@@ -16,7 +16,23 @@ import (
 // Serve runs p behind apiKey and returns its URL.
 func Serve(t testing.TB, p plugin.Plugin, apiKey string) string {
 	t.Helper()
-	srv := httptest.NewUnstartedServer(plugin.NewHandler(p, apiKey))
+	return ServeWithRoutes(t, p, apiKey, nil)
+}
+
+// ServeWithRoutes is Serve with more routes on the plugin's address, such
+// as files it links to by a relative path (icons).
+func ServeWithRoutes(t testing.TB, p plugin.Plugin, apiKey string, routes map[string]http.Handler) string {
+	t.Helper()
+	h := plugin.NewHandler(p, apiKey)
+	if len(routes) > 0 {
+		mux := http.NewServeMux()
+		for pattern, rh := range routes {
+			mux.Handle(pattern, rh)
+		}
+		mux.Handle("/", h)
+		h = mux
+	}
+	srv := httptest.NewUnstartedServer(h)
 	srv.Config.Protocols = new(http.Protocols)
 	srv.Config.Protocols.SetHTTP1(true)
 	srv.Config.Protocols.SetUnencryptedHTTP2(true)

@@ -91,6 +91,8 @@ type Host struct {
 	followUp   []time.Duration
 	rechecking map[string]*chain
 	hub        *events.Hub
+	// sourcesChanged runs when sources become usable or stop being usable.
+	sourcesChanged func(ctx context.Context, sourceIDs []string)
 }
 
 // SetHub makes the host tell admins about each plugin sync
@@ -381,6 +383,11 @@ func (h *Host) Update(ctx context.Context, id string, p Patch) (Plugin, error) {
 	}
 	h.setClient(id, c)
 	h.log.InfoContext(ctx, "plugin updated", "component", "audit", "plugin", id, "enabled", enabled)
+	if enabled != cur.Enabled {
+		if err := h.changedSince(ctx, id, nil); err != nil {
+			return Plugin{}, err
+		}
+	}
 	if enabled && (!cur.Enabled || p.URL != nil || p.APIKey != nil) {
 		if err := h.pushConfig(ctx, updated); err != nil {
 			h.log.WarnContext(ctx, "plugin config", "plugin", id, "err", err)
@@ -444,6 +451,10 @@ func (h *Host) sync(ctx context.Context, id string) (Plugin, error) {
 		state.Health, state.HealthMessage = "down", "listing sources failed: "+errorMessage(err)
 		return h.saveState(ctx, cur, state)
 	}
+	before, err := h.usable(ctx, id)
+	if err != nil {
+		return Plugin{}, err
+	}
 	err = h.st.InTx(ctx, func(q *db.Queries, _ pgx.Tx) error {
 		listed := make([]string, 0, len(res.GetSources()))
 		for _, s := range res.GetSources() {
@@ -455,6 +466,9 @@ func (h *Host) sync(ctx context.Context, id string) (Plugin, error) {
 		return q.MarkSourcesAbsent(ctx, db.MarkSourcesAbsentParams{PluginID: id, Listed: listed})
 	})
 	if err != nil {
+		return Plugin{}, err
+	}
+	if err := h.changedSince(ctx, id, before); err != nil {
 		return Plugin{}, err
 	}
 	if h.limits != nil {

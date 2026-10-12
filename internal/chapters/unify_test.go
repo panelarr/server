@@ -107,4 +107,24 @@ func TestChoose(t *testing.T) {
 	if c := Choose(g, &gone, nil); c.Reason == ReasonPinned {
 		t.Fatal("a vanished pin still wins")
 	}
+
+	// An unusable source gives way to any usable one, before language and
+	// pins; it still serves when nothing else has the chapter.
+	b.Unusable = true
+	g = Group{Variants: []Variant{a, b}}
+	if c := Choose(g, nil, []string{"de"}); c.Variant.ID != a.ID || c.Reason != ReasonHealthier {
+		t.Fatalf("unusable preferred language %+v", c)
+	}
+	pinB := b.ID
+	if c := Choose(g, &pinB, nil); c.Variant.ID != a.ID || c.Reason == ReasonPinned {
+		t.Fatalf("unusable pin %+v", c)
+	}
+	if c := Choose(Group{Variants: []Variant{b}}, nil, nil); c.Variant.ID != b.ID {
+		t.Fatalf("unusable only %+v", c)
+	}
+	a.Unusable = true
+	g = Group{Variants: []Variant{a, b}}
+	if c := Choose(g, &pinB, nil); c.Variant.ID != b.ID || c.Reason != ReasonPinned {
+		t.Fatalf("pin among unusable %+v", c)
+	}
 }

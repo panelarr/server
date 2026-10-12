@@ -40,13 +40,18 @@ Every attached series' chapters are kept exactly as its source lists them (the p
 
 Each chapter shows one chosen copy and why:
 
-1. `pinned`: a user with `may_manage_matches` chose it (until it disappears from its source);
-2. `language`: the instance setting `chapters.languages` (a JSON list such as `["en", "de"]`) prefers copies in those languages, in order;
-3. `healthier_source`: a copy on a working source beats one on a failing source (a failing source still serves a chapter only it has);
-4. `priority`: the series' priority for the work;
-5. `newest_upload`, then `first_listed`.
+1. `pinned`: a user with `may_manage_matches` chose it (until it disappears from its source, or while its source is unusable and another copy isn't);
+2. `healthier_source`, first for usability: a copy on a usable source beats one on a source that is turned off, no longer listed by its plugin (absent) or whose plugin is turned off;
+3. `language`: the instance setting `chapters.languages` (a JSON list such as `["en", "de"]`) prefers copies in those languages, in order;
+4. `healthier_source`: a copy on a working source beats one on a failing source (a failing source still serves a chapter only it has);
+5. `priority`: the series' priority for the work;
+6. `newest_upload`, then `first_listed`.
 
 `only_source` means just one source has it. A chapter no source lists any more stays (progress and files may point at it) but shows as unavailable.
+
+### When a source goes away
+
+A source can stop being usable: an admin turns it or its plugin off, or its plugin stops listing it (an extension uninstalled, its language turned off). Nothing of the work is deleted: its series stay attached, their chapters, read progress and downloaded files stay, and the work's page keeps the chapters. As soon as the server notices (the admin's switch, or the plugin's next sync), every work with a series on that source chooses its copies again, so reading and downloads move to other sources that have the chapters. Matching, update checks (skipped, not failed) and a work's source search leave the source alone meanwhile. When it is usable again, the copies are chosen again the same way and its copies come back.
 
 ### Update checks
 

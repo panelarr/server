@@ -11,8 +11,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
+	sourcev1 "github.com/panelarr/source-api/gen/panelarr/source/v1"
 
 	"github.com/panelarr/server/internal/meta"
+	"github.com/panelarr/server/internal/plugins"
 	"github.com/panelarr/server/internal/store/db"
 	"github.com/panelarr/server/internal/textmatch"
 )
@@ -254,6 +256,36 @@ func (s *Service) AddFromSource(ctx context.Context, v Viewer, ref SourceRef) (F
 			break
 		}
 		out.Candidates = append(out.Candidates, *c)
+	}
+	return out, nil
+}
+
+// SourceSearch is a search of one source for a work, with the series the
+// work already knows on it, by key.
+type SourceSearch struct {
+	plugins.Page
+	Known map[string]db.SourceSeries
+}
+
+// SearchSource searches one source v may use for the work, to fix its
+// match by hand. ErrNotFound when v can't see the work or use the source.
+func (s *Service) SearchSource(ctx context.Context, v Viewer, workID uuid.UUID, sourceID, query string, page uint32, filters []*sourcev1.FilterValue) (SourceSearch, error) {
+	if _, err := s.Get(ctx, v, workID); err != nil {
+		return SourceSearch{}, err
+	}
+	p, err := s.host.Search(ctx, v.plugins(), sourceID, query, page, filters)
+	if err != nil {
+		return SourceSearch{}, err
+	}
+	series, err := s.st.ListSourceSeries(ctx, workID)
+	if err != nil {
+		return SourceSearch{}, err
+	}
+	out := SourceSearch{Page: p, Known: map[string]db.SourceSeries{}}
+	for _, se := range series {
+		if se.SourceID == sourceID {
+			out.Known[se.Key] = se
+		}
 	}
 	return out, nil
 }

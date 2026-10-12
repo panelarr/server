@@ -72,7 +72,9 @@ tags:
     description: |
       Listing and browsing sources through their plugins (admins). Sources
       are an admin concern: regular users see sources only on a work
-      (`GET /works/{work_id}` and its series' chapters).
+      (`GET /works/{work_id}` and its series' chapters). Browsing is the
+      admin's test view and also works on a source turned off; a source its
+      plugin no longer lists, or of a plugin turned off, answers `404`.
   - name: jobs
     description: Named background jobs and their runs (admins).
   - name: tasks
@@ -942,6 +944,22 @@ paths:
           schema:
             type: string
             maxLength: 35
+        - name: plugin_id
+          in: query
+          description: Only this plugin's sources.
+          schema:
+            type: string
+            maxLength: 64
+        - name: enabled
+          in: query
+          description: Only sources turned on (`true`) or off (`false`) by an admin. Turned-off sources show only with `all=true`.
+          schema:
+            type: boolean
+        - name: present
+          in: query
+          description: Only sources their plugin lists (`true`) or no longer lists (`false`). Absent sources show only with `all=true`.
+          schema:
+            type: boolean
       responses:
         "200":
           description: Sources by plugin and name.
@@ -1630,6 +1648,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MatchSeries"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /works/{work_id}/sources/{source_id}/search:
+    post:
+      operationId: searchWorkSource
+      tags: [library]
+      summary: Search one of the work's sources by hand, to fix its match
+      description: |
+        The source search for fixing a work's match, open to users with
+        `may_manage_matches` (browsing a source directly is for admins).
+        The source must be usable and allowed by the caller's source
+        grants, else `404`. Each result carries `match` when the work
+        already knows that series (attached, candidate or rejected); any
+        result can be attached with `POST /works/{work_id}/series` and its
+        `key`. A POST because filter values are structured; it only reads.
+      x-panelarr-access: user
+      x-panelarr-read-only: true
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+        - $ref: "#/components/parameters/SourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceSearchRequest"
+      responses:
+        "200":
+          description: A page of series.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceSeriesPage"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -3704,6 +3756,18 @@ components:
       properties:
         enabled:
           type: boolean
+    SeriesMatchRef:
+      type: object
+      description: How a work already knows a series.
+      required: [series_id, state]
+      properties:
+        series_id:
+          type: string
+          format: uuid
+          description: The work's series (`/works/{work_id}/series/{series_id}`).
+        state:
+          type: string
+          enum: [attached, candidate, rejected]
     SourceSeries:
       type: object
       required: [key, title, alt_titles, authors, artists, genres]
@@ -3740,6 +3804,9 @@ components:
         url:
           type: string
           description: The series' page on the site.
+        match:
+          $ref: "#/components/schemas/SeriesMatchRef"
+          description: Only in a work's source search, when the work already knows the series.
     SourceSeriesPage:
       type: object
       required: [series, has_next_page]

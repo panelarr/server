@@ -127,10 +127,21 @@ func TestSourcesBrowse(t *testing.T) {
 	user.expectProblem(http.MethodGet, tampered, nil, 403, "bad_signature")
 	limited.expectProblem(http.MethodGet, *series.CoverUrl, nil, 404, CodeNotFound)
 
-	// A disabled source can't be browsed, even by admins, until it's back.
+	// An admin may try a source turned off before turning it on (covers
+	// included); for users it is gone.
 	call[apigen.SourceInfo](admin, http.MethodPatch, "/api/v1/sources/fake:1001", map[string]any{"enabled": false}, 200)
-	admin.expectProblem(http.MethodGet, "/api/v1/sources/fake:1001/popular", nil, 404, CodeNotFound)
+	call[apigen.SourceSeriesPage](admin, http.MethodGet, "/api/v1/sources/fake:1001/popular", nil, 200)
+	call[apigen.SourceSeriesPage](admin, http.MethodPost, "/api/v1/sources/fake:1001/search", map[string]any{"query": "lantern"}, 200)
+	call[apigen.SourceChapterList](admin, http.MethodGet, "/api/v1/sources/fake:1001/chapters?key="+key, nil, 200)
+	if res := admin.do(http.MethodGet, *series.CoverUrl, nil); res.status != 200 {
+		t.Fatalf("admin cover of a source turned off: %d", res.status)
+	}
 	user.expectProblem(http.MethodGet, *series.CoverUrl, nil, 404, CodeNotFound)
+	// A plugin turned off takes its sources away from admins too.
+	call[apigen.Plugin](admin, http.MethodPatch, "/api/v1/plugins/fake", map[string]any{"enabled": false}, 200)
+	admin.expectProblem(http.MethodGet, "/api/v1/sources/fake:1001/popular", nil, 404, CodeNotFound)
+	admin.expectProblem(http.MethodGet, "/api/v1/sources/fake:2001/filters", nil, 404, CodeNotFound)
+	call[apigen.Plugin](admin, http.MethodPatch, "/api/v1/plugins/fake", map[string]any{"enabled": true}, 200)
 	if l := call[apigen.SourceList](admin, http.MethodGet, "/api/v1/sources?all=true", nil, 200); len(l.Sources) != 2 {
 		t.Fatalf("all sources %d", len(l.Sources))
 	}

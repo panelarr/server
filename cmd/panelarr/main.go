@@ -169,17 +169,17 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	host := plugins.NewHost(st, box, plugins.RemoteDialer, logging.Component(log, "plugins"))
 	host.SetLimits(lim)
 	host.SetHub(hub)
+	q := queue.New(st, hub, lim, m, logging.Component(log, "queue"))
+	lib := library.NewService(st, metaSvc, host, q, lim, hub, logging.Component(log, "library"))
+	chs := chapters.NewService(st, host, q, lim, hub, logging.Component(log, "chapters"))
+	lib.SetChapterHooks(chs)
+	host.SetSourcesChanged(chs.SourcesChanged)
 	// Connecting to plugins can take a while; the API serves meanwhile.
 	go func() {
 		if err := host.Load(ctx); err != nil {
 			log.Error("load plugins", "component", "plugins", "err", err)
 		}
 	}()
-
-	q := queue.New(st, hub, lim, m, logging.Component(log, "queue"))
-	lib := library.NewService(st, metaSvc, host, q, lim, hub, logging.Component(log, "library"))
-	chs := chapters.NewService(st, host, q, lim, hub, logging.Component(log, "chapters"))
-	lib.SetChapterHooks(chs)
 	rdr := reader.NewService(st, host, lib, chs, lim, hub, logging.Component(log, "reader"))
 	storages := storage.NewManager(st, box, logging.Component(log, "storage"))
 	if err := storages.EnsureDefault(ctx, filepath.Join(cfg.DataDir, "library")); err != nil {

@@ -291,6 +291,28 @@ func (s *Server) AttachSeries(ctx context.Context, req apigen.AttachSeriesReques
 	return apigen.AttachSeries201JSONResponse(s.toMatchSeries(se)), nil
 }
 
+// SearchWorkSource searches one of the work's sources to fix its match.
+func (s *Server) SearchWorkSource(ctx context.Context, req apigen.SearchWorkSourceRequestObject) (apigen.SearchWorkSourceResponseObject, error) {
+	if err := requireGrant(ctx, "may_manage_matches", mayManageMatches); err != nil {
+		return nil, err
+	}
+	query, filters, err := searchRequest(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.deps.Library.SearchSource(ctx, s.libraryViewer(ctx), req.WorkId, req.SourceId, query, page(req.Body.Page), filters)
+	if err != nil {
+		return nil, libraryError(ctx, err)
+	}
+	out := s.toPage(req.SourceId, res.Page)
+	for i := range out.Series {
+		if se, ok := res.Known[out.Series[i].Key]; ok {
+			out.Series[i].Match = &apigen.SeriesMatchRef{SeriesId: se.ID, State: apigen.SeriesMatchRefState(se.State)}
+		}
+	}
+	return apigen.SearchWorkSource200JSONResponse(out), nil
+}
+
 // UpdateWorkSeries sets a series' priority.
 func (s *Server) UpdateWorkSeries(ctx context.Context, req apigen.UpdateWorkSeriesRequestObject) (apigen.UpdateWorkSeriesResponseObject, error) {
 	if err := requireGrant(ctx, "may_manage_matches", mayManageMatches); err != nil {

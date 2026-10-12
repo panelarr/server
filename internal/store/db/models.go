@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type ApiKey struct {
@@ -90,6 +91,39 @@ type LibraryEntry struct {
 	AddedAt      time.Time
 	SeenAt       time.Time
 	AutoDownload bool
+}
+
+type NetworkAssignment struct {
+	TargetKind string
+	TargetID   string
+	ProfileID  pgtype.Text
+	PluginID   pgtype.Text
+	UpdatedAt  time.Time
+}
+
+type NetworkProfile struct {
+	ID               string
+	Name             string
+	ProxyID          pgtype.Text
+	SolverID         pgtype.Text
+	RateRequests     int32
+	RatePeriodMs     int32
+	RateBurst        int32
+	RateScope        string
+	Concurrency      int32
+	UserAgentMode    string
+	UserAgent        string
+	DohUrl           string
+	Headers          []byte
+	SharedCookieJar  string
+	ConnectTimeoutMs int32
+	ReadTimeoutMs    int32
+	CallTimeoutMs    int32
+	OwnerKind        string
+	OwnerID          string
+	OwnerPlugin      pgtype.Text
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type NetworkProxy struct {

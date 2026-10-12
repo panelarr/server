@@ -62,7 +62,10 @@ Admins set up shared network services once, in Panelarr, under `/api/v1/network`
 - **Solvers:** FlareSolverr-compatible challenge solvers (FlareSolverr, Byparr) by URL, with how long a session is reused and how long one solve may take. A check asks the solver for its state.
 - **Proxies:** HTTP, HTTPS or SOCKS5 proxies, e.g. a VPN container that exposes a proxy (Panelarr never runs tunnels itself). The password is stored encrypted and never shown again. A check connects to the proxy, or requests a URL you give through it.
 
-They are options: nothing uses a solver or proxy until a network profile built from it is assigned to a plugin, an extension or a source. One that a profile uses can't be removed.
+- **Network profiles** bundle a proxy, a solver, a rate limit, a concurrency cap, the user agent (the plugin's, a fixed one, a random desktop one, or the solver's), a DNS-over-HTTPS resolver, extra headers, a shared cookie jar and timeouts; parts left out are the plugin's defaults. A profile is shared, or **custom** to one plugin, extension, source or metadata provider: then it can only be assigned there, and it goes when its plugin is removed.
+- **Assignments** put a profile at a level: everything (global), a plugin, an extension (package), a source, all of meta, or one metadata provider. The most specific wins: for a source, its own assignment, then its extension's, its plugin's, then global; for a provider, its own, then meta's, then global. An assignment can also say "the plugin's own settings", e.g. for one source that should connect directly while its plugin uses a VPN profile. `GET /api/v1/plugins/{id}/network` shows the profile in force for each source and where it comes from.
+
+They are options: nothing is assigned by default, so plugins keep their own settings until an admin assigns a profile. A solver, proxy or profile in use can't be removed.
 
 ## Background work
 

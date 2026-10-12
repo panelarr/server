@@ -171,6 +171,7 @@ func (s *Service) UpdateProxy(ctx context.Context, id string, p ProxyPatch) (Pro
 		return Proxy{}, err
 	}
 	s.log.InfoContext(ctx, "proxy changed", "component", "audit", "proxy", id)
+	s.changed(ctx)
 	return proxyOf(r), nil
 }
 

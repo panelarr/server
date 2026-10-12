@@ -1400,6 +1400,196 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /network/profiles:
+    get:
+      operationId: listNetworkProfiles
+      tags: [network]
+      summary: Network profiles
+      description: Shared profiles; with `include_custom` also the custom ones; with `owner_kind` and `owner_id` only that owner's custom profiles.
+      x-panelarr-access: admin
+      parameters:
+        - name: include_custom
+          in: query
+          schema:
+            type: boolean
+        - name: owner_kind
+          in: query
+          schema:
+            $ref: "#/components/schemas/ProfileOwnerKind"
+        - name: owner_id
+          in: query
+          schema:
+            type: string
+            maxLength: 300
+      responses:
+        "200":
+          description: The profiles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkProfileList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createNetworkProfile
+      tags: [network]
+      summary: Add a network profile
+      description: |
+        Shared, or custom to one plugin, extension (package), source or
+        metadata provider (`owner`): a custom profile can only be assigned
+        to its owner, and goes when its plugin is removed. Creating a
+        profile assigns it nowhere; "create new" from a plugin is this
+        then `PUT /network/assignments`.
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewNetworkProfile"
+      responses:
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkProfile"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /network/profiles/{profile_id}:
+    parameters:
+      - $ref: "#/components/parameters/ProfileId"
+    get:
+      operationId: getNetworkProfile
+      tags: [network]
+      summary: One network profile
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkProfile"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: replaceNetworkProfile
+      tags: [network]
+      summary: Replace a profile's settings
+      description: Everything but its ID and owner; parts left out go back to the plugin's defaults.
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NetworkProfileSettings"
+      responses:
+        "200":
+          description: Replaced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkProfile"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteNetworkProfile
+      tags: [network]
+      summary: Remove a profile
+      description: "An assigned profile can't be removed: `409`, code `in_use`."
+      x-panelarr-access: admin
+      responses:
+        "204":
+          description: Removed.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /network/assignments:
+    get:
+      operationId: listNetworkAssignments
+      tags: [network]
+      summary: Where profiles are assigned
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: Every assignment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkAssignmentList"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: assignNetworkProfile
+      tags: [network]
+      summary: Assign a profile at one level
+      description: |
+        Levels: `global`; a `plugin`; a `package` ("plugin:package"); a
+        `source`; all of `meta`; a metadata `provider`. The most specific
+        assignment wins: for a source, source → package → plugin →
+        global; for a provider, provider → meta → global. Give
+        `profile_id`, or `plugin_default: true` to use the plugin's own
+        settings there and stop inheriting. Nothing is assigned by default.
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NetworkAssignmentRequest"
+      responses:
+        "200":
+          description: Assigned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkAssignment"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: unassignNetworkProfile
+      tags: [network]
+      summary: Remove the assignment at one level, which then inherits
+      x-panelarr-access: admin
+      parameters:
+        - name: target_kind
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/NetworkTargetKind"
+        - name: target_id
+          in: query
+          schema:
+            type: string
+            maxLength: 300
+      responses:
+        "204":
+          description: Removed.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}/network:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+    get:
+      operationId: getPluginNetwork
+      tags: [network]
+      summary: The network profile in force for each of a plugin's sources
+      description: With what is assigned at the plugin and at each source, and where each source's profile comes from.
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The plugin's network settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginNetwork"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /sources:
     get:
       operationId: listSources
@@ -2882,6 +3072,13 @@ components:
       description: A personal API key as a bearer token.
 
   parameters:
+    ProfileId:
+      name: profile_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9_-]{0,39}$"
     SolverId:
       name: solver_id
       in: path
@@ -4649,6 +4846,319 @@ components:
           items:
             type: string
             format: uuid
+    ProfileOwnerKind:
+      type: string
+      enum: [plugin, package, source, provider]
+    ProfileOwner:
+      type: object
+      required: [kind, id]
+      properties:
+        kind:
+          $ref: "#/components/schemas/ProfileOwnerKind"
+        id:
+          type: string
+          minLength: 1
+          maxLength: 300
+          description: A plugin ID, "plugin:package", a source ID or a provider ID.
+    NetworkRateLimit:
+      type: object
+      required: [requests, period_seconds]
+      properties:
+        requests:
+          type: integer
+          minimum: 1
+          maximum: 100000
+        period_seconds:
+          type: number
+          minimum: 0.001
+          maximum: 86400
+        burst:
+          type: integer
+          minimum: 0
+          maximum: 100000
+        scope:
+          type: string
+          enum: [source, host]
+          description: One budget per source (the default) or per target host.
+    NetworkUserAgent:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [default, fixed, random_desktop, from_solver]
+          description: "`default`: the plugin's; `from_solver` needs a solver."
+        value:
+          type: string
+          maxLength: 1000
+          description: The user agent, for `fixed`.
+    NetworkTimeouts:
+      type: object
+      properties:
+        connect_seconds:
+          type: number
+          minimum: 0
+          maximum: 3600
+        read_seconds:
+          type: number
+          minimum: 0
+          maximum: 3600
+        call_seconds:
+          type: number
+          minimum: 0
+          maximum: 3600
+    NetworkProfileSettings:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        proxy_id:
+          type: string
+          description: The proxy; absent means a direct connection.
+        solver_id:
+          type: string
+          description: The challenge solver; absent means none.
+        rate_limit:
+          $ref: "#/components/schemas/NetworkRateLimit"
+        concurrency:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: Parallel requests per source; absent or 0 means the plugin's default.
+        user_agent:
+          $ref: "#/components/schemas/NetworkUserAgent"
+        doh_url:
+          type: string
+          maxLength: 2000
+          description: DNS-over-HTTPS resolver; absent means the system resolver.
+        headers:
+          type: object
+          maxProperties: 50
+          additionalProperties:
+            type: string
+            maxLength: 2000
+          description: Extra headers on every request.
+        shared_cookie_jar:
+          type: string
+          maxLength: 100
+          description: Name of a cookie jar shared with other sources; absent means each source has its own.
+        timeouts:
+          $ref: "#/components/schemas/NetworkTimeouts"
+    NewNetworkProfile:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]{0,39}$"
+        owner:
+          $ref: "#/components/schemas/ProfileOwner"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        proxy_id:
+          type: string
+          description: The proxy; absent means a direct connection.
+        solver_id:
+          type: string
+          description: The challenge solver; absent means none.
+        rate_limit:
+          $ref: "#/components/schemas/NetworkRateLimit"
+        concurrency:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: Parallel requests per source; absent or 0 means the plugin's default.
+        user_agent:
+          $ref: "#/components/schemas/NetworkUserAgent"
+        doh_url:
+          type: string
+          maxLength: 2000
+          description: DNS-over-HTTPS resolver; absent means the system resolver.
+        headers:
+          type: object
+          maxProperties: 50
+          additionalProperties:
+            type: string
+            maxLength: 2000
+          description: Extra headers on every request.
+        shared_cookie_jar:
+          type: string
+          maxLength: 100
+          description: Name of a cookie jar shared with other sources; absent means each source has its own.
+        timeouts:
+          $ref: "#/components/schemas/NetworkTimeouts"
+    NetworkProfile:
+      type: object
+      required: [id, name, user_agent, headers, timeouts, assigned_to, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        owner:
+          $ref: "#/components/schemas/ProfileOwner"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        proxy_id:
+          type: string
+          description: The proxy; absent means a direct connection.
+        solver_id:
+          type: string
+          description: The challenge solver; absent means none.
+        rate_limit:
+          $ref: "#/components/schemas/NetworkRateLimit"
+        concurrency:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: Parallel requests per source; absent or 0 means the plugin's default.
+        user_agent:
+          $ref: "#/components/schemas/NetworkUserAgent"
+        doh_url:
+          type: string
+          maxLength: 2000
+          description: DNS-over-HTTPS resolver; absent means the system resolver.
+        headers:
+          type: object
+          maxProperties: 50
+          additionalProperties:
+            type: string
+            maxLength: 2000
+          description: Extra headers on every request.
+        shared_cookie_jar:
+          type: string
+          maxLength: 100
+          description: Name of a cookie jar shared with other sources; absent means each source has its own.
+        timeouts:
+          $ref: "#/components/schemas/NetworkTimeouts"
+        assigned_to:
+          type: array
+          description: Where it is assigned.
+          items:
+            $ref: "#/components/schemas/NetworkTarget"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    NetworkProfileList:
+      type: object
+      required: [profiles]
+      properties:
+        profiles:
+          type: array
+          items:
+            $ref: "#/components/schemas/NetworkProfile"
+    NetworkTargetKind:
+      type: string
+      enum: [global, plugin, package, source, meta, provider]
+    NetworkTarget:
+      type: object
+      required: [target_kind, target_id]
+      properties:
+        target_kind:
+          $ref: "#/components/schemas/NetworkTargetKind"
+        target_id:
+          type: string
+          description: Empty for `global` and `meta`.
+    NetworkAssignmentRequest:
+      type: object
+      required: [target_kind]
+      properties:
+        target_kind:
+          $ref: "#/components/schemas/NetworkTargetKind"
+        target_id:
+          type: string
+          maxLength: 300
+        profile_id:
+          type: string
+          maxLength: 40
+        plugin_default:
+          type: boolean
+          description: Use the plugin's own settings here (instead of profile_id).
+    NetworkAssignment:
+      type: object
+      required: [target_kind, target_id, plugin_default, updated_at]
+      properties:
+        target_kind:
+          $ref: "#/components/schemas/NetworkTargetKind"
+        target_id:
+          type: string
+        profile_id:
+          type: string
+        plugin_default:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    NetworkAssignmentList:
+      type: object
+      required: [assignments]
+      properties:
+        assignments:
+          type: array
+          items:
+            $ref: "#/components/schemas/NetworkAssignment"
+    NetworkEffective:
+      type: object
+      required: [level, plugin_default]
+      properties:
+        level:
+          type: string
+          enum: [source, package, plugin, global, provider, meta, none]
+          description: Where it comes from; `none` means nothing is assigned (the plugin's own settings).
+        profile_id:
+          type: string
+        plugin_default:
+          type: boolean
+          description: The plugin's own settings are in force.
+    SourceNetwork:
+      type: object
+      required: [source_id, name, effective]
+      properties:
+        source_id:
+          type: string
+        name:
+          type: string
+        lang:
+          type: string
+        package_id:
+          type: string
+        present:
+          type: boolean
+        assignment:
+          $ref: "#/components/schemas/NetworkAssignment"
+        effective:
+          $ref: "#/components/schemas/NetworkEffective"
+    PluginNetwork:
+      type: object
+      required: [plugin_id, accepts_profiles, accepts_solver, packages, sources]
+      properties:
+        plugin_id:
+          type: string
+        accepts_profiles:
+          type: boolean
+          description: The plugin declares the network profile service; others never receive profiles.
+        accepts_solver:
+          type: boolean
+          description: The plugin declares the solver service; others receive profiles without the solver.
+        assignment:
+          $ref: "#/components/schemas/NetworkAssignment"
+        packages:
+          type: array
+          description: Assignments at the plugin's packages.
+          items:
+            $ref: "#/components/schemas/NetworkAssignment"
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceNetwork"
     SeriesMatchRef:
       type: object
       description: How a work already knows a series.

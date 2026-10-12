@@ -44,11 +44,13 @@ type Querier interface {
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateStorage(ctx context.Context, arg CreateStorageParams) (Storage, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) (int64, error)
 	DeleteBookmarks(ctx context.Context, arg DeleteBookmarksParams) error
 	DeleteChapterFile(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	DeleteInvite(ctx context.Context, id uuid.UUID) (int64, error)
 	DeletePlugin(ctx context.Context, id string) (int64, error)
+	DeleteProfile(ctx context.Context, id string) (int64, error)
 	DeleteProgress(ctx context.Context, arg DeleteProgressParams) error
 	DeleteProxy(ctx context.Context, id string) (int64, error)
 	DeleteReaderSettings(ctx context.Context, arg DeleteReaderSettingsParams) (int64, error)
@@ -84,6 +86,7 @@ type Querier interface {
 	GetOpenInviteByTokenHashForUpdate(ctx context.Context, tokenHash []byte) (Invite, error)
 	GetPlugin(ctx context.Context, id string) (Plugin, error)
 	GetPreferences(ctx context.Context, userID uuid.UUID) (UserPreference, error)
+	GetProfile(ctx context.Context, id string) (NetworkProfile, error)
 	GetProgress(ctx context.Context, arg GetProgressParams) (Progress, error)
 	GetProxy(ctx context.Context, id string) (NetworkProxy, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionByTokenHashRow, error)
@@ -104,6 +107,7 @@ type Querier interface {
 	HurryTask(ctx context.Context, arg HurryTaskParams) (Task, error)
 	InsertChapter(ctx context.Context, arg InsertChapterParams) (Chapter, error)
 	InsertChapterFile(ctx context.Context, arg InsertChapterFileParams) (ChapterFile, error)
+	InsertProfile(ctx context.Context, arg InsertProfileParams) (NetworkProfile, error)
 	InsertProxy(ctx context.Context, arg InsertProxyParams) (NetworkProxy, error)
 	InsertSolver(ctx context.Context, arg InsertSolverParams) (NetworkSolver, error)
 	// Returns no row when a live task with the same dedupe key exists.
@@ -113,6 +117,7 @@ type Querier interface {
 	// Which of these catalogue entries are in a user's library, as which work.
 	LibraryWorksByEntries(ctx context.Context, arg LibraryWorksByEntriesParams) ([]LibraryWorksByEntriesRow, error)
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ApiKey, error)
+	ListAssignments(ctx context.Context) ([]NetworkAssignment, error)
 	ListBookmarks(ctx context.Context, arg ListBookmarksParams) ([]uuid.UUID, error)
 	ListChapters(ctx context.Context, workID uuid.UUID) ([]Chapter, error)
 	// Download tasks with their chapter and work, newest first; users see the
@@ -124,6 +129,7 @@ type Querier interface {
 	ListLibrary(ctx context.Context, arg ListLibraryParams) ([]ListLibraryRow, error)
 	ListOpenInvites(ctx context.Context) ([]Invite, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
+	ListProfiles(ctx context.Context) ([]NetworkProfile, error)
 	ListProxies(ctx context.Context) ([]NetworkProxy, error)
 	ListReaderSettings(ctx context.Context, arg ListReaderSettingsParams) ([]ReaderSetting, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]Session, error)
@@ -183,11 +189,13 @@ type Querier interface {
 	UnclaimTask(ctx context.Context, id uuid.UUID) (Task, error)
 	UpdateChapter(ctx context.Context, arg UpdateChapterParams) error
 	UpdatePlugin(ctx context.Context, arg UpdatePluginParams) (Plugin, error)
+	UpdateProfile(ctx context.Context, arg UpdateProfileParams) (NetworkProfile, error)
 	UpdateProxy(ctx context.Context, arg UpdateProxyParams) (NetworkProxy, error)
 	UpdateSolver(ctx context.Context, arg UpdateSolverParams) (NetworkSolver, error)
 	UpdateStorage(ctx context.Context, arg UpdateStorageParams) (Storage, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpdateWorkDisplay(ctx context.Context, arg UpdateWorkDisplayParams) (Work, error)
+	UpsertAssignment(ctx context.Context, arg UpsertAssignmentParams) (NetworkAssignment, error)
 	UpsertProgress(ctx context.Context, arg UpsertProgressParams) (Progress, error)
 	UpsertSource(ctx context.Context, arg UpsertSourceParams) error
 	UpsertSourceChapter(ctx context.Context, arg UpsertSourceChapterParams) error

@@ -53,6 +53,7 @@ type harness struct {
 	meta    *meta.Service
 	metrics *metrics.Metrics
 	queue   *queue.Queue
+	chs     *chapters.Service
 	jobs    *jobs.Manager
 	hub     *events.Hub
 	srv     *httptest.Server
@@ -198,7 +199,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	}
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &harness{t: t, st: st, auth: a, users: u, meta: m, metrics: deps.Metrics, queue: q, jobs: jm, hub: hub, srv: srv, release: release, dataDir: dataDir}
+	return &harness{t: t, st: st, auth: a, users: u, meta: m, metrics: deps.Metrics, queue: q, chs: chs, jobs: jm, hub: hub, srv: srv, release: release, dataDir: dataDir}
 }
 
 // client is an API client that keeps cookies, sends the CSRF token it was

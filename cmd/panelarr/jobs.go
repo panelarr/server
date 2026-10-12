@@ -34,6 +34,16 @@ func registerJobs(m *jobs.Manager, st *store.Store, a *auth.Service, host *plugi
 		},
 	})
 	m.Register(jobs.Definition{
+		ID: "chapters.reunify", Name: "Read chapter names again", Group: "Library",
+		Description:    "Rebuilds every work's chapters from the chapters already stored (numbers, volumes, extras), without asking any source. Run it after an update that reads chapter names better.",
+		ScheduleSource: "run by hand", Cancellable: true,
+		Run: func(ctx context.Context, r *jobs.Run) error {
+			n, err := chs.UnifyAll(ctx)
+			r.Count("works", int64(n))
+			return err
+		},
+	})
+	m.Register(jobs.Definition{
 		ID: "works.refresh", Name: "Refresh works from the catalogue", Group: "Library",
 		Description: "Copies the latest titles, covers, statuses and ratings of followed works from the metadata service.",
 		Interval:    24 * time.Hour, ScheduleSource: "built in",

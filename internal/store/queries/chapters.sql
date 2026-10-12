@@ -91,3 +91,6 @@ UPDATE library_entries SET seen_at = now() WHERE user_id = @user_id AND work_id 
 SELECT DISTINCT source_series.* FROM source_series
 JOIN library_entries ON library_entries.work_id = source_series.work_id
 WHERE source_series.state = 'attached';
+
+-- name: WorksWithAttachedSeries :many
+SELECT DISTINCT work_id FROM source_series WHERE state = 'attached' ORDER BY work_id;

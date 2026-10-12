@@ -85,6 +85,28 @@ type LibraryEntry struct {
 	AutoDownload bool
 }
 
+type NetworkProxy struct {
+	ID             string
+	Name           string
+	Url            string
+	Username       string
+	PasswordSealed string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type NetworkSolver struct {
+	ID                 string
+	Name               string
+	Type               string
+	Url                string
+	SessionTtlSeconds  int32
+	MaxTimeoutSeconds  int32
+	AsResponseFallback bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
 type Plugin struct {
 	ID            string
 	Url           string

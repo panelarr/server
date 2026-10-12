@@ -55,6 +55,15 @@ Plugins that host many sites (the `packages` capability, e.g. an extension runti
 
 Each source's ID is `<plugin>:<source>`. Admins turn sources on or off for everyone; each user's grants (allowed sources, content-rating ceiling) decide which they see. Mixed-content sources count as "suggestive", adult-only sources as "pornographic". Images from sources (covers, icons) are fetched through the plugin and cached by the server; their links are signed, so the server never fetches an address a caller made up.
 
+## Network services
+
+Admins set up shared network services once, in Panelarr, under `/api/v1/network`, instead of in each plugin's own admin:
+
+- **Solvers:** FlareSolverr-compatible challenge solvers (FlareSolverr, Byparr) by URL, with how long a session is reused and how long one solve may take. A check asks the solver for its state.
+- **Proxies:** HTTP, HTTPS or SOCKS5 proxies, e.g. a VPN container that exposes a proxy (Panelarr never runs tunnels itself). The password is stored encrypted and never shown again. A check connects to the proxy, or requests a URL you give through it.
+
+They are options: nothing uses a solver or proxy until a network profile built from it is assigned to a plugin, an extension or a source. One that a profile uses can't be removed.
+
 ## Background work
 
 Two kinds of background work show in the admin:

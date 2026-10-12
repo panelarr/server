@@ -24,6 +24,16 @@ Sources become an admin concern; plugins that host many sites get an extensions 
 - [x] **S2. Source filters, absent sources, work-scoped search:** `GET /sources` filters by plugin, enabled and present; sources turned off, absent or of a plugin turned off are skipped by matching, URL resolving, update checks (skipped, not failed), reading and downloads, while admins may still browse a source turned off to test it; chapter copies prefer usable sources and are chosen again for the affected works when a source changes, so works keep their history and move to other sources until it is back; `POST /works/{work_id}/sources/{source_id}/search` for users who may fix matches (within their source grants), results marked when the work knows them.
 - [x] **S3. Packages:** for plugins with the `packages` capability, list what they offer (languages, versions, updates, content rating, offers, sources; filtered by the plugin) with the pending task per package; install (from a chosen offer), update and uninstall as `plugin.package` tasks (one at a time, unknown packages refused up front, bad packages fail for good); per-package languages; sources carry their providing package (filter by it), and an absent source whose language is turned off says so (`unavailable_reason: language`, "not available") apart from one no longer provided; the plugin is synced right after every change and again shortly after. Store failures map to `store_fetch_failed` / `store_invalid`, a refused request to `package_rejected`; a task keeps the plugin's reason and fails at once unless the store just couldn't be reached. Package icons through the server (signed links, the plugin's key only to its own address, raster up to 2 MiB, refreshed weekly).
 
+## Shared network services and plugin settings
+
+Solvers, proxies and network profiles live in Panelarr as options; admins assign profiles to a whole plugin, an extension, a source or a metadata provider (the most specific wins), and the server pushes them to plugins that can use them.
+
+- [x] **S1. Solvers and proxies:** admin CRUD under `/network/solvers` and `/network/proxies`, checks before and after saving (a solver's state; a proxy's connection or a request through it), proxy passwords encrypted and never returned.
+- [ ] **S2. Profiles and assignments:** profiles built from them (shared or custom to one target), assignments at global, plugin, extension, source, meta and provider level, and the effective profile per source and provider.
+- [ ] **S3. Push to source plugins:** effective profiles pushed to plugins that declare the network profile service (solver only with the solver service), on change, for new sources and after a plugin restart; push state per source; the server's own source limits follow the profile.
+- [ ] **S4. Per-source settings:** a source's own settings through the API.
+- [ ] **S5. Metadata providers:** profiles pushed to meta per provider.
+
 ## Working assumptions
 
 Settled for now, cheap to change:

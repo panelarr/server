@@ -30,6 +30,7 @@ import (
 	"github.com/panelarr/server/internal/library"
 	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/metrics"
+	"github.com/panelarr/server/internal/network"
 	"github.com/panelarr/server/internal/plugins"
 	"github.com/panelarr/server/internal/queue"
 	"github.com/panelarr/server/internal/reader"
@@ -169,6 +170,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		Reader:    rdr,
 		Downloads: dl,
 		Storages:  storages,
+		Network:   network.New(st, box, nil),
 		Checks: []Check{
 			{Name: "database", Required: true, Run: st.Pool.Ping},
 			{Name: "meta", Run: m.ReadyCheck},

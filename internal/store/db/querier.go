@@ -47,9 +47,11 @@ type Querier interface {
 	DeleteInvite(ctx context.Context, id uuid.UUID) (int64, error)
 	DeletePlugin(ctx context.Context, id string) (int64, error)
 	DeleteProgress(ctx context.Context, arg DeleteProgressParams) error
+	DeleteProxy(ctx context.Context, id string) (int64, error)
 	DeleteReaderSettings(ctx context.Context, arg DeleteReaderSettingsParams) (int64, error)
 	DeleteSession(ctx context.Context, id uuid.UUID) error
 	DeleteSetting(ctx context.Context, key string) error
+	DeleteSolver(ctx context.Context, id string) (int64, error)
 	DeleteStorage(ctx context.Context, id string) (int64, error)
 	DeleteUser(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteUserAPIKey(ctx context.Context, arg DeleteUserAPIKeyParams) (int64, error)
@@ -80,8 +82,10 @@ type Querier interface {
 	GetPlugin(ctx context.Context, id string) (Plugin, error)
 	GetPreferences(ctx context.Context, userID uuid.UUID) (UserPreference, error)
 	GetProgress(ctx context.Context, arg GetProgressParams) (Progress, error)
+	GetProxy(ctx context.Context, id string) (NetworkProxy, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionByTokenHashRow, error)
 	GetSetting(ctx context.Context, key string) ([]byte, error)
+	GetSolver(ctx context.Context, id string) (NetworkSolver, error)
 	GetSource(ctx context.Context, id string) (GetSourceRow, error)
 	GetSourceSeries(ctx context.Context, id uuid.UUID) (SourceSeries, error)
 	GetStorage(ctx context.Context, id string) (Storage, error)
@@ -97,6 +101,8 @@ type Querier interface {
 	HurryTask(ctx context.Context, arg HurryTaskParams) (Task, error)
 	InsertChapter(ctx context.Context, arg InsertChapterParams) (Chapter, error)
 	InsertChapterFile(ctx context.Context, arg InsertChapterFileParams) (ChapterFile, error)
+	InsertProxy(ctx context.Context, arg InsertProxyParams) (NetworkProxy, error)
+	InsertSolver(ctx context.Context, arg InsertSolverParams) (NetworkSolver, error)
 	// Returns no row when a live task with the same dedupe key exists.
 	InsertTask(ctx context.Context, arg InsertTaskParams) (Task, error)
 	LastJobRuns(ctx context.Context) ([]JobRun, error)
@@ -114,9 +120,11 @@ type Querier interface {
 	ListLibrary(ctx context.Context, arg ListLibraryParams) ([]ListLibraryRow, error)
 	ListOpenInvites(ctx context.Context) ([]Invite, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
+	ListProxies(ctx context.Context) ([]NetworkProxy, error)
 	ListReaderSettings(ctx context.Context, arg ListReaderSettingsParams) ([]ReaderSetting, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]Session, error)
 	ListSettings(ctx context.Context) ([]Setting, error)
+	ListSolvers(ctx context.Context) ([]NetworkSolver, error)
 	ListSourceChaptersBySeries(ctx context.Context, sourceSeriesID uuid.UUID) ([]SourceChapter, error)
 	ListSourceSeries(ctx context.Context, workID uuid.UUID) ([]SourceSeries, error)
 	ListSources(ctx context.Context) ([]ListSourcesRow, error)
@@ -171,6 +179,8 @@ type Querier interface {
 	UnclaimTask(ctx context.Context, id uuid.UUID) (Task, error)
 	UpdateChapter(ctx context.Context, arg UpdateChapterParams) error
 	UpdatePlugin(ctx context.Context, arg UpdatePluginParams) (Plugin, error)
+	UpdateProxy(ctx context.Context, arg UpdateProxyParams) (NetworkProxy, error)
+	UpdateSolver(ctx context.Context, arg UpdateSolverParams) (NetworkSolver, error)
 	UpdateStorage(ctx context.Context, arg UpdateStorageParams) (Storage, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpdateWorkDisplay(ctx context.Context, arg UpdateWorkDisplayParams) (Work, error)

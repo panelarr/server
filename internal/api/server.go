@@ -24,6 +24,7 @@ import (
 	"github.com/panelarr/server/internal/library"
 	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/metrics"
+	"github.com/panelarr/server/internal/network"
 	"github.com/panelarr/server/internal/plugins"
 	"github.com/panelarr/server/internal/queue"
 	"github.com/panelarr/server/internal/reader"
@@ -62,6 +63,7 @@ type Deps struct {
 	Reader    *reader.Service
 	Downloads *downloads.Service
 	Storages  *storage.Manager
+	Network   *network.Service
 
 	// SecureCookies marks session cookies Secure (https deployments).
 	SecureCookies bool
@@ -92,7 +94,7 @@ func NewHandler(deps Deps) (http.Handler, error) {
 	}
 	if deps.Auth == nil || deps.Users == nil || deps.Meta == nil || deps.Images == nil || deps.Plugins == nil || deps.Signer == nil ||
 		deps.Jobs == nil || deps.Queue == nil || deps.Hub == nil || deps.Store == nil || deps.Library == nil || deps.Chapters == nil || deps.Reader == nil ||
-		deps.Downloads == nil || deps.Storages == nil {
+		deps.Downloads == nil || deps.Storages == nil || deps.Network == nil {
 		return nil, fmt.Errorf("api: every service dependency is required")
 	}
 	s := &Server{deps: deps, policies: pols, iconWarnings: newLogThrottle(10 * time.Minute)}

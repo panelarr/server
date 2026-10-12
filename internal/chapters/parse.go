@@ -49,8 +49,14 @@ var (
 	extraRe = regexp.MustCompile(`(?i)^\W*(?:extra|special|side\s*story|bonus|omake|notice|hiatus|announcement|q\s*&\s*a)\b`)
 	// Bracketed parts of a name that only say who made the scan.
 	bracketRe = regexp.MustCompile(`\[[^\]]*\]`)
-	// Words around a title that aren't the title.
-	noiseRe = regexp.MustCompile(`(?i)\b(?:official\s+translation|official|raw|hq|scan(?:lation)?s?|end)\b`)
+	// A trailing group name in parentheses: a few words, no digits (so
+	// "(Part 1)" stays).
+	groupRe = regexp.MustCompile(`\(\s*[^()\d]{1,40}\)\s*$`)
+	// Release and group tags at either end of a title (inside it they may
+	// be words of the title).
+	noise     = `(?:(?:official|fan)\s+translation|official|translation|scan(?:s)?lations?|scans?|m?tl|raw|hq|lq|end)`
+	noiseHead = regexp.MustCompile(`(?i)^(?:[\s:\-–—|.,]*\b` + noise + `\b)+`)
+	noiseTail = regexp.MustCompile(`(?i)(?:\b` + noise + `\b[\s:\-–—|.,]*)+$`)
 )
 
 func parseNum(s string) *float64 {
@@ -119,11 +125,20 @@ func Parse(name string) Parsed {
 // name.
 func cleanTitle(s string) string {
 	s = bracketRe.ReplaceAllString(s, " ")
-	s = noiseRe.ReplaceAllString(s, " ")
+	if g := groupRe.FindStringIndex(s); g != nil {
+		s = s[:g[0]]
+	}
 	s = strings.Join(strings.Fields(s), " ")
-	s = strings.TrimFunc(s, func(r rune) bool {
-		return unicode.IsSpace(r) || strings.ContainsRune(":-–—|.,·•()~_", r)
-	})
+	trim := func(s string) string {
+		return strings.TrimFunc(s, func(r rune) bool {
+			return unicode.IsSpace(r) || strings.ContainsRune(":-–—|.,·•~_", r)
+		})
+	}
+	s = trim(s)
+	s = trim(noiseHead.ReplaceAllString(s, ""))
+	s = trim(noiseTail.ReplaceAllString(s, ""))
+	// Brackets left with nothing in them.
+	s = trim(strings.ReplaceAll(s, "()", ""))
 	// Nothing but punctuation (e.g. "…") is no title.
 	if !strings.ContainsFunc(s, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }) {
 		return ""

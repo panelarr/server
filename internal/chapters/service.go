@@ -109,6 +109,25 @@ func (s *Service) SourcesChanged(ctx context.Context, sourceIDs []string) {
 	}
 }
 
+// UnifyAll rebuilds every work's chapters from the chapters stored, without
+// asking any source: after a change to how chapter names are read. It
+// returns how many works it went through.
+func (s *Service) UnifyAll(ctx context.Context) (int, error) {
+	works, err := s.st.WorksWithAttachedSeries(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for i, id := range works {
+		if err := ctx.Err(); err != nil {
+			return i, err
+		}
+		if _, err := s.Unify(ctx, id); err != nil {
+			return i, err
+		}
+	}
+	return len(works), nil
+}
+
 // Refresh queues chapter checks of every attached series of a work, ahead
 // of scheduled ones.
 func (s *Service) Refresh(ctx context.Context, workID, by uuid.UUID) (int, error) {

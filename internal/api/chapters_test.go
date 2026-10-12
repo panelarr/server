@@ -9,6 +9,7 @@ import (
 	"time"
 
 	sourcev1 "github.com/panelarr/source-api/gen/panelarr/source/v1"
+	"github.com/panelarr/source-api/sdk/plugin"
 	"github.com/panelarr/source-api/sdk/plugintest"
 
 	"github.com/panelarr/server/internal/api/apigen"
@@ -140,5 +141,33 @@ func TestUnifiedChapters(t *testing.T) {
 	}
 	if lib := call[apigen.LibraryPage](user, http.MethodGet, "/api/v1/library", nil, 200); lib.Entries[0].NewChapters != 2 {
 		t.Fatalf("new after refresh %d", lib.Entries[0].NewChapters)
+	}
+}
+
+func TestUnifyAllReadsNamesAgain(t *testing.T) {
+	t.Parallel()
+	f := newLibraryFixture(t, func(fk *plugintest.Fake) plugin.Plugin {
+		fk.Sources[0].Series[0].Chapters[0].Chapter.Name = "Vol. 2 Chapter 3: The Last Lantern"
+		return fk
+	})
+	entry := call[apigen.LibraryEntry](f.user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 201)
+	id := entry.Work.Id.String()
+	waitWorkMatched(t, f.user, id)
+	waitChapters(t, f.user, id, func(cs []apigen.UnifiedChapter) bool {
+		c := chapterNumbered(cs, 3)
+		return c != nil && c.Volume != nil && *c.Volume == "2"
+	})
+
+	// As if stored by an older reading of the names.
+	ctx := context.Background()
+	if _, err := f.h.st.Pool.Exec(ctx, `UPDATE chapters SET volume = '' WHERE work_id = $1`, entry.Work.Id); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := f.h.chs.UnifyAll(ctx); err != nil || n != 1 {
+		t.Fatalf("unify all: %d %v", n, err)
+	}
+	c := chapterNumbered(call[apigen.ChapterList](f.user, http.MethodGet, "/api/v1/works/"+id+"/chapters", nil, 200).Chapters, 3)
+	if c == nil || c.Volume == nil || *c.Volume != "2" || c.DisplayTitle != "The Last Lantern" {
+		t.Fatalf("chapter 3 %+v", c)
 	}
 }

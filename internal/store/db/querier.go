@@ -216,6 +216,7 @@ type Querier interface {
 	WorkVariants(ctx context.Context, workID uuid.UUID) ([]WorkVariantsRow, error)
 	// Works with a series attached on any of these sources.
 	WorksOnSources(ctx context.Context, sourceIds []string) ([]uuid.UUID, error)
+	WorksWithAttachedSeries(ctx context.Context) ([]uuid.UUID, error)
 }
 
 var _ Querier = (*Queries)(nil)

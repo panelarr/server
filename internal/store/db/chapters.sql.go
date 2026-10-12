@@ -580,3 +580,27 @@ func (q *Queries) WorksOnSources(ctx context.Context, sourceIds []string) ([]uui
 	}
 	return items, nil
 }
+
+const worksWithAttachedSeries = `-- name: WorksWithAttachedSeries :many
+SELECT DISTINCT work_id FROM source_series WHERE state = 'attached' ORDER BY work_id
+`
+
+func (q *Queries) WorksWithAttachedSeries(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, worksWithAttachedSeries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var work_id uuid.UUID
+		if err := rows.Scan(&work_id); err != nil {
+			return nil, err
+		}
+		items = append(items, work_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

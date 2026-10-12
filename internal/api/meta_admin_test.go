@@ -76,3 +76,43 @@ func TestMetaJobs(t *testing.T) {
 	admin.expectProblem(http.MethodPost, "/api/v1/system/meta/jobs/nope/run", nil, 404, CodeNotFound)
 	user.expectProblem(http.MethodGet, "/api/v1/system/meta/jobs", nil, 403, "forbidden")
 }
+
+func TestMetaProvidersAndSyncs(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	admin, _ := h.setupAdmin()
+	user, _ := h.createUser(admin, "reader", nil)
+	fake := connectedMeta(t, admin)
+	fake.AddEntry(&metav1.Entry{Id: "e1", Title: "The Lantern Keeper"})
+
+	call[map[string]any](admin, http.MethodPost, "/api/v1/system/meta/providers/books/sync", map[string]string{"kind": "dump"}, 202)
+	provs := call[apigen.MetaProviderList](admin, http.MethodGet, "/api/v1/system/meta/providers", nil, 200)
+	if len(provs.Providers) != 1 || provs.Providers[0].Id != "books" || provs.Providers[0].RecordCount != 2 || provs.Providers[0].Health != "ok" || len(provs.Providers[0].LastRuns) != 1 {
+		t.Fatalf("providers %+v", provs)
+	}
+	runs := call[apigen.MetaSyncRunList](admin, http.MethodGet, "/api/v1/system/meta/sync-runs?provider=books", nil, 200)
+	if len(runs.Runs) != 1 || runs.Runs[0].Status != "running" || runs.Runs[0].Kind != "dump" || runs.Runs[0].Upserts != 12 {
+		t.Fatalf("runs %+v", runs)
+	}
+	run := call[apigen.MetaSyncRun](admin, http.MethodGet, "/api/v1/system/meta/sync-runs/"+runs.Runs[0].Id, nil, 200)
+	if len(run.Notices) != 1 || run.Notices[0].Level != "warning" || run.StartedAt == nil {
+		t.Fatalf("run %+v", run)
+	}
+	admin.expectProblem(http.MethodGet, "/api/v1/system/meta/sync-runs/nope", nil, 404, CodeNotFound)
+
+	health := call[apigen.MetaServiceHealth](admin, http.MethodGet, "/api/v1/system/meta/health", nil, 200)
+	if health.Status != "ok" || len(health.Components) != 2 || health.Components[0].Details["engine"] != "postgres" {
+		t.Fatalf("health %+v", health)
+	}
+	fake.SetProviderDown("books", true)
+	if h := call[apigen.MetaServiceHealth](admin, http.MethodGet, "/api/v1/system/meta/health", nil, 200); h.Status != "degraded" || h.Components[1].Status != "down" {
+		t.Fatalf("degraded %+v", h)
+	}
+
+	ref := call[apigen.MetaEntryRefresh](admin, http.MethodPost, "/api/v1/system/meta/entries/e1/refresh", nil, 200)
+	if len(ref.Refreshed) != 0 || ref.Failed["books"] == "" {
+		t.Fatalf("refresh %+v", ref)
+	}
+	admin.expectProblem(http.MethodPost, "/api/v1/system/meta/entries/missing/refresh", nil, 404, CodeNotFound)
+	user.expectProblem(http.MethodGet, "/api/v1/system/meta/providers", nil, 403, "forbidden")
+}

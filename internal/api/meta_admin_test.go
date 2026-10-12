@@ -75,6 +75,11 @@ func TestMetaJobs(t *testing.T) {
 		t.Fatalf("rebuild %+v", r.Summary)
 	}
 
+	// A job that can't run now.
+	fake.DisableJob("search-rebuild", "the search backend is postgres")
+	if p := admin.expectProblem(http.MethodPost, "/api/v1/system/meta/jobs/search-rebuild/run", nil, 409, "job_disabled"); p.Detail == nil || !strings.Contains(*p.Detail, "postgres") {
+		t.Fatalf("disabled %+v", p)
+	}
 	admin.expectProblem(http.MethodGet, "/api/v1/system/meta/jobs/nope", nil, 404, CodeNotFound)
 	admin.expectProblem(http.MethodPost, "/api/v1/system/meta/jobs/nope/run", nil, 404, CodeNotFound)
 	user.expectProblem(http.MethodGet, "/api/v1/system/meta/jobs", nil, 403, "forbidden")

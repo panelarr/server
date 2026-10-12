@@ -5110,6 +5110,9 @@ components:
       type: object
       required: [id, name, description, group, schedule, running, cancellable, params]
       properties:
+        disabled_reason:
+          type: string
+          description: "Why the job can't run now (e.g. a feature it needs is off); absent when it can. Running it answers `409`, code `job_disabled`, and its schedule doesn't fire meanwhile."
         id:
           type: string
         name:
@@ -6694,6 +6697,9 @@ components:
       - cancellable
       - params
       properties:
+        disabled_reason:
+          type: string
+          description: "Why the job can't run now (e.g. a feature it needs is off); absent when it can. Running it answers `409`, code `job_disabled`, and its schedule doesn't fire meanwhile."
         id:
           type: string
         name:

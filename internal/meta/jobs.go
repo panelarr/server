@@ -26,6 +26,11 @@ type JobRunningError struct{ RunID string }
 
 func (e *JobRunningError) Error() string { return "meta: the job is running as " + e.RunID }
 
+// JobDisabledError is a job that can't run now, and why.
+type JobDisabledError struct{ Reason string }
+
+func (e *JobDisabledError) Error() string { return "meta: the job can't run now: " + e.Reason }
+
 // BadJobParamsError is a run meta refused for its params.
 type BadJobParamsError struct{ Reason string }
 
@@ -51,6 +56,9 @@ func jobError(op string, err error) error {
 	case connect.CodeInvalidArgument:
 		return &BadJobParamsError{Reason: ce.Message()}
 	case connect.CodeFailedPrecondition:
+		if reason, _ := errorInfo(err); reason == "JOB_DISABLED" {
+			return &JobDisabledError{Reason: ce.Message()}
+		}
 		return ErrJobNotCancelable
 	}
 	return wrap(op, providerError(err, ""))

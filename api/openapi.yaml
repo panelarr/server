@@ -2311,6 +2311,147 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /plugins/{plugin_id}/jobs:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+    get:
+      operationId: listPluginJobs
+      tags: [plugins]
+      summary: A plugin's background jobs
+      description: "Needs a plugin with the `jobs` capability (else `422`, code `no_jobs`) that is turned on (else `409`, code `plugin_disabled`). The plugin's jobs in the same shape as the server's own (`/jobs`), except that run IDs are the plugin's own strings (`PluginJob*`). No events come for them: poll a running run."
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The jobs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginJobList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}/jobs/{job_id}:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+      - $ref: "#/components/parameters/JobId"
+    get:
+      operationId: getPluginJob
+      tags: [plugins]
+      summary: One of a plugin's jobs
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The job.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginJob"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}/jobs/{job_id}/runs:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+      - $ref: "#/components/parameters/JobId"
+    get:
+      operationId: listPluginJobRuns
+      tags: [plugins]
+      summary: A plugin job's runs, newest first
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/PageToken"
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/JobRunStatus'
+      responses:
+        "200":
+          description: A page of runs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginJobRunList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}/jobs/{job_id}/run:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+      - $ref: "#/components/parameters/JobId"
+    post:
+      operationId: runPluginJob
+      tags: [plugins]
+      summary: Run one of a plugin's jobs now
+      description: "`409`, code `already_running`, with `current_run`, when it runs already. The plugin records the admin as who started it."
+      x-panelarr-access: admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunJobRequest"
+      responses:
+        "202":
+          description: Started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginJobRunSummary"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}/job-runs/{run_id}:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+    get:
+      operationId: getPluginJobRun
+      tags: [plugins]
+      summary: One run of a plugin's job, in full
+      x-panelarr-access: admin
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginJobRun"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}/job-runs/{run_id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+    post:
+      operationId: cancelPluginJobRun
+      tags: [plugins]
+      summary: Cancel a running run of a plugin's job
+      x-panelarr-access: admin
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+      responses:
+        "202":
+          description: Cancelling.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginJobRunSummary"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /sources:
     get:
       operationId: listSources
@@ -6502,6 +6643,128 @@ components:
       properties:
         enabled:
           type: boolean
+    PluginJob:
+      type: object
+      required:
+      - id
+      - name
+      - description
+      - group
+      - schedule
+      - running
+      - cancellable
+      - params
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        group:
+          type: string
+        schedule:
+          $ref: '#/components/schemas/JobSchedule'
+        running:
+          type: boolean
+        current_run_id:
+          type: string
+        last_run:
+          $ref: '#/components/schemas/PluginJobRunSummary'
+        next_run_at:
+          type: string
+          format: date-time
+        cancellable:
+          type: boolean
+        params:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobParam'
+      description: As `Job`, field for field, except that run IDs are the plugin's own strings.
+    PluginJobRunSummary:
+      type: object
+      required:
+      - id
+      - job_id
+      - status
+      - trigger
+      - started_at
+      - message
+      - counts
+      properties:
+        id:
+          type: string
+          description: The plugin's own run ID (not always a UUID).
+        job_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/JobRunStatus'
+        trigger:
+          type: string
+          enum:
+          - schedule
+          - manual
+          - startup
+          - system
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        message:
+          type: string
+        counts:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        triggered_by:
+          type: string
+      description: As `JobRunSummary`, field for field, except that run IDs are the plugin's own strings.
+    PluginJobRun:
+      type: object
+      required:
+      - summary
+      - params
+      - notes
+      properties:
+        summary:
+          $ref: '#/components/schemas/PluginJobRunSummary'
+        params:
+          type: object
+          additionalProperties:
+            type: string
+        notes:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobRunNote'
+        progress:
+          $ref: '#/components/schemas/JobProgress'
+      description: As `JobRun`, field for field, except that run IDs are the plugin's own strings.
+    PluginJobList:
+      type: object
+      required:
+      - jobs
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/PluginJob'
+      description: As `JobList`, field for field, except that run IDs are the plugin's own strings.
+    PluginJobRunList:
+      type: object
+      required:
+      - runs
+      - next_page_token
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/PluginJobRunSummary'
+        next_page_token:
+          type: string
+      description: As `JobRunList`, field for field, except that run IDs are the plugin's own strings.
     SeriesMatchRef:
       type: object
       description: How a work already knows a series.
@@ -6974,6 +7237,9 @@ components:
           type: string
           format: uuid
           description: With code `already_running`, the run that is going on.
+        current_run:
+          type: string
+          description: With code `already_running` from a plugin's jobs, the run that is going on (the plugin's own ID).
         errors:
           type: array
           description: Per-field validation errors.

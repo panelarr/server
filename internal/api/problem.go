@@ -34,6 +34,8 @@ type Problem struct {
 	Fields []apigen.FieldError
 	// CurrentRunID goes with already_running.
 	CurrentRunID *uuid.UUID
+	// CurrentRun is a plugin job's running run (its own ID).
+	CurrentRun string
 }
 
 func (p *Problem) Error() string { return p.Code + ": " + p.Detail }
@@ -62,6 +64,7 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p *Problem) {
 		body.Errors = &p.Fields
 	}
 	body.CurrentRunId = p.CurrentRunID
+	body.CurrentRun = nonEmpty(p.CurrentRun)
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(p.Status)
 	_ = json.NewEncoder(w).Encode(body)

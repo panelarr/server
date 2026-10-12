@@ -24,6 +24,8 @@ func pluginJobError(ctx context.Context, err error) error {
 	switch {
 	case errors.Is(err, plugins.ErrNoJobs):
 		return NewProblem(http.StatusUnprocessableEntity, "no_jobs", "the plugin has no jobs")
+	case errors.As(err, &pe) && pe.Reason == plugin.ReasonJobDisabled:
+		return NewProblem(http.StatusConflict, "job_disabled", pe.Message)
 	case errors.As(err, &pe) && pe.Reason == plugin.ReasonAlreadyRunning:
 		return &Problem{Status: http.StatusConflict, Code: "already_running", Detail: "the job is running as " + pe.CurrentRunID, CurrentRun: pe.CurrentRunID}
 	case errors.As(err, &pe) && pe.Code == plugin.CodeFailedPrecondition && pe.Reason == "":
@@ -56,7 +58,7 @@ func fromPluginRunSummary(r *jobsv1.JobRunSummary) apigen.PluginJobRunSummary {
 func fromPluginJob(j *jobsv1.Job) apigen.PluginJob {
 	out := apigen.PluginJob{
 		Id: j.GetId(), Name: j.GetName(), Description: j.GetDescription(), Group: j.GetGroup(), Running: j.GetRunning(),
-		Cancellable: j.GetCancellable(), Params: make([]apigen.JobParam, 0, len(j.GetParams())),
+		Cancellable: j.GetCancellable(), Params: make([]apigen.JobParam, 0, len(j.GetParams())), DisabledReason: nonEmpty(j.GetDisabledReason()),
 		Schedule: apigen.JobSchedule{Enabled: j.GetSchedule().GetEnabled(), Source: nonEmpty(j.GetSchedule().GetSource())},
 	}
 	if c := j.GetSchedule().GetCron(); c != "" {

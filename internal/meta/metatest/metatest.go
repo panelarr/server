@@ -64,6 +64,8 @@ type Fake struct {
 	judgeKey  string
 	// syncRuns are the sync runs started, oldest first.
 	syncRuns []*metav1.SyncRun
+	// disabled are jobs that can't run now, with why.
+	disabled map[string]string
 	// jobs and runs are meta's own jobs (not syncs), runs newest last.
 	jobs        []*metav1.Job
 	runs        []*metav1.JobRun
@@ -625,6 +627,13 @@ func (f *Fake) runJob(id string, params map[string]string) (*metav1.JobRunSummar
 	if j == nil {
 		return nil, false, nil
 	}
+	if why := f.disabled[id]; why != "" {
+		cerr := connect.NewError(connect.CodeFailedPrecondition, errors.New(why))
+		if d, err := connect.NewErrorDetail(&errdetails.ErrorInfo{Reason: "JOB_DISABLED", Domain: "panelarr.meta", Metadata: map[string]string{"job_id": id}}); err == nil {
+			cerr.AddDetail(d)
+		}
+		return nil, true, cerr
+	}
 	if j.GetRunning() {
 		cerr := connect.NewError(connect.CodeAlreadyExists, errors.New("the job is running"))
 		if d, err := connect.NewErrorDetail(&metav1.JobAlreadyRunning{CurrentRunId: j.GetCurrentRunId()}); err == nil {
@@ -945,4 +954,14 @@ func (h *integrationsHandler) ResetSearchEngine(ctx context.Context, _ *connect.
 	h.f.search, h.f.searchKey = nil, ""
 	st, status := h.f.searchShown()
 	return connect.NewResponse(&metav1.ResetSearchEngineResponse{Settings: st, Status: status}), nil
+}
+
+// DisableJob makes RunJob refuse a job, with why ("" allows it again).
+func (f *Fake) DisableJob(id, why string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.disabled == nil {
+		f.disabled = map[string]string{}
+	}
+	f.disabled[id] = why
 }

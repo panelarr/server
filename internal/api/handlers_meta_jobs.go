@@ -22,7 +22,10 @@ import (
 func metaJobError(err error) error {
 	var busy *meta.JobRunningError
 	var bad *meta.BadJobParamsError
+	var off *meta.JobDisabledError
 	switch {
+	case errors.As(err, &off):
+		return NewProblem(http.StatusConflict, "job_disabled", off.Reason)
 	case errors.As(err, &busy):
 		p := &Problem{Status: http.StatusConflict, Code: "already_running", Detail: "the job is running as " + busy.RunID}
 		if id, perr := uuid.Parse(busy.RunID); perr == nil {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/panelarr/source-api/sdk/plugintest"
@@ -257,6 +258,18 @@ func TestPluginJobs(t *testing.T) {
 		t.Fatalf("runs %+v", runs)
 	}
 
+	// A job that can't run now says why, and refuses to start.
+	fake.DisableJob("refresh", "nothing to refresh yet")
+	if j := call[apigen.PluginJob](admin, http.MethodGet, base+"/jobs/refresh", nil, 200); j.DisabledReason == nil || *j.DisabledReason != "nothing to refresh yet" || j.NextRunAt != nil {
+		t.Fatalf("disabled job %+v", j)
+	}
+	if p := admin.expectProblem(http.MethodPost, base+"/jobs/refresh/run", nil, 409, "job_disabled"); p.Detail == nil || !strings.Contains(*p.Detail, "nothing to refresh") {
+		t.Fatalf("disabled run %+v", p)
+	}
+	fake.DisableJob("refresh", "")
+	if j := call[apigen.PluginJob](admin, http.MethodGet, base+"/jobs/refresh", nil, 200); j.DisabledReason != nil {
+		t.Fatalf("enabled again %+v", j)
+	}
 	admin.expectProblem(http.MethodGet, base+"/jobs/nope", nil, 404, CodeNotFound)
 	admin.expectProblem(http.MethodGet, base+"/job-runs/nope", nil, 404, CodeNotFound)
 	user.expectProblem(http.MethodGet, base+"/jobs", nil, 403, "forbidden")

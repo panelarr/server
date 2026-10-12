@@ -211,3 +211,59 @@ func TestPackageOriginsDetailsAndHealthChecks(t *testing.T) {
 	call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins", map[string]string{"url": pluginstest.Serve(t, single, pluginKey), "api_key": pluginKey}, 201)
 	admin.expectProblem(http.MethodGet, "/api/v1/plugins/single/origins", nil, 422, "no_packages")
 }
+
+func TestPluginJobs(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	admin, _ := h.setupAdmin()
+	user, _ := h.createUser(admin, "reader", nil)
+	fake := plugintest.New()
+	call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins", map[string]string{"url": pluginstest.Serve(t, fake, pluginKey), "api_key": pluginKey}, 201)
+	const base = "/api/v1/plugins/fake"
+
+	list := call[apigen.PluginJobList](admin, http.MethodGet, base+"/jobs", nil, 200)
+	if len(list.Jobs) != 2 {
+		t.Fatalf("jobs %+v", list)
+	}
+	// A job that finishes at once, run by the admin.
+	r := call[apigen.PluginJobRunSummary](admin, http.MethodPost, base+"/jobs/refresh/run", nil, 202)
+	if r.Id == "" || r.JobId != "refresh" {
+		t.Fatalf("run %+v", r)
+	}
+	waitFor(t, "the refresh", func() bool {
+		return call[apigen.PluginJobRun](admin, http.MethodGet, base+"/job-runs/"+r.Id, nil, 200).Summary.Status == apigen.JobRunStatusSucceeded
+	})
+	if full := call[apigen.PluginJobRun](admin, http.MethodGet, base+"/job-runs/"+r.Id, nil, 200); full.Summary.TriggeredBy == nil || *full.Summary.TriggeredBy != "Admin" {
+		t.Fatalf("triggered by %+v", full.Summary)
+	}
+
+	// A job that runs until cancelled: busy, cancel, history.
+	hold := call[apigen.PluginJobRunSummary](admin, http.MethodPost, base+"/jobs/hold/run", nil, 202)
+	p := admin.expectProblem(http.MethodPost, base+"/jobs/hold/run", nil, 409, "already_running")
+	if p.CurrentRun == nil || *p.CurrentRun != hold.Id {
+		t.Fatalf("busy %+v", p)
+	}
+	if j := call[apigen.PluginJob](admin, http.MethodGet, base+"/jobs/hold", nil, 200); !j.Running || j.CurrentRunId == nil || *j.CurrentRunId != hold.Id {
+		t.Fatalf("job %+v", j)
+	}
+	if c := call[apigen.PluginJobRunSummary](admin, http.MethodPost, base+"/job-runs/"+hold.Id+"/cancel", nil, 202); c.Status != apigen.JobRunStatusCancelled && c.Status != apigen.JobRunStatusRunning {
+		t.Fatalf("cancel %+v", c)
+	}
+	waitFor(t, "the cancel", func() bool {
+		return call[apigen.PluginJobRun](admin, http.MethodGet, base+"/job-runs/"+hold.Id, nil, 200).Summary.Status == apigen.JobRunStatusCancelled
+	})
+	admin.expectProblem(http.MethodPost, base+"/job-runs/"+hold.Id+"/cancel", nil, 409, "not_running")
+	if runs := call[apigen.PluginJobRunList](admin, http.MethodGet, base+"/jobs/hold/runs?status=cancelled", nil, 200); len(runs.Runs) != 1 || runs.Runs[0].Id != hold.Id {
+		t.Fatalf("runs %+v", runs)
+	}
+
+	admin.expectProblem(http.MethodGet, base+"/jobs/nope", nil, 404, CodeNotFound)
+	admin.expectProblem(http.MethodGet, base+"/job-runs/nope", nil, 404, CodeNotFound)
+	user.expectProblem(http.MethodGet, base+"/jobs", nil, 403, "forbidden")
+
+	// A plugin without jobs.
+	plain := plugintest.New()
+	plain.ID, plain.Jobs = "plain", nil
+	call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins", map[string]string{"url": pluginstest.Serve(t, plain, pluginKey), "api_key": pluginKey}, 201)
+	admin.expectProblem(http.MethodGet, "/api/v1/plugins/plain/jobs", nil, 422, "no_jobs")
+}

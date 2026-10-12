@@ -60,6 +60,8 @@ type Service struct {
 	log *slog.Logger
 	// dial is the dialer of proxy tests (tests replace it).
 	dial func(ctx context.Context, network, addr string) (net.Conn, error)
+	// onChange runs after anything that changes an effective profile.
+	onChange func(ctx context.Context)
 }
 
 // New returns the service.
@@ -192,6 +194,7 @@ func (s *Service) UpdateSolver(ctx context.Context, id string, p SolverPatch) (S
 		return Solver{}, err
 	}
 	s.log.InfoContext(ctx, "solver changed", "component", "audit", "solver", id)
+	s.changed(ctx)
 	return solverOf(r), nil
 }
 

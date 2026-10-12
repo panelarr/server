@@ -374,3 +374,15 @@ func (h *Host) Icon(ctx context.Context, id, ref string) (string, io.Reader, err
 	}
 	return res.Header.Get("Content-Type"), bytes.NewReader(data), nil
 }
+
+// AcceptsProfiles reports whether a plugin declares the network profile
+// service: only those receive network profiles.
+func AcceptsProfiles(info *sourcev1.PluginInfo) bool {
+	return slices.Contains(info.GetCommonServices(), sourcev1.CommonService_COMMON_SERVICE_NETWORK_PROFILE)
+}
+
+// AcceptsSolver reports whether a plugin declares the solver service: only
+// those receive a profile's solver.
+func AcceptsSolver(info *sourcev1.PluginInfo) bool {
+	return slices.Contains(info.GetCommonServices(), sourcev1.CommonService_COMMON_SERVICE_SOLVER)
+}

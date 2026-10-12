@@ -37,3 +37,47 @@ RETURNING *;
 
 -- name: DeleteProxy :execrows
 DELETE FROM network_proxies WHERE id = $1;
+
+-- name: ListProfiles :many
+SELECT * FROM network_profiles ORDER BY lower(name), id;
+
+-- name: GetProfile :one
+SELECT * FROM network_profiles WHERE id = $1;
+
+-- name: InsertProfile :one
+INSERT INTO network_profiles (
+    id, name, proxy_id, solver_id, rate_requests, rate_period_ms, rate_burst, rate_scope, concurrency,
+    user_agent_mode, user_agent, doh_url, headers, shared_cookie_jar, connect_timeout_ms, read_timeout_ms,
+    call_timeout_ms, owner_kind, owner_id, owner_plugin
+) VALUES (
+    @id, @name, @proxy_id, @solver_id, @rate_requests, @rate_period_ms, @rate_burst, @rate_scope, @concurrency,
+    @user_agent_mode, @user_agent, @doh_url, @headers, @shared_cookie_jar, @connect_timeout_ms, @read_timeout_ms,
+    @call_timeout_ms, @owner_kind, @owner_id, @owner_plugin
+)
+RETURNING *;
+
+-- name: UpdateProfile :one
+UPDATE network_profiles SET
+    name = @name, proxy_id = @proxy_id, solver_id = @solver_id, rate_requests = @rate_requests,
+    rate_period_ms = @rate_period_ms, rate_burst = @rate_burst, rate_scope = @rate_scope, concurrency = @concurrency,
+    user_agent_mode = @user_agent_mode, user_agent = @user_agent, doh_url = @doh_url, headers = @headers,
+    shared_cookie_jar = @shared_cookie_jar, connect_timeout_ms = @connect_timeout_ms,
+    read_timeout_ms = @read_timeout_ms, call_timeout_ms = @call_timeout_ms, updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: DeleteProfile :execrows
+DELETE FROM network_profiles WHERE id = $1;
+
+-- name: ListAssignments :many
+SELECT * FROM network_assignments ORDER BY target_kind, target_id;
+
+-- name: UpsertAssignment :one
+INSERT INTO network_assignments (target_kind, target_id, profile_id, plugin_id)
+VALUES (@target_kind, @target_id, @profile_id, @plugin_id)
+ON CONFLICT (target_kind, target_id) DO UPDATE SET
+    profile_id = EXCLUDED.profile_id, plugin_id = EXCLUDED.plugin_id, updated_at = now()
+RETURNING *;
+
+-- name: DeleteAssignment :execrows
+DELETE FROM network_assignments WHERE target_kind = @target_kind AND target_id = @target_id;

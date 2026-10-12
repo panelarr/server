@@ -7,7 +7,38 @@ package db
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const deleteAssignment = `-- name: DeleteAssignment :execrows
+DELETE FROM network_assignments WHERE target_kind = $1 AND target_id = $2
+`
+
+type DeleteAssignmentParams struct {
+	TargetKind string
+	TargetID   string
+}
+
+func (q *Queries) DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAssignment, arg.TargetKind, arg.TargetID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteProfile = `-- name: DeleteProfile :execrows
+DELETE FROM network_profiles WHERE id = $1
+`
+
+func (q *Queries) DeleteProfile(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteProfile, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
 
 const deleteProxy = `-- name: DeleteProxy :execrows
 DELETE FROM network_proxies WHERE id = $1
@@ -31,6 +62,40 @@ func (q *Queries) DeleteSolver(ctx context.Context, id string) (int64, error) {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const getProfile = `-- name: GetProfile :one
+SELECT id, name, proxy_id, solver_id, rate_requests, rate_period_ms, rate_burst, rate_scope, concurrency, user_agent_mode, user_agent, doh_url, headers, shared_cookie_jar, connect_timeout_ms, read_timeout_ms, call_timeout_ms, owner_kind, owner_id, owner_plugin, created_at, updated_at FROM network_profiles WHERE id = $1
+`
+
+func (q *Queries) GetProfile(ctx context.Context, id string) (NetworkProfile, error) {
+	row := q.db.QueryRow(ctx, getProfile, id)
+	var i NetworkProfile
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ProxyID,
+		&i.SolverID,
+		&i.RateRequests,
+		&i.RatePeriodMs,
+		&i.RateBurst,
+		&i.RateScope,
+		&i.Concurrency,
+		&i.UserAgentMode,
+		&i.UserAgent,
+		&i.DohUrl,
+		&i.Headers,
+		&i.SharedCookieJar,
+		&i.ConnectTimeoutMs,
+		&i.ReadTimeoutMs,
+		&i.CallTimeoutMs,
+		&i.OwnerKind,
+		&i.OwnerID,
+		&i.OwnerPlugin,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getProxy = `-- name: GetProxy :one
@@ -67,6 +132,93 @@ func (q *Queries) GetSolver(ctx context.Context, id string) (NetworkSolver, erro
 		&i.SessionTtlSeconds,
 		&i.MaxTimeoutSeconds,
 		&i.AsResponseFallback,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const insertProfile = `-- name: InsertProfile :one
+INSERT INTO network_profiles (
+    id, name, proxy_id, solver_id, rate_requests, rate_period_ms, rate_burst, rate_scope, concurrency,
+    user_agent_mode, user_agent, doh_url, headers, shared_cookie_jar, connect_timeout_ms, read_timeout_ms,
+    call_timeout_ms, owner_kind, owner_id, owner_plugin
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9,
+    $10, $11, $12, $13, $14, $15, $16,
+    $17, $18, $19, $20
+)
+RETURNING id, name, proxy_id, solver_id, rate_requests, rate_period_ms, rate_burst, rate_scope, concurrency, user_agent_mode, user_agent, doh_url, headers, shared_cookie_jar, connect_timeout_ms, read_timeout_ms, call_timeout_ms, owner_kind, owner_id, owner_plugin, created_at, updated_at
+`
+
+type InsertProfileParams struct {
+	ID               string
+	Name             string
+	ProxyID          pgtype.Text
+	SolverID         pgtype.Text
+	RateRequests     int32
+	RatePeriodMs     int32
+	RateBurst        int32
+	RateScope        string
+	Concurrency      int32
+	UserAgentMode    string
+	UserAgent        string
+	DohUrl           string
+	Headers          []byte
+	SharedCookieJar  string
+	ConnectTimeoutMs int32
+	ReadTimeoutMs    int32
+	CallTimeoutMs    int32
+	OwnerKind        string
+	OwnerID          string
+	OwnerPlugin      pgtype.Text
+}
+
+func (q *Queries) InsertProfile(ctx context.Context, arg InsertProfileParams) (NetworkProfile, error) {
+	row := q.db.QueryRow(ctx, insertProfile,
+		arg.ID,
+		arg.Name,
+		arg.ProxyID,
+		arg.SolverID,
+		arg.RateRequests,
+		arg.RatePeriodMs,
+		arg.RateBurst,
+		arg.RateScope,
+		arg.Concurrency,
+		arg.UserAgentMode,
+		arg.UserAgent,
+		arg.DohUrl,
+		arg.Headers,
+		arg.SharedCookieJar,
+		arg.ConnectTimeoutMs,
+		arg.ReadTimeoutMs,
+		arg.CallTimeoutMs,
+		arg.OwnerKind,
+		arg.OwnerID,
+		arg.OwnerPlugin,
+	)
+	var i NetworkProfile
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ProxyID,
+		&i.SolverID,
+		&i.RateRequests,
+		&i.RatePeriodMs,
+		&i.RateBurst,
+		&i.RateScope,
+		&i.Concurrency,
+		&i.UserAgentMode,
+		&i.UserAgent,
+		&i.DohUrl,
+		&i.Headers,
+		&i.SharedCookieJar,
+		&i.ConnectTimeoutMs,
+		&i.ReadTimeoutMs,
+		&i.CallTimeoutMs,
+		&i.OwnerKind,
+		&i.OwnerID,
+		&i.OwnerPlugin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -149,6 +301,83 @@ func (q *Queries) InsertSolver(ctx context.Context, arg InsertSolverParams) (Net
 	return i, err
 }
 
+const listAssignments = `-- name: ListAssignments :many
+SELECT target_kind, target_id, profile_id, plugin_id, updated_at FROM network_assignments ORDER BY target_kind, target_id
+`
+
+func (q *Queries) ListAssignments(ctx context.Context) ([]NetworkAssignment, error) {
+	rows, err := q.db.Query(ctx, listAssignments)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NetworkAssignment{}
+	for rows.Next() {
+		var i NetworkAssignment
+		if err := rows.Scan(
+			&i.TargetKind,
+			&i.TargetID,
+			&i.ProfileID,
+			&i.PluginID,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProfiles = `-- name: ListProfiles :many
+SELECT id, name, proxy_id, solver_id, rate_requests, rate_period_ms, rate_burst, rate_scope, concurrency, user_agent_mode, user_agent, doh_url, headers, shared_cookie_jar, connect_timeout_ms, read_timeout_ms, call_timeout_ms, owner_kind, owner_id, owner_plugin, created_at, updated_at FROM network_profiles ORDER BY lower(name), id
+`
+
+func (q *Queries) ListProfiles(ctx context.Context) ([]NetworkProfile, error) {
+	rows, err := q.db.Query(ctx, listProfiles)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NetworkProfile{}
+	for rows.Next() {
+		var i NetworkProfile
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ProxyID,
+			&i.SolverID,
+			&i.RateRequests,
+			&i.RatePeriodMs,
+			&i.RateBurst,
+			&i.RateScope,
+			&i.Concurrency,
+			&i.UserAgentMode,
+			&i.UserAgent,
+			&i.DohUrl,
+			&i.Headers,
+			&i.SharedCookieJar,
+			&i.ConnectTimeoutMs,
+			&i.ReadTimeoutMs,
+			&i.CallTimeoutMs,
+			&i.OwnerKind,
+			&i.OwnerID,
+			&i.OwnerPlugin,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProxies = `-- name: ListProxies :many
 SELECT id, name, url, username, password_sealed, created_at, updated_at FROM network_proxies ORDER BY lower(name), id
 `
@@ -213,6 +442,85 @@ func (q *Queries) ListSolvers(ctx context.Context) ([]NetworkSolver, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateProfile = `-- name: UpdateProfile :one
+UPDATE network_profiles SET
+    name = $1, proxy_id = $2, solver_id = $3, rate_requests = $4,
+    rate_period_ms = $5, rate_burst = $6, rate_scope = $7, concurrency = $8,
+    user_agent_mode = $9, user_agent = $10, doh_url = $11, headers = $12,
+    shared_cookie_jar = $13, connect_timeout_ms = $14,
+    read_timeout_ms = $15, call_timeout_ms = $16, updated_at = now()
+WHERE id = $17
+RETURNING id, name, proxy_id, solver_id, rate_requests, rate_period_ms, rate_burst, rate_scope, concurrency, user_agent_mode, user_agent, doh_url, headers, shared_cookie_jar, connect_timeout_ms, read_timeout_ms, call_timeout_ms, owner_kind, owner_id, owner_plugin, created_at, updated_at
+`
+
+type UpdateProfileParams struct {
+	Name             string
+	ProxyID          pgtype.Text
+	SolverID         pgtype.Text
+	RateRequests     int32
+	RatePeriodMs     int32
+	RateBurst        int32
+	RateScope        string
+	Concurrency      int32
+	UserAgentMode    string
+	UserAgent        string
+	DohUrl           string
+	Headers          []byte
+	SharedCookieJar  string
+	ConnectTimeoutMs int32
+	ReadTimeoutMs    int32
+	CallTimeoutMs    int32
+	ID               string
+}
+
+func (q *Queries) UpdateProfile(ctx context.Context, arg UpdateProfileParams) (NetworkProfile, error) {
+	row := q.db.QueryRow(ctx, updateProfile,
+		arg.Name,
+		arg.ProxyID,
+		arg.SolverID,
+		arg.RateRequests,
+		arg.RatePeriodMs,
+		arg.RateBurst,
+		arg.RateScope,
+		arg.Concurrency,
+		arg.UserAgentMode,
+		arg.UserAgent,
+		arg.DohUrl,
+		arg.Headers,
+		arg.SharedCookieJar,
+		arg.ConnectTimeoutMs,
+		arg.ReadTimeoutMs,
+		arg.CallTimeoutMs,
+		arg.ID,
+	)
+	var i NetworkProfile
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ProxyID,
+		&i.SolverID,
+		&i.RateRequests,
+		&i.RatePeriodMs,
+		&i.RateBurst,
+		&i.RateScope,
+		&i.Concurrency,
+		&i.UserAgentMode,
+		&i.UserAgent,
+		&i.DohUrl,
+		&i.Headers,
+		&i.SharedCookieJar,
+		&i.ConnectTimeoutMs,
+		&i.ReadTimeoutMs,
+		&i.CallTimeoutMs,
+		&i.OwnerKind,
+		&i.OwnerID,
+		&i.OwnerPlugin,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateProxy = `-- name: UpdateProxy :one
@@ -288,6 +596,39 @@ func (q *Queries) UpdateSolver(ctx context.Context, arg UpdateSolverParams) (Net
 		&i.MaxTimeoutSeconds,
 		&i.AsResponseFallback,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertAssignment = `-- name: UpsertAssignment :one
+INSERT INTO network_assignments (target_kind, target_id, profile_id, plugin_id)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (target_kind, target_id) DO UPDATE SET
+    profile_id = EXCLUDED.profile_id, plugin_id = EXCLUDED.plugin_id, updated_at = now()
+RETURNING target_kind, target_id, profile_id, plugin_id, updated_at
+`
+
+type UpsertAssignmentParams struct {
+	TargetKind string
+	TargetID   string
+	ProfileID  pgtype.Text
+	PluginID   pgtype.Text
+}
+
+func (q *Queries) UpsertAssignment(ctx context.Context, arg UpsertAssignmentParams) (NetworkAssignment, error) {
+	row := q.db.QueryRow(ctx, upsertAssignment,
+		arg.TargetKind,
+		arg.TargetID,
+		arg.ProfileID,
+		arg.PluginID,
+	)
+	var i NetworkAssignment
+	err := row.Scan(
+		&i.TargetKind,
+		&i.TargetID,
+		&i.ProfileID,
+		&i.PluginID,
 		&i.UpdatedAt,
 	)
 	return i, err

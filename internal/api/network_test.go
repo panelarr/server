@@ -10,7 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/panelarr/source-api/sdk/plugintest"
+
 	"github.com/panelarr/server/internal/api/apigen"
+	"github.com/panelarr/server/internal/plugins/pluginstest"
 )
 
 func TestSolversAPI(t *testing.T) {
@@ -133,4 +136,133 @@ func TestProxiesAPI(t *testing.T) {
 	}
 	call[struct{}](admin, http.MethodDelete, "/api/v1/network/proxies/vpn-nl", nil, 204)
 	admin.expectProblem(http.MethodDelete, "/api/v1/network/proxies/vpn-nl", nil, 404, CodeNotFound)
+}
+
+func effectiveOf(t *testing.T, n apigen.PluginNetwork) map[string]apigen.NetworkEffective {
+	t.Helper()
+	out := map[string]apigen.NetworkEffective{}
+	for _, s := range n.Sources {
+		out[s.SourceId] = s.Effective
+	}
+	return out
+}
+
+func TestNetworkProfilesAndAssignments(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	admin, _ := h.setupAdmin()
+	call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins", map[string]string{"url": pluginstest.Serve(t, plugintest.New(), pluginKey), "api_key": pluginKey}, 201)
+	call[apigen.Solver](admin, http.MethodPost, "/api/v1/network/solvers", map[string]any{"id": "fs", "name": "FS", "type": "flaresolverr", "url": "http://fs:8191"}, 201)
+	call[apigen.Proxy](admin, http.MethodPost, "/api/v1/network/proxies", map[string]any{"id": "nl", "name": "NL", "url": "http://gluetun:8888"}, 201)
+
+	vpn := call[apigen.NetworkProfile](admin, http.MethodPost, "/api/v1/network/profiles", map[string]any{
+		"id": "vpn", "name": "VPN", "proxy_id": "nl", "solver_id": "fs",
+		"rate_limit": map[string]any{"requests": 2, "period_seconds": 1, "burst": 3, "scope": "host"}, "concurrency": 4,
+		"user_agent": map[string]any{"mode": "from_solver"}, "headers": map[string]string{"X-Test": "1"},
+		"timeouts": map[string]any{"connect_seconds": 5, "call_seconds": 30},
+	}, 201)
+	if vpn.ProxyId == nil || *vpn.ProxyId != "nl" || vpn.RateLimit == nil || vpn.RateLimit.Requests != 2 || *vpn.RateLimit.Scope != "host" ||
+		vpn.UserAgent.Mode != "from_solver" || vpn.Headers["X-Test"] != "1" || vpn.Timeouts.ConnectSeconds == nil || *vpn.Timeouts.ConnectSeconds != 5 ||
+		vpn.Timeouts.ReadSeconds != nil || vpn.Owner != nil || len(vpn.AssignedTo) != 0 {
+		t.Fatalf("vpn %+v", vpn)
+	}
+	call[apigen.NetworkProfile](admin, http.MethodPost, "/api/v1/network/profiles", map[string]any{"id": "direct", "name": "Direct"}, 201)
+	for _, bad := range []map[string]any{
+		{"id": "x", "name": "x", "proxy_id": "nope"},
+		{"id": "x", "name": "x", "user_agent": map[string]any{"mode": "from_solver"}},
+		{"id": "x", "name": "x", "user_agent": map[string]any{"mode": "fixed"}},
+	} {
+		admin.expectProblem(http.MethodPost, "/api/v1/network/profiles", bad, 400, CodeInvalidRequest)
+	}
+	admin.expectProblem(http.MethodPost, "/api/v1/network/profiles",
+		map[string]any{"id": "x", "name": "x", "owner": map[string]any{"kind": "source", "id": "fake:9999"}}, 404, CodeNotFound)
+	admin.expectProblem(http.MethodDelete, "/api/v1/network/proxies/nl", nil, 409, "in_use")
+
+	// Nothing is assigned by default: the plugin's own settings.
+	net := call[apigen.PluginNetwork](admin, http.MethodGet, "/api/v1/plugins/fake/network", nil, 200)
+	if !net.AcceptsProfiles || net.AcceptsSolver || len(net.Sources) != 2 {
+		t.Fatalf("network %+v", net)
+	}
+	for id, e := range effectiveOf(t, net) {
+		if e.Level != "none" || !e.PluginDefault {
+			t.Fatalf("%s: %+v", id, e)
+		}
+	}
+
+	// The most specific level wins.
+	assign := func(body map[string]any) apigen.NetworkAssignment {
+		return call[apigen.NetworkAssignment](admin, http.MethodPut, "/api/v1/network/assignments", body, 200)
+	}
+	assign(map[string]any{"target_kind": "global", "profile_id": "vpn"})
+	assign(map[string]any{"target_kind": "package", "target_id": "fake:example.comics", "profile_id": "direct"})
+	eff := effectiveOf(t, call[apigen.PluginNetwork](admin, http.MethodGet, "/api/v1/plugins/fake/network", nil, 200))
+	if eff["fake:1001"].Level != "package" || *eff["fake:1001"].ProfileId != "direct" || eff["fake:2001"].Level != "global" || *eff["fake:2001"].ProfileId != "vpn" {
+		t.Fatalf("effective %+v", eff)
+	}
+	pd := assign(map[string]any{"target_kind": "plugin", "target_id": "fake", "plugin_default": true})
+	if !pd.PluginDefault || pd.ProfileId != nil {
+		t.Fatalf("plugin default %+v", pd)
+	}
+	eff = effectiveOf(t, call[apigen.PluginNetwork](admin, http.MethodGet, "/api/v1/plugins/fake/network", nil, 200))
+	if eff["fake:2001"].Level != "plugin" || !eff["fake:2001"].PluginDefault || eff["fake:1001"].Level != "package" {
+		t.Fatalf("plugin default %+v", eff)
+	}
+
+	// A custom profile for one source, only for it.
+	own := call[apigen.NetworkProfile](admin, http.MethodPost, "/api/v1/network/profiles", map[string]any{
+		"id": "de-only", "name": "German source", "proxy_id": "nl", "owner": map[string]any{"kind": "source", "id": "fake:2001"},
+	}, 201)
+	if own.Owner == nil || own.Owner.Id != "fake:2001" {
+		t.Fatalf("custom %+v", own)
+	}
+	assign(map[string]any{"target_kind": "source", "target_id": "fake:2001", "profile_id": "de-only"})
+	admin.expectProblem(http.MethodPut, "/api/v1/network/assignments", map[string]any{"target_kind": "source", "target_id": "fake:1001", "profile_id": "de-only"}, 409, "profile_not_shared")
+	net = call[apigen.PluginNetwork](admin, http.MethodGet, "/api/v1/plugins/fake/network", nil, 200)
+	eff = effectiveOf(t, net)
+	if eff["fake:2001"].Level != "source" || *eff["fake:2001"].ProfileId != "de-only" || net.Assignment == nil || len(net.Packages) != 1 {
+		t.Fatalf("custom effective %+v", net)
+	}
+	if l := call[apigen.NetworkProfileList](admin, http.MethodGet, "/api/v1/network/profiles", nil, 200); len(l.Profiles) != 2 {
+		t.Fatalf("shared %+v", l)
+	}
+	if l := call[apigen.NetworkProfileList](admin, http.MethodGet, "/api/v1/network/profiles?include_custom=true", nil, 200); len(l.Profiles) != 3 {
+		t.Fatalf("all %+v", l)
+	}
+	if l := call[apigen.NetworkProfileList](admin, http.MethodGet, "/api/v1/network/profiles?owner_kind=source&owner_id=fake:2001", nil, 200); len(l.Profiles) != 1 || l.Profiles[0].Id != "de-only" {
+		t.Fatalf("owner's %+v", l)
+	}
+	if p := call[apigen.NetworkProfile](admin, http.MethodGet, "/api/v1/network/profiles/vpn", nil, 200); len(p.AssignedTo) != 1 || p.AssignedTo[0].TargetKind != "global" {
+		t.Fatalf("assigned to %+v", p.AssignedTo)
+	}
+
+	// Replacing keeps the ID and owner; parts left out go back to defaults.
+	re := call[apigen.NetworkProfile](admin, http.MethodPut, "/api/v1/network/profiles/vpn", map[string]any{"name": "VPN 2", "proxy_id": "nl"}, 200)
+	if re.Name != "VPN 2" || re.SolverId != nil || re.RateLimit != nil || len(re.AssignedTo) != 1 {
+		t.Fatalf("replaced %+v", re)
+	}
+
+	// Bad requests.
+	admin.expectProblem(http.MethodPut, "/api/v1/network/assignments", map[string]any{"target_kind": "global", "target_id": "x", "profile_id": "vpn"}, 400, CodeInvalidRequest)
+	admin.expectProblem(http.MethodPut, "/api/v1/network/assignments", map[string]any{"target_kind": "global", "profile_id": "vpn", "plugin_default": true}, 400, CodeInvalidRequest)
+	admin.expectProblem(http.MethodPut, "/api/v1/network/assignments", map[string]any{"target_kind": "source", "target_id": "fake:9999", "profile_id": "vpn"}, 404, CodeNotFound)
+	admin.expectProblem(http.MethodPut, "/api/v1/network/assignments", map[string]any{"target_kind": "global", "profile_id": "nope"}, 400, CodeInvalidRequest)
+	assign(map[string]any{"target_kind": "provider", "target_id": "books", "profile_id": "vpn"})
+	assign(map[string]any{"target_kind": "meta", "plugin_default": true})
+
+	// An assigned profile stays until unassigned.
+	admin.expectProblem(http.MethodDelete, "/api/v1/network/profiles/vpn", nil, 409, "in_use")
+	call[struct{}](admin, http.MethodDelete, "/api/v1/network/assignments?target_kind=global", nil, 204)
+	call[struct{}](admin, http.MethodDelete, "/api/v1/network/assignments?target_kind=provider&target_id=books", nil, 204)
+	admin.expectProblem(http.MethodDelete, "/api/v1/network/assignments?target_kind=global", nil, 404, CodeNotFound)
+	call[struct{}](admin, http.MethodDelete, "/api/v1/network/profiles/vpn", nil, 204)
+	if l := call[apigen.NetworkAssignmentList](admin, http.MethodGet, "/api/v1/network/assignments", nil, 200); len(l.Assignments) != 4 {
+		t.Fatalf("assignments %+v", l)
+	}
+
+	// Removing the plugin removes its custom profiles and assignments.
+	call[struct{}](admin, http.MethodDelete, "/api/v1/plugins/fake", nil, 204)
+	admin.expectProblem(http.MethodGet, "/api/v1/network/profiles/de-only", nil, 404, CodeNotFound)
+	if l := call[apigen.NetworkAssignmentList](admin, http.MethodGet, "/api/v1/network/assignments", nil, 200); len(l.Assignments) != 1 || l.Assignments[0].TargetKind != "meta" {
+		t.Fatalf("after removing the plugin %+v", l)
+	}
 }

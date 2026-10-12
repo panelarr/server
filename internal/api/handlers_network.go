@@ -6,10 +6,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/panelarr/server/internal/api/apigen"
 	"github.com/panelarr/server/internal/network"
+	"github.com/panelarr/server/internal/plugins"
 )
 
 // networkError maps the network service's errors.
@@ -26,6 +28,8 @@ func networkError(err error) error {
 		return fieldProblem("id", err.Error())
 	case errors.Is(err, network.ErrInUse):
 		return NewProblem(http.StatusConflict, "in_use", err.Error())
+	case errors.Is(err, network.ErrNotShared):
+		return NewProblem(http.StatusConflict, "profile_not_shared", err.Error())
 	case errors.As(err, &bad):
 		return fieldProblem(bad.Field, bad.Reason)
 	}
@@ -230,4 +234,261 @@ func (s *Server) TestProxy(ctx context.Context, req apigen.TestProxyRequestObjec
 		return nil, networkError(err)
 	}
 	return apigen.TestProxy200JSONResponse(toNetworkTest(r)), nil
+}
+
+func secs(f *float32) time.Duration {
+	if f == nil {
+		return 0
+	}
+	return time.Duration(float64(*f) * float64(time.Second))
+}
+
+func secsPtr(d time.Duration) *float32 {
+	if d <= 0 {
+		return nil
+	}
+	return ptr(float32(d.Seconds()))
+}
+
+// profileSettings turns the API's profile settings into the service's.
+func profileSettings(b apigen.NetworkProfileSettings) network.Profile {
+	p := network.Profile{
+		Name: b.Name, ProxyID: deref(b.ProxyId), SolverID: deref(b.SolverId), Concurrency: deref(b.Concurrency),
+		DoHURL: deref(b.DohUrl), SharedCookieJar: deref(b.SharedCookieJar), UserAgentMode: network.UAPluginDefault,
+	}
+	if b.Headers != nil {
+		p.Headers = *b.Headers
+	}
+	if rl := b.RateLimit; rl != nil {
+		p.RateLimit = &network.RateLimit{
+			Requests: rl.Requests, Period: secs(&rl.PeriodSeconds), Burst: deref(rl.Burst), Scope: "source",
+		}
+		if rl.Scope != nil {
+			p.RateLimit.Scope = string(*rl.Scope)
+		}
+	}
+	if ua := b.UserAgent; ua != nil {
+		p.UserAgentMode, p.UserAgent = string(ua.Mode), deref(ua.Value)
+	}
+	if t := b.Timeouts; t != nil {
+		p.Timeouts = network.Timeouts{Connect: secs(t.ConnectSeconds), Read: secs(t.ReadSeconds), Call: secs(t.CallSeconds)}
+	}
+	return p
+}
+
+func toNetworkProfile(p network.Profile, assigned []apigen.NetworkTarget) apigen.NetworkProfile {
+	out := apigen.NetworkProfile{
+		Id: p.ID, Name: p.Name, ProxyId: nonEmpty(p.ProxyID), SolverId: nonEmpty(p.SolverID),
+		DohUrl: nonEmpty(p.DoHURL), SharedCookieJar: nonEmpty(p.SharedCookieJar), Headers: p.Headers,
+		UserAgent: apigen.NetworkUserAgent{Mode: apigen.NetworkUserAgentMode(p.UserAgentMode), Value: nonEmpty(p.UserAgent)},
+		Timeouts: apigen.NetworkTimeouts{
+			ConnectSeconds: secsPtr(p.Timeouts.Connect), ReadSeconds: secsPtr(p.Timeouts.Read), CallSeconds: secsPtr(p.Timeouts.Call),
+		},
+		AssignedTo: assigned, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+	}
+	if out.AssignedTo == nil {
+		out.AssignedTo = []apigen.NetworkTarget{}
+	}
+	if p.Concurrency > 0 {
+		out.Concurrency = ptr(p.Concurrency)
+	}
+	if rl := p.RateLimit; rl != nil {
+		scope := apigen.NetworkRateLimitScope(rl.Scope)
+		out.RateLimit = &apigen.NetworkRateLimit{Requests: rl.Requests, PeriodSeconds: float32(rl.Period.Seconds()), Scope: &scope}
+		if rl.Burst > 0 {
+			out.RateLimit.Burst = ptr(rl.Burst)
+		}
+	}
+	if p.Owner != nil {
+		out.Owner = &apigen.ProfileOwner{Kind: apigen.ProfileOwnerKind(p.Owner.Kind), Id: p.Owner.ID}
+	}
+	return out
+}
+
+// assignedTo maps profiles to where they are assigned.
+func (s *Server) assignedTo(ctx context.Context) (map[string][]apigen.NetworkTarget, error) {
+	list, err := s.deps.Network.Assignments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]apigen.NetworkTarget{}
+	for _, a := range list {
+		if a.ProfileID != "" {
+			out[a.ProfileID] = append(out[a.ProfileID], apigen.NetworkTarget{TargetKind: apigen.NetworkTargetKind(a.Kind), TargetId: a.TargetID})
+		}
+	}
+	return out, nil
+}
+
+func (s *Server) profileResponse(ctx context.Context, p network.Profile) (apigen.NetworkProfile, error) {
+	assigned, err := s.assignedTo(ctx)
+	if err != nil {
+		return apigen.NetworkProfile{}, err
+	}
+	return toNetworkProfile(p, assigned[p.ID]), nil
+}
+
+// ListNetworkProfiles lists profiles.
+func (s *Server) ListNetworkProfiles(ctx context.Context, req apigen.ListNetworkProfilesRequestObject) (apigen.ListNetworkProfilesResponseObject, error) {
+	var owner *network.Owner
+	if req.Params.OwnerKind != nil {
+		owner = &network.Owner{Kind: string(*req.Params.OwnerKind), ID: deref(req.Params.OwnerId)}
+	}
+	list, err := s.deps.Network.Profiles(ctx, owner, deref(req.Params.IncludeCustom))
+	if err != nil {
+		return nil, err
+	}
+	assigned, err := s.assignedTo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := apigen.ListNetworkProfiles200JSONResponse{Profiles: make([]apigen.NetworkProfile, len(list))}
+	for i, p := range list {
+		out.Profiles[i] = toNetworkProfile(p, assigned[p.ID])
+	}
+	return out, nil
+}
+
+// CreateNetworkProfile adds a profile.
+func (s *Server) CreateNetworkProfile(ctx context.Context, req apigen.CreateNetworkProfileRequestObject) (apigen.CreateNetworkProfileResponseObject, error) {
+	b := req.Body
+	p := profileSettings(apigen.NetworkProfileSettings{
+		Name: b.Name, ProxyId: b.ProxyId, SolverId: b.SolverId, RateLimit: b.RateLimit, Concurrency: b.Concurrency,
+		UserAgent: b.UserAgent, DohUrl: b.DohUrl, Headers: b.Headers, SharedCookieJar: b.SharedCookieJar, Timeouts: b.Timeouts,
+	})
+	p.ID = b.Id
+	if b.Owner != nil {
+		p.Owner = &network.Owner{Kind: string(b.Owner.Kind), ID: b.Owner.Id}
+	}
+	created, err := s.deps.Network.CreateProfile(ctx, p)
+	if err != nil {
+		return nil, networkError(err)
+	}
+	return apigen.CreateNetworkProfile201JSONResponse(toNetworkProfile(created, nil)), nil
+}
+
+// GetNetworkProfile returns a profile.
+func (s *Server) GetNetworkProfile(ctx context.Context, req apigen.GetNetworkProfileRequestObject) (apigen.GetNetworkProfileResponseObject, error) {
+	p, err := s.deps.Network.Profile(ctx, req.ProfileId)
+	if err != nil {
+		return nil, networkError(err)
+	}
+	out, err := s.profileResponse(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.GetNetworkProfile200JSONResponse(out), nil
+}
+
+// ReplaceNetworkProfile replaces a profile's settings.
+func (s *Server) ReplaceNetworkProfile(ctx context.Context, req apigen.ReplaceNetworkProfileRequestObject) (apigen.ReplaceNetworkProfileResponseObject, error) {
+	p, err := s.deps.Network.ReplaceProfile(ctx, req.ProfileId, profileSettings(*req.Body))
+	if err != nil {
+		return nil, networkError(err)
+	}
+	out, err := s.profileResponse(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.ReplaceNetworkProfile200JSONResponse(out), nil
+}
+
+// DeleteNetworkProfile removes a profile.
+func (s *Server) DeleteNetworkProfile(ctx context.Context, req apigen.DeleteNetworkProfileRequestObject) (apigen.DeleteNetworkProfileResponseObject, error) {
+	if err := s.deps.Network.DeleteProfile(ctx, req.ProfileId); err != nil {
+		return nil, networkError(err)
+	}
+	return apigen.DeleteNetworkProfile204Response{}, nil
+}
+
+func toAssignment(a network.Assignment) apigen.NetworkAssignment {
+	return apigen.NetworkAssignment{
+		TargetKind: apigen.NetworkTargetKind(a.Kind), TargetId: a.TargetID, ProfileId: nonEmpty(a.ProfileID),
+		PluginDefault: a.PluginDefault(), UpdatedAt: a.UpdatedAt,
+	}
+}
+
+// ListNetworkAssignments lists the assignments.
+func (s *Server) ListNetworkAssignments(ctx context.Context, _ apigen.ListNetworkAssignmentsRequestObject) (apigen.ListNetworkAssignmentsResponseObject, error) {
+	list, err := s.deps.Network.Assignments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := apigen.ListNetworkAssignments200JSONResponse{Assignments: make([]apigen.NetworkAssignment, len(list))}
+	for i, a := range list {
+		out.Assignments[i] = toAssignment(a)
+	}
+	return out, nil
+}
+
+// AssignNetworkProfile assigns a profile at a level.
+func (s *Server) AssignNetworkProfile(ctx context.Context, req apigen.AssignNetworkProfileRequestObject) (apigen.AssignNetworkProfileResponseObject, error) {
+	b := req.Body
+	if (b.ProfileId != nil) == deref(b.PluginDefault) {
+		return nil, fieldProblem("profile_id", "give profile_id, or plugin_default: true")
+	}
+	a, err := s.deps.Network.Assign(ctx, string(b.TargetKind), deref(b.TargetId), deref(b.ProfileId))
+	if err != nil {
+		return nil, networkError(err)
+	}
+	return apigen.AssignNetworkProfile200JSONResponse(toAssignment(a)), nil
+}
+
+// UnassignNetworkProfile removes an assignment.
+func (s *Server) UnassignNetworkProfile(ctx context.Context, req apigen.UnassignNetworkProfileRequestObject) (apigen.UnassignNetworkProfileResponseObject, error) {
+	if err := s.deps.Network.Unassign(ctx, string(req.Params.TargetKind), deref(req.Params.TargetId)); err != nil {
+		return nil, networkError(err)
+	}
+	return apigen.UnassignNetworkProfile204Response{}, nil
+}
+
+func toEffective(e network.Effective) apigen.NetworkEffective {
+	return apigen.NetworkEffective{Level: apigen.NetworkEffectiveLevel(e.Level), ProfileId: nonEmpty(e.ProfileID), PluginDefault: e.ProfileID == ""}
+}
+
+// GetPluginNetwork shows the profile in force for each of a plugin's
+// sources.
+func (s *Server) GetPluginNetwork(ctx context.Context, req apigen.GetPluginNetworkRequestObject) (apigen.GetPluginNetworkResponseObject, error) {
+	pl, err := s.deps.Plugins.Get(ctx, req.PluginId)
+	if err != nil {
+		return nil, pluginError(ctx, err)
+	}
+	res, err := s.deps.Network.Resolver(ctx)
+	if err != nil {
+		return nil, err
+	}
+	srcs, err := s.deps.Plugins.Sources(ctx, s.sourceViewer(ctx), true)
+	if err != nil {
+		return nil, err
+	}
+	out := apigen.GetPluginNetwork200JSONResponse{
+		PluginId: pl.ID, AcceptsProfiles: plugins.AcceptsProfiles(pl.Info), AcceptsSolver: plugins.AcceptsSolver(pl.Info),
+		Packages: []apigen.NetworkAssignment{}, Sources: []apigen.SourceNetwork{},
+	}
+	if a, ok := res.Assigned(network.KindPlugin, pl.ID); ok {
+		out.Assignment = ptr(toAssignment(a))
+	}
+	all, err := s.deps.Network.Assignments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range all {
+		if a.Kind == network.KindPackage && strings.HasPrefix(a.TargetID, pl.ID+":") {
+			out.Packages = append(out.Packages, toAssignment(a))
+		}
+	}
+	for _, src := range srcs {
+		if src.PluginID != pl.ID {
+			continue
+		}
+		sn := apigen.SourceNetwork{
+			SourceId: src.ID, Name: src.Name, Lang: nonEmpty(src.Lang), PackageId: nonEmpty(src.PackageID), Present: ptr(src.Present),
+			Effective: toEffective(res.Source(src.ID, pl.ID, src.PackageID)),
+		}
+		if a, ok := res.Assigned(network.KindSource, src.ID); ok {
+			sn.Assignment = ptr(toAssignment(a))
+		}
+		out.Sources = append(out.Sources, sn)
+	}
+	return out, nil
 }

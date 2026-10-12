@@ -53,6 +53,11 @@ type Fake struct {
 	via []string
 	// pushed are network profiles pushed per provider; unsupported are
 	// providers whose plugin takes no profiles.
+	// pairs are suspected duplicates; judge the decision model settings
+	// (judgeKey its API key, never returned).
+	pairs    []*metav1.DuplicatePair
+	judge    *metav1.DecisionJudgeSettings
+	judgeKey string
 	// syncRuns are the sync runs started, oldest first.
 	syncRuns []*metav1.SyncRun
 	// jobs and runs are meta's own jobs (not syncs), runs newest last.
@@ -74,6 +79,7 @@ func New(t testing.TB) *Fake {
 	mux.Handle(metav1connect.NewMetaClientsServiceHandler(&clientsHandler{f: f}, opts))
 	mux.Handle(metav1connect.NewMetaJobsServiceHandler(&jobsHandler{f: f}, opts))
 	mux.Handle(metav1connect.NewMetaIntegrationsServiceHandler(&integrationsHandler{f: f}, opts))
+	mux.Handle(metav1connect.NewMetaDuplicatesServiceHandler(&duplicatesHandler{f: f}, opts))
 	// Down means no answer at all: the connection is cut.
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -702,4 +708,171 @@ func (h *jobsHandler) CancelJobRun(ctx context.Context, req *connect.Request[met
 	}
 	r.Summary.Status, r.Summary.FinishedAt, r.Summary.Message = metav1.JobRunStatus_JOB_RUN_STATUS_CANCELLED, timestamppb.Now(), "cancelled"
 	return connect.NewResponse(&metav1.CancelJobRunResponse{Run: r.GetSummary()}), nil
+}
+
+// AddPair adds a suspected duplicate pair of two entries (open).
+func (f *Fake) AddPair(id int64, a, b string, score float64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pairs = append(f.pairs, &metav1.DuplicatePair{
+		Id: id, EntryA: &metav1.EntrySummary{Id: a, Title: a}, EntryB: &metav1.EntrySummary{Id: b, Title: b},
+		Status: metav1.DuplicateStatus_DUPLICATE_STATUS_OPEN, Score: score, CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now(),
+		Signals: &metav1.DuplicateSignals{Title: 1, TitleA: a, TitleB: b, People: 0.5, SharedPeople: []string{"A. Author"}, YearA: 2020, YearB: 2020},
+	})
+}
+
+// JudgeKey is the decision model's stored API key.
+func (f *Fake) JudgeKey() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.judgeKey
+}
+
+type duplicatesHandler struct {
+	metav1connect.UnimplementedMetaDuplicatesServiceHandler
+	f *Fake
+}
+
+func (h *duplicatesHandler) pair(id int64) *metav1.DuplicatePair {
+	for _, p := range h.f.pairs {
+		if p.GetId() == id {
+			return p
+		}
+	}
+	return nil
+}
+
+func (h *duplicatesHandler) ListDuplicates(ctx context.Context, req *connect.Request[metav1.ListDuplicatesRequest]) (*connect.Response[metav1.ListDuplicatesResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	if n := req.Msg.GetPageSize(); n > 100 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("page_size is at most 100"))
+	}
+	status := req.Msg.GetStatus()
+	if status == metav1.DuplicateStatus_DUPLICATE_STATUS_UNSPECIFIED {
+		status = metav1.DuplicateStatus_DUPLICATE_STATUS_OPEN
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	res := &metav1.ListDuplicatesResponse{}
+	for _, p := range h.f.pairs {
+		if p.GetStatus() == status && p.GetScore() >= req.Msg.GetMinScore() && (!req.Msg.GetJudgedOnly() || p.GetVerdict() != nil) {
+			res.Pairs = append(res.Pairs, p)
+		}
+	}
+	res.TotalSize = int64(len(res.Pairs))
+	return connect.NewResponse(res), nil
+}
+
+func (h *duplicatesHandler) GetDuplicate(ctx context.Context, req *connect.Request[metav1.GetDuplicateRequest]) (*connect.Response[metav1.GetDuplicateResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	p := h.pair(req.Msg.GetId())
+	if p == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("no such pair"))
+	}
+	return connect.NewResponse(&metav1.GetDuplicateResponse{Pair: p}), nil
+}
+
+func (h *duplicatesHandler) decide(ctx context.Context, id int64, from, to metav1.DuplicateStatus, note string) (*metav1.DuplicatePair, error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	p := h.pair(id)
+	if p == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("no such pair"))
+	}
+	if p.GetStatus() != from {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("the pair is "+p.GetStatus().String()))
+	}
+	p.Status, p.Note, p.DecidedBy, p.DecidedAt = to, note, "test client", timestamppb.Now()
+	return p, nil
+}
+
+func (h *duplicatesHandler) ConfirmDuplicate(ctx context.Context, req *connect.Request[metav1.ConfirmDuplicateRequest]) (*connect.Response[metav1.ConfirmDuplicateResponse], error) {
+	p, err := h.decide(ctx, req.Msg.GetId(), metav1.DuplicateStatus_DUPLICATE_STATUS_OPEN, metav1.DuplicateStatus_DUPLICATE_STATUS_CONFIRMED, req.Msg.GetNote())
+	if err != nil {
+		return nil, err
+	}
+	keep := p.GetEntryA().GetId()
+	if req.Msg.GetKeep() == "b" {
+		keep = p.GetEntryB().GetId()
+	}
+	return connect.NewResponse(&metav1.ConfirmDuplicateResponse{Pair: p, EntryId: keep}), nil
+}
+
+func (h *duplicatesHandler) DismissDuplicate(ctx context.Context, req *connect.Request[metav1.DismissDuplicateRequest]) (*connect.Response[metav1.DismissDuplicateResponse], error) {
+	p, err := h.decide(ctx, req.Msg.GetId(), metav1.DuplicateStatus_DUPLICATE_STATUS_OPEN, metav1.DuplicateStatus_DUPLICATE_STATUS_DISMISSED, req.Msg.GetNote())
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&metav1.DismissDuplicateResponse{Pair: p}), nil
+}
+
+func (h *duplicatesHandler) ReopenDuplicate(ctx context.Context, req *connect.Request[metav1.ReopenDuplicateRequest]) (*connect.Response[metav1.ReopenDuplicateResponse], error) {
+	p, err := h.decide(ctx, req.Msg.GetId(), metav1.DuplicateStatus_DUPLICATE_STATUS_DISMISSED, metav1.DuplicateStatus_DUPLICATE_STATUS_OPEN, "")
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&metav1.ReopenDuplicateResponse{Pair: p}), nil
+}
+
+// judgeShown is the judge as meta returns it; call with f.mu held.
+func (h *duplicatesHandler) judgeShown() *metav1.DecisionJudgeSettings {
+	if h.f.judge == nil {
+		return &metav1.DecisionJudgeSettings{Kind: "local", Origin: "config"}
+	}
+	out := proto.Clone(h.f.judge).(*metav1.DecisionJudgeSettings)
+	out.ApiKey, out.HasApiKey, out.Origin = "", h.f.judgeKey != "", "admin"
+	return out
+}
+
+func (h *duplicatesHandler) GetDecisionJudge(ctx context.Context, _ *connect.Request[metav1.GetDecisionJudgeRequest]) (*connect.Response[metav1.GetDecisionJudgeResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	return connect.NewResponse(&metav1.GetDecisionJudgeResponse{Settings: h.judgeShown()}), nil
+}
+
+func (h *duplicatesHandler) PutDecisionJudge(ctx context.Context, req *connect.Request[metav1.PutDecisionJudgeRequest]) (*connect.Response[metav1.PutDecisionJudgeResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	h.f.judge = proto.Clone(req.Msg.GetSettings()).(*metav1.DecisionJudgeSettings)
+	if k := req.Msg.GetSettings().GetApiKey(); k != "" {
+		h.f.judgeKey = k
+	}
+	return connect.NewResponse(&metav1.PutDecisionJudgeResponse{Settings: h.judgeShown()}), nil
+}
+
+func (h *duplicatesHandler) TestDecisionJudge(ctx context.Context, req *connect.Request[metav1.TestDecisionJudgeRequest]) (*connect.Response[metav1.TestDecisionJudgeResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	if req.Msg.GetSettings().GetKind() == "broken" {
+		return connect.NewResponse(&metav1.TestDecisionJudgeResponse{Error: "the model didn't answer"}), nil
+	}
+	return connect.NewResponse(&metav1.TestDecisionJudgeResponse{Ok: true, Verdict: &metav1.DuplicateVerdict{
+		Judge: req.Msg.GetSettings().GetKind(), Same: 0.9, Choice: "same_work", Probabilities: map[string]float64{"same_work": 0.9, "different": 0.1},
+	}}), nil
+}
+
+func (h *duplicatesHandler) ResetDecisionJudge(ctx context.Context, _ *connect.Request[metav1.ResetDecisionJudgeRequest]) (*connect.Response[metav1.ResetDecisionJudgeResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	h.f.judge, h.f.judgeKey = nil, ""
+	return connect.NewResponse(&metav1.ResetDecisionJudgeResponse{Settings: h.judgeShown()}), nil
 }

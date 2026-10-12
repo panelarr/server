@@ -1742,6 +1742,226 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /system/meta/duplicates:
+    get:
+      operationId: listMetaDuplicates
+      tags: [meta]
+      summary: Pairs of catalogue entries the metadata service suspects are one work
+      description: Open pairs by default. Confirming merges a pair for good; dismissing marks them different works (reopen takes that back).
+      x-panelarr-access: admin
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, confirmed, dismissed]
+        - name: min_score
+          in: query
+          schema:
+            type: number
+            minimum: 0
+            maximum: 1
+        - name: judged_only
+          in: query
+          description: Only pairs the decision model rated.
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/PageToken"
+      responses:
+        "200":
+          description: A page of pairs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicatePage"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/duplicates/{pair_id}:
+    get:
+      operationId: getMetaDuplicate
+      tags: [meta]
+      summary: One pair, both entries side by side
+      x-panelarr-access: admin
+      parameters:
+        - name: pair_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: The pair.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicatePair"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/duplicates/{pair_id}/confirm:
+    post:
+      operationId: confirmMetaDuplicate
+      tags: [meta]
+      summary: Merge a pair into one entry
+      description: "Can't be undone: the other entry's records move over and its ID points to the one that stays. Ask the admin to confirm first."
+      x-panelarr-access: admin
+      parameters:
+        - name: pair_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmDuplicateRequest"
+      responses:
+        "200":
+          description: Merged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfirmedDuplicate"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/duplicates/{pair_id}/dismiss:
+    post:
+      operationId: dismissMetaDuplicate
+      tags: [meta]
+      summary: Mark a pair as different works
+      x-panelarr-access: admin
+      parameters:
+        - name: pair_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DuplicateNote"
+      responses:
+        "200":
+          description: Dismissed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicatePair"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/duplicates/{pair_id}/reopen:
+    post:
+      operationId: reopenMetaDuplicate
+      tags: [meta]
+      summary: Take back a dismissal
+      description: "Only dismissed pairs (`409`, code `pair_decided`, for others)."
+      x-panelarr-access: admin
+      parameters:
+        - name: pair_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: Open again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicatePair"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/duplicate-judge:
+    get:
+      operationId: getMetaDuplicateJudge
+      tags: [meta]
+      summary: The decision model that rates duplicate pairs
+      description: Its API key is never returned (`has_api_key`).
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The settings in force.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicateJudge"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: putMetaDuplicateJudge
+      tags: [meta]
+      summary: Save the decision model settings
+      description: They win over meta's configuration until reset. An empty API key keeps the stored one. Off by default; nothing is sent to a model until it's on.
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DuplicateJudgeSettings"
+      responses:
+        "200":
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicateJudge"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/duplicate-judge/test:
+    post:
+      operationId: testMetaDuplicateJudge
+      tags: [meta]
+      summary: Ask the model about a made-up pair, without saving
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DuplicateJudgeSettings"
+      responses:
+        "200":
+          description: How it went.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicateJudgeTest"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/duplicate-judge/reset:
+    post:
+      operationId: resetMetaDuplicateJudge
+      tags: [meta]
+      summary: Forget the saved settings; meta's configuration applies again
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The settings in force now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicateJudge"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /system/meta/jobs:
     get:
       operationId: listMetaJobs
@@ -5770,6 +5990,193 @@ components:
           additionalProperties:
             type: string
           description: Providers that failed, with the reason.
+    DuplicatePage:
+      type: object
+      required: [pairs, next_page_token, total_size]
+      properties:
+        pairs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DuplicatePair"
+        next_page_token:
+          type: string
+        total_size:
+          type: integer
+          format: int64
+    DuplicatePair:
+      type: object
+      required: [id, entry_a, entry_b, status, score, signals, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        entry_a:
+          $ref: "#/components/schemas/CatalogEntrySummary"
+        entry_b:
+          $ref: "#/components/schemas/CatalogEntrySummary"
+        status:
+          type: string
+          enum: [open, confirmed, dismissed, unknown]
+        score:
+          type: number
+          description: 0..1, how likely meta's own comparison thinks the two are one work.
+        signals:
+          $ref: "#/components/schemas/DuplicateSignals"
+        verdict:
+          $ref: "#/components/schemas/DuplicateVerdict"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        decided_at:
+          type: string
+          format: date-time
+        decided_by:
+          type: string
+        note:
+          type: string
+    DuplicateSignals:
+      type: object
+      required: [title, people, shared_people, shared_ids, same_provider]
+      properties:
+        title:
+          type: number
+          description: Best title similarity (1 is the same normalized title).
+        title_a:
+          type: string
+        title_b:
+          type: string
+        people:
+          type: number
+          description: Share of credited people in common (0..1); -1 when a side has none.
+        shared_people:
+          type: array
+          items:
+            type: string
+        year_a:
+          type: integer
+        year_b:
+          type: integer
+        type_a:
+          type: string
+        type_b:
+          type: string
+        language_a:
+          type: string
+        language_b:
+          type: string
+        shared_ids:
+          type: array
+          description: IDs at another site both report.
+          items:
+            type: string
+        same_provider:
+          type: boolean
+    DuplicateVerdict:
+      type: object
+      required: [judge, same, choice, probabilities]
+      properties:
+        judge:
+          type: string
+        model:
+          type: string
+        same:
+          type: number
+          description: Probability that the two are one work.
+        choice:
+          type: string
+          description: same_work, related_work or different.
+        probabilities:
+          type: object
+          additionalProperties:
+            type: number
+        confidence:
+          type: number
+        tokens:
+          type: integer
+          format: int64
+        at:
+          type: string
+          format: date-time
+    ConfirmDuplicateRequest:
+      type: object
+      properties:
+        keep:
+          type: string
+          enum: [a, b]
+          description: The entry that stays; absent keeps the more popular one.
+        note:
+          type: string
+          maxLength: 2000
+    DuplicateNote:
+      type: object
+      properties:
+        note:
+          type: string
+          maxLength: 2000
+    ConfirmedDuplicate:
+      type: object
+      required: [pair, entry_id]
+      properties:
+        pair:
+          $ref: "#/components/schemas/DuplicatePair"
+        entry_id:
+          type: string
+          description: The entry the two are now.
+    DuplicateJudge:
+      type: object
+      required: [enabled, kind, has_api_key, covers, origin]
+      properties:
+        enabled:
+          type: boolean
+        kind:
+          type: string
+          description: The kind of model service, as meta names it.
+        url:
+          type: string
+        model:
+          type: string
+        has_api_key:
+          type: boolean
+        covers:
+          type: boolean
+          description: Send cover images to models that take them.
+        origin:
+          type: string
+          description: Where the settings come from, "config" or "admin".
+    DuplicateJudgeSettings:
+      type: object
+      required: [enabled, kind]
+      properties:
+        enabled:
+          type: boolean
+        kind:
+          type: string
+          maxLength: 100
+        url:
+          type: string
+          maxLength: 2000
+        model:
+          type: string
+          maxLength: 200
+        api_key:
+          type: string
+          maxLength: 2000
+          description: Never returned; empty keeps the stored one.
+        covers:
+          type: boolean
+    DuplicateJudgeTest:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        error:
+          type: string
+        verdict:
+          $ref: "#/components/schemas/DuplicateVerdict"
     SeriesMatchRef:
       type: object
       description: How a work already knows a series.

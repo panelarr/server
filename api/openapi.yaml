@@ -1641,6 +1641,126 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /system/meta/jobs:
+    get:
+      operationId: listMetaJobs
+      tags: [meta]
+      summary: The metadata service's background jobs
+      description: "meta's jobs, in the same shape as the server's own (`/jobs`). Calls meta: `503` when it isn't connected or can't be reached. Schedules are set in meta's configuration and shown read-only (`schedule.source`)."
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The jobs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/jobs/{job_id}:
+    get:
+      operationId: getMetaJob
+      tags: [meta]
+      summary: One of the metadata service's jobs
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: The job.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/jobs/{job_id}/runs:
+    get:
+      operationId: listMetaJobRuns
+      tags: [meta]
+      summary: A metadata service job's runs, newest first
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/PageToken"
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/JobRunStatus'
+      responses:
+        "200":
+          description: A page of runs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRunList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/jobs/{job_id}/run:
+    post:
+      operationId: runMetaJob
+      tags: [meta]
+      summary: Run one of the metadata service's jobs now
+      description: "`409`, code `already_running`, with `current_run_id`, when it runs already; e.g. `search-rebuild` rebuilds the search index."
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunJobRequest"
+      responses:
+        "202":
+          description: Started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRunSummary"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/job-runs/{run_id}:
+    get:
+      operationId: getMetaJobRun
+      tags: [meta]
+      summary: One run of a metadata service job, in full
+      description: No events come for meta's runs; poll while it runs.
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRun"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/job-runs/{run_id}/cancel:
+    post:
+      operationId: cancelMetaJobRun
+      tags: [meta]
+      summary: Cancel a running run of a metadata service job
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "202":
+          description: Cancelling.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRunSummary"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /sources/{source_id}/settings:
     parameters:
       - $ref: "#/components/parameters/SourceId"
@@ -4226,6 +4346,9 @@ components:
         interval_seconds:
           type: integer
           description: Absent for jobs run by hand only.
+        cron:
+          type: string
+          description: A cron schedule (the connected services' jobs); absent otherwise.
         enabled:
           type: boolean
         source:

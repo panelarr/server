@@ -10,10 +10,13 @@ import (
 	"strconv"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 
+	sourcev1 "github.com/panelarr/source-api/gen/panelarr/source/v1"
 	"github.com/panelarr/source-api/sdk/plugin"
 
 	"github.com/panelarr/server/internal/api/apigen"
+	"github.com/panelarr/server/internal/auth"
 	"github.com/panelarr/server/internal/plugins"
 )
 
@@ -42,6 +45,12 @@ func pluginError(ctx context.Context, err error) error {
 		return NewProblem(http.StatusBadRequest, CodeInvalidRequest, err.Error())
 	case errors.Is(err, plugins.ErrUnsupported):
 		return NewProblem(http.StatusUnprocessableEntity, "unsupported", "the source doesn't support this")
+	case errors.Is(err, plugins.ErrNoPackages):
+		return NewProblem(http.StatusUnprocessableEntity, "no_packages", "the plugin doesn't install packages")
+	case errors.As(err, &pe) && pe.Reason == plugin.ReasonStoreFetchFailed:
+		return NewProblem(http.StatusBadGateway, "store_fetch_failed", pe.Message)
+	case errors.As(err, &pe) && pe.Reason == plugin.ReasonStoreInvalid:
+		return NewProblem(http.StatusBadGateway, "store_invalid", pe.Message)
 	case errors.As(err, &pe):
 		switch pe.Code {
 		case plugin.CodeInvalidArgument:
@@ -179,4 +188,121 @@ func (s *Server) SetPluginConfig(ctx context.Context, req apigen.SetPluginConfig
 		return nil, pluginError(ctx, err)
 	}
 	return apigen.SetPluginConfig200JSONResponse(toPluginConfig(c)), nil
+}
+
+func toPackage(pluginID string, p *sourcev1.Package, task *uuid.UUID) apigen.Package {
+	out := apigen.Package{
+		Id: p.GetId(), Name: p.GetName(), Langs: nonNil(p.GetLangs()), Version: p.GetVersion(),
+		Installed: p.GetInstalled(), InstalledVersion: nonEmpty(p.GetInstalledVersion()),
+		UpdateAvailable: p.GetUpdateAvailable(), ContentRating: apigen.PackageContentRating(plugins.RatingName(p.GetContentRating())),
+		Supported: p.GetSupported(), Offers: []apigen.PackageOffer{}, Sources: []apigen.PackageSource{},
+		EnabledLangs: nonNil(p.GetSettings().GetEnabledLangs()), Error: nonEmpty(p.GetError()), TaskId: task,
+	}
+	for _, o := range p.GetOffers() {
+		out.Offers = append(out.Offers, apigen.PackageOffer{
+			OriginId: o.GetOriginId(), OriginName: o.GetOriginName(), Version: o.GetVersion(), Supported: o.GetSupported(),
+		})
+	}
+	for _, src := range p.GetSources() {
+		out.Sources = append(out.Sources, apigen.PackageSource{
+			Id: pluginID + ":" + src.GetId(), Name: src.GetName(), Lang: src.GetLang(), Available: src.GetAvailable(),
+		})
+	}
+	return out
+}
+
+// pendingTask is the queued or running task of a package, if any.
+func pendingTask(pending map[string]uuid.UUID, pkg string) *uuid.UUID {
+	if id, ok := pending[pkg]; ok {
+		return &id
+	}
+	return nil
+}
+
+// ListPackages lists what a plugin offers and has installed.
+func (s *Server) ListPackages(ctx context.Context, req apigen.ListPackagesRequestObject) (apigen.ListPackagesResponseObject, error) {
+	pr := req.Params
+	list, err := s.deps.Plugins.Packages(ctx, req.PluginId, plugins.PackageQuery{
+		Query: deref(pr.Q), Lang: deref(pr.Lang), OriginID: deref(pr.OriginId),
+		InstalledOnly: deref(pr.Installed), UpdatesOnly: deref(pr.Updates),
+	})
+	if err != nil {
+		return nil, pluginError(ctx, err)
+	}
+	pending, err := s.deps.Plugins.PendingPackageTasks(ctx, req.PluginId)
+	if err != nil {
+		return nil, err
+	}
+	out := apigen.ListPackages200JSONResponse{Packages: make([]apigen.Package, len(list))}
+	for i, p := range list {
+		out.Packages[i] = toPackage(req.PluginId, p, pendingTask(pending, p.GetId()))
+	}
+	return out, nil
+}
+
+// GetPackage returns one of a plugin's packages.
+func (s *Server) GetPackage(ctx context.Context, req apigen.GetPackageRequestObject) (apigen.GetPackageResponseObject, error) {
+	p, err := s.deps.Plugins.Package(ctx, req.PluginId, req.PackageId)
+	if err != nil {
+		return nil, pluginError(ctx, err)
+	}
+	pending, err := s.deps.Plugins.PendingPackageTasks(ctx, req.PluginId)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.GetPackage200JSONResponse(toPackage(req.PluginId, p, pendingTask(pending, p.GetId()))), nil
+}
+
+func (s *Server) queuePackage(ctx context.Context, pluginID, pkg, action, origin string) (apigen.TaskRef, error) {
+	t, err := s.deps.Plugins.QueuePackage(ctx, auth.FromContext(ctx).User.ID, plugins.PackagePayload{
+		PluginID: pluginID, PackageID: pkg, Action: action, OriginID: origin,
+	})
+	if err != nil {
+		return apigen.TaskRef{}, pluginError(ctx, err)
+	}
+	return apigen.TaskRef{TaskId: t.ID}, nil
+}
+
+// InstallPackage queues installing a package.
+func (s *Server) InstallPackage(ctx context.Context, req apigen.InstallPackageRequestObject) (apigen.InstallPackageResponseObject, error) {
+	origin := ""
+	if req.Body != nil {
+		origin = deref(req.Body.OriginId)
+	}
+	ref, err := s.queuePackage(ctx, req.PluginId, req.PackageId, plugins.ActionInstall, origin)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.InstallPackage202JSONResponse(ref), nil
+}
+
+// UpdatePackage queues updating a package.
+func (s *Server) UpdatePackage(ctx context.Context, req apigen.UpdatePackageRequestObject) (apigen.UpdatePackageResponseObject, error) {
+	ref, err := s.queuePackage(ctx, req.PluginId, req.PackageId, plugins.ActionUpdate, "")
+	if err != nil {
+		return nil, err
+	}
+	return apigen.UpdatePackage202JSONResponse(ref), nil
+}
+
+// UninstallPackage queues uninstalling a package.
+func (s *Server) UninstallPackage(ctx context.Context, req apigen.UninstallPackageRequestObject) (apigen.UninstallPackageResponseObject, error) {
+	ref, err := s.queuePackage(ctx, req.PluginId, req.PackageId, plugins.ActionUninstall, "")
+	if err != nil {
+		return nil, err
+	}
+	return apigen.UninstallPackage202JSONResponse(ref), nil
+}
+
+// SetPackageLanguages chooses a package's languages.
+func (s *Server) SetPackageLanguages(ctx context.Context, req apigen.SetPackageLanguagesRequestObject) (apigen.SetPackageLanguagesResponseObject, error) {
+	p, err := s.deps.Plugins.SetPackageLanguages(ctx, req.PluginId, req.PackageId, req.Body.EnabledLangs)
+	if err != nil {
+		return nil, pluginError(ctx, err)
+	}
+	pending, err := s.deps.Plugins.PendingPackageTasks(ctx, req.PluginId)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.SetPackageLanguages200JSONResponse(toPackage(req.PluginId, p, pendingTask(pending, p.GetId()))), nil
 }

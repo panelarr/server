@@ -54,10 +54,15 @@ func (s *Server) toSourceInfo(src plugins.Source) apigen.SourceInfo {
 		ContentRating: apigen.SourceInfoContentRating(src.ContentRating),
 		IconUrl:       s.imageURL(src.ID, src.IconUrl), HomeUrl: nonEmpty(src.HomeUrl),
 		Capabilities: nonNil(src.Capabilities), Enabled: src.Enabled, Present: src.Present,
+		PackageId: nonEmpty(src.PackageID), PackageName: nonEmpty(src.PackageName),
 		Health: apigen.SourceHealth{
 			Status: apigen.SourceHealthStatus(src.Health), Reason: nonEmpty(src.HealthReason),
 			Message: nonEmpty(src.HealthMessage), CheckedAt: src.HealthCheckedAt,
 		},
+	}
+	if !src.Present && src.UnavailableReason != "" {
+		r := apigen.SourceInfoUnavailableReason(src.UnavailableReason)
+		out.UnavailableReason = &r
 	}
 	return out
 }
@@ -73,6 +78,7 @@ func (s *Server) ListSources(ctx context.Context, req apigen.ListSourcesRequestO
 		pr := req.Params
 		if (pr.Lang != nil && *pr.Lang != "" && src.Lang != *pr.Lang) ||
 			(pr.PluginId != nil && src.PluginID != *pr.PluginId) ||
+			(pr.PackageId != nil && src.PackageID != *pr.PackageId) ||
 			(pr.Enabled != nil && src.Enabled != *pr.Enabled) ||
 			(pr.Present != nil && src.Present != *pr.Present) {
 			continue

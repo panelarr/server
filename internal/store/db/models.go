@@ -135,23 +135,26 @@ type Setting struct {
 }
 
 type Source struct {
-	ID              string
-	PluginID        string
-	SourceID        string
-	Name            string
-	Lang            string
-	ContentRating   string
-	IconUrl         string
-	HomeUrl         string
-	Capabilities    []string
-	Health          string
-	HealthReason    string
-	HealthMessage   string
-	HealthCheckedAt *time.Time
-	Enabled         bool
-	Present         bool
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                string
+	PluginID          string
+	SourceID          string
+	Name              string
+	Lang              string
+	ContentRating     string
+	IconUrl           string
+	HomeUrl           string
+	Capabilities      []string
+	Health            string
+	HealthReason      string
+	HealthMessage     string
+	HealthCheckedAt   *time.Time
+	Enabled           bool
+	Present           bool
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	PackageID         string
+	PackageName       string
+	UnavailableReason string
 }
 
 type SourceChapter struct {

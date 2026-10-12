@@ -924,6 +924,175 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /plugins/{plugin_id}/packages:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+    get:
+      operationId: listPackages
+      tags: [plugins]
+      summary: The packages a plugin offers and has installed
+      description: |
+        For plugins that host many sites, packages (e.g. extensions from
+        the stores in the plugin's settings) provide its sources. One list,
+        filtered by the plugin. Rows with an install, update or uninstall
+        queued or running carry its `task_id`. Needs a plugin with the `packages` capability (else `422`, code `no_packages`) that is turned on (else `409`, code `plugin_disabled`).
+      x-panelarr-access: admin
+      parameters:
+        - name: q
+          in: query
+          description: Matches the package's or its sources' names.
+          schema:
+            type: string
+            maxLength: 200
+        - name: lang
+          in: query
+          description: Only packages with a source in this language.
+          schema:
+            type: string
+            maxLength: 35
+        - name: installed
+          in: query
+          description: Only installed packages.
+          schema:
+            type: boolean
+        - name: updates
+          in: query
+          description: Only installed packages with an update.
+          schema:
+            type: boolean
+        - name: origin_id
+          in: query
+          description: Only packages this origin (e.g. a store) offers.
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        "200":
+          description: The packages.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackageList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}/packages/{package_id}:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+      - $ref: "#/components/parameters/PackageId"
+    get:
+      operationId: getPackage
+      tags: [plugins]
+      summary: One of a plugin's packages
+      description: "Needs a plugin with the `packages` capability (else `422`, code `no_packages`) that is turned on (else `409`, code `plugin_disabled`)."
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The package.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Package"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: uninstallPackage
+      tags: [plugins]
+      summary: Uninstall a package
+      description: |
+        Queues the uninstall as a `plugin.package` task (progress on the
+        task's events). Its sources become absent: works keep their series
+        and chapters, and read from other sources meanwhile. Needs a plugin with the `packages` capability (else `422`, code `no_packages`) that is turned on (else `409`, code `plugin_disabled`).
+      x-panelarr-access: admin
+      responses:
+        "202":
+          description: Queued (or already queued).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRef"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}/packages/{package_id}/install:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+      - $ref: "#/components/parameters/PackageId"
+    post:
+      operationId: installPackage
+      tags: [plugins]
+      summary: Install a package
+      description: |
+        Queues the install as a `plugin.package` task; the plugin checks
+        the package (signature, checksum) and the task fails with its
+        reason when it doesn't pass. The plugin is synced when it's done,
+        so the package's sources appear within seconds. Needs a plugin with the `packages` capability (else `422`, code `no_packages`) that is turned on (else `409`, code `plugin_disabled`).
+      x-panelarr-access: admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallPackageRequest"
+      responses:
+        "202":
+          description: Queued (or already queued).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRef"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}/packages/{package_id}/update:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+      - $ref: "#/components/parameters/PackageId"
+    post:
+      operationId: updatePackage
+      tags: [plugins]
+      summary: Update an installed package to its newest offered version
+      description: Queued as a `plugin.package` task, like an install. Needs a plugin with the `packages` capability (else `422`, code `no_packages`) that is turned on (else `409`, code `plugin_disabled`).
+      x-panelarr-access: admin
+      responses:
+        "202":
+          description: Queued (or already queued).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRef"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}/packages/{package_id}/languages:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+      - $ref: "#/components/parameters/PackageId"
+    put:
+      operationId: setPackageLanguages
+      tags: [plugins]
+      summary: Choose the languages a package offers sources in
+      description: |
+        A subset of the package's `langs`; empty means every language the
+        plugin allows (its own `languages` setting). "all" and "multi" are
+        languages like any other. Sources outside both become absent. The
+        plugin is synced right away. Needs a plugin with the `packages` capability (else `422`, code `no_packages`) that is turned on (else `409`, code `plugin_disabled`).
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PackageLanguages"
+      responses:
+        "200":
+          description: The package as the plugin now reports it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Package"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /sources:
     get:
       operationId: listSources
@@ -950,6 +1119,12 @@ paths:
           schema:
             type: string
             maxLength: 64
+        - name: package_id
+          in: query
+          description: Only sources this package provides.
+          schema:
+            type: string
+            maxLength: 200
         - name: enabled
           in: query
           description: Only sources turned on (`true`) or off (`false`) by an admin. Turned-off sources show only with `all=true`.
@@ -2413,6 +2588,15 @@ components:
       schema:
         type: string
         pattern: "^[a-z0-9][a-z0-9_-]{0,39}$"
+    PackageId:
+      name: package_id
+      in: path
+      required: true
+      description: The package's ID on its plugin.
+      schema:
+        type: string
+        maxLength: 200
+        pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
     SourceId:
       name: source_id
       in: path
@@ -3614,6 +3798,7 @@ components:
             type: string
         capabilities:
           type: array
+          description: What the plugin supports beyond the contract, e.g. `packages` (it installs packages that provide sources; show its packages) or `network_profiles`.
           items:
             type: string
         max_concurrency_per_source:
@@ -3742,6 +3927,22 @@ components:
         present:
           type: boolean
           description: The plugin still lists it.
+        unavailable_reason:
+          type: string
+          enum: [language]
+          description: |
+            Why a source the plugin no longer lists (`present: false`) is
+            missing, when known: `language` means its package is still
+            installed but its language is turned off (the plugin's or the
+            package's languages), so show it as "not available" rather than
+            gone. Absent without a reason: no longer provided (e.g. its
+            package was uninstalled). Either way it isn't used and nothing
+            of it is deleted.
+        package_id:
+          type: string
+          description: The package (e.g. extension) that provides it, on plugins with the `packages` capability.
+        package_name:
+          type: string
     SourceList:
       type: object
       required: [sources]
@@ -3756,6 +3957,108 @@ components:
       properties:
         enabled:
           type: boolean
+    PackageList:
+      type: object
+      required: [packages]
+      properties:
+        packages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Package"
+    Package:
+      type: object
+      description: A package that provides sources, e.g. an extension.
+      required: [id, name, langs, version, installed, update_available, content_rating, supported, offers, sources, enabled_langs]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        langs:
+          type: array
+          description: Languages its sources cover (BCP 47, or "all"/"multi").
+          items:
+            type: string
+        version:
+          type: string
+          description: The newest version offered.
+        installed:
+          type: boolean
+        installed_version:
+          type: string
+        update_available:
+          type: boolean
+        content_rating:
+          type: string
+          enum: [safe, mixed, nsfw, unknown]
+        supported:
+          type: boolean
+          description: The plugin can run the version offered.
+        offers:
+          type: array
+          description: Where it can come from (e.g. stores).
+          items:
+            $ref: "#/components/schemas/PackageOffer"
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/PackageSource"
+        enabled_langs:
+          type: array
+          description: The languages chosen for it; empty means every language the plugin allows.
+          items:
+            type: string
+        error:
+          type: string
+          description: Why an installed package isn't working.
+        task_id:
+          type: string
+          format: uuid
+          description: An install, update or uninstall of it that is queued or running.
+    PackageOffer:
+      type: object
+      required: [origin_id, origin_name, version, supported]
+      properties:
+        origin_id:
+          type: string
+        origin_name:
+          type: string
+        version:
+          type: string
+        supported:
+          type: boolean
+    PackageSource:
+      type: object
+      required: [id, name, lang, available]
+      properties:
+        id:
+          type: string
+          description: The source's ID on the server ("plugin:source") once installed.
+        name:
+          type: string
+        lang:
+          type: string
+        available:
+          type: boolean
+          description: Its language is turned on at the plugin's and the package's level, so it is listed while the package is installed. An admin may still turn the source off.
+    InstallPackageRequest:
+      type: object
+      properties:
+        origin_id:
+          type: string
+          maxLength: 200
+          description: Which offer to install; empty lets the plugin pick the best one.
+    PackageLanguages:
+      type: object
+      required: [enabled_langs]
+      properties:
+        enabled_langs:
+          type: array
+          maxItems: 200
+          items:
+            type: string
+            minLength: 1
+            maxLength: 35
     SeriesMatchRef:
       type: object
       description: How a work already knows a series.

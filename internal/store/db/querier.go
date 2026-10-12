@@ -12,6 +12,8 @@ import (
 )
 
 type Querier interface {
+	// Queued and running tasks of a kind whose payload has field = value.
+	ActiveTasksOf(ctx context.Context, arg ActiveTasksOfParams) ([]Task, error)
 	AddLibraryEntry(ctx context.Context, arg AddLibraryEntryParams) (LibraryEntry, error)
 	AssignVariants(ctx context.Context, arg AssignVariantsParams) error
 	// Attached series of works someone follows: what scheduled update checks
@@ -156,6 +158,9 @@ type Querier interface {
 	SetSourcePriority(ctx context.Context, arg SetSourcePriorityParams) (int64, error)
 	SetSourceSeriesState(ctx context.Context, arg SetSourceSeriesStateParams) (SourceSeries, error)
 	SetTaskProgress(ctx context.Context, arg SetTaskProgressParams) error
+	// Why a plugin's absent sources are absent: "language" for those its
+	// installed packages still provide in a language turned off.
+	SetUnavailableReasons(ctx context.Context, arg SetUnavailableReasonsParams) error
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
 	StartTask(ctx context.Context, arg StartTaskParams) (Task, error)
 	TaskStats(ctx context.Context) ([]TaskStatsRow, error)

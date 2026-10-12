@@ -116,7 +116,7 @@ func (q *Queries) GetPlugin(ctx context.Context, id string) (Plugin, error) {
 }
 
 const getSource = `-- name: GetSource :one
-SELECT sources.id, sources.plugin_id, sources.source_id, sources.name, sources.lang, sources.content_rating, sources.icon_url, sources.home_url, sources.capabilities, sources.health, sources.health_reason, sources.health_message, sources.health_checked_at, sources.enabled, sources.present, sources.created_at, sources.updated_at, plugins.enabled AS plugin_enabled
+SELECT sources.id, sources.plugin_id, sources.source_id, sources.name, sources.lang, sources.content_rating, sources.icon_url, sources.home_url, sources.capabilities, sources.health, sources.health_reason, sources.health_message, sources.health_checked_at, sources.enabled, sources.present, sources.created_at, sources.updated_at, sources.package_id, sources.package_name, sources.unavailable_reason, plugins.enabled AS plugin_enabled
 FROM sources JOIN plugins ON plugins.id = sources.plugin_id
 WHERE sources.id = $1
 `
@@ -147,6 +147,9 @@ func (q *Queries) GetSource(ctx context.Context, id string) (GetSourceRow, error
 		&i.Source.Present,
 		&i.Source.CreatedAt,
 		&i.Source.UpdatedAt,
+		&i.Source.PackageID,
+		&i.Source.PackageName,
+		&i.Source.UnavailableReason,
 		&i.PluginEnabled,
 	)
 	return i, err
@@ -189,7 +192,7 @@ func (q *Queries) ListPlugins(ctx context.Context) ([]Plugin, error) {
 }
 
 const listSources = `-- name: ListSources :many
-SELECT sources.id, sources.plugin_id, sources.source_id, sources.name, sources.lang, sources.content_rating, sources.icon_url, sources.home_url, sources.capabilities, sources.health, sources.health_reason, sources.health_message, sources.health_checked_at, sources.enabled, sources.present, sources.created_at, sources.updated_at, plugins.enabled AS plugin_enabled
+SELECT sources.id, sources.plugin_id, sources.source_id, sources.name, sources.lang, sources.content_rating, sources.icon_url, sources.home_url, sources.capabilities, sources.health, sources.health_reason, sources.health_message, sources.health_checked_at, sources.enabled, sources.present, sources.created_at, sources.updated_at, sources.package_id, sources.package_name, sources.unavailable_reason, plugins.enabled AS plugin_enabled
 FROM sources JOIN plugins ON plugins.id = sources.plugin_id
 ORDER BY sources.plugin_id, lower(sources.name), sources.id
 `
@@ -226,6 +229,9 @@ func (q *Queries) ListSources(ctx context.Context) ([]ListSourcesRow, error) {
 			&i.Source.Present,
 			&i.Source.CreatedAt,
 			&i.Source.UpdatedAt,
+			&i.Source.PackageID,
+			&i.Source.PackageName,
+			&i.Source.UnavailableReason,
 			&i.PluginEnabled,
 		); err != nil {
 			return nil, err
@@ -321,6 +327,23 @@ func (q *Queries) SetSourceEnabled(ctx context.Context, arg SetSourceEnabledPara
 	return result.RowsAffected(), nil
 }
 
+const setUnavailableReasons = `-- name: SetUnavailableReasons :exec
+UPDATE sources SET unavailable_reason = CASE WHEN source_id = ANY($1::text[]) THEN 'language' ELSE '' END
+WHERE plugin_id = $2 AND NOT present
+`
+
+type SetUnavailableReasonsParams struct {
+	LanguageOff []string
+	PluginID    string
+}
+
+// Why a plugin's absent sources are absent: "language" for those its
+// installed packages still provide in a language turned off.
+func (q *Queries) SetUnavailableReasons(ctx context.Context, arg SetUnavailableReasonsParams) error {
+	_, err := q.db.Exec(ctx, setUnavailableReasons, arg.LanguageOff, arg.PluginID)
+	return err
+}
+
 const updatePlugin = `-- name: UpdatePlugin :one
 UPDATE plugins SET url = $1, api_key = $2, enabled = $3, updated_at = now()
 WHERE id = $4
@@ -361,16 +384,17 @@ func (q *Queries) UpdatePlugin(ctx context.Context, arg UpdatePluginParams) (Plu
 const upsertSource = `-- name: UpsertSource :exec
 INSERT INTO sources (
     id, plugin_id, source_id, name, lang, content_rating, icon_url, home_url, capabilities,
-    health, health_reason, health_message, health_checked_at, present
+    health, health_reason, health_message, health_checked_at, package_id, package_name, present
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9,
-    $10, $11, $12, $13, true
+    $10, $11, $12, $13, $14, $15, true
 )
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name, lang = EXCLUDED.lang, content_rating = EXCLUDED.content_rating,
     icon_url = EXCLUDED.icon_url, home_url = EXCLUDED.home_url, capabilities = EXCLUDED.capabilities,
     health = EXCLUDED.health, health_reason = EXCLUDED.health_reason, health_message = EXCLUDED.health_message,
-    health_checked_at = EXCLUDED.health_checked_at, present = true, updated_at = now()
+    health_checked_at = EXCLUDED.health_checked_at, package_id = EXCLUDED.package_id,
+    package_name = EXCLUDED.package_name, present = true, unavailable_reason = '', updated_at = now()
 `
 
 type UpsertSourceParams struct {
@@ -387,6 +411,8 @@ type UpsertSourceParams struct {
 	HealthReason    string
 	HealthMessage   string
 	HealthCheckedAt *time.Time
+	PackageID       string
+	PackageName     string
 }
 
 func (q *Queries) UpsertSource(ctx context.Context, arg UpsertSourceParams) error {
@@ -404,6 +430,8 @@ func (q *Queries) UpsertSource(ctx context.Context, arg UpsertSourceParams) erro
 		arg.HealthReason,
 		arg.HealthMessage,
 		arg.HealthCheckedAt,
+		arg.PackageID,
+		arg.PackageName,
 	)
 	return err
 }

@@ -91,3 +91,9 @@ RETURNING *;
 UPDATE tasks SET run_after = least(run_after, @run_after), priority = greatest(priority, @priority), updated_at = now()
 WHERE dedupe_key = @dedupe_key AND state = 'queued'
 RETURNING *;
+
+-- name: ActiveTasksOf :many
+-- Queued and running tasks of a kind whose payload has field = value.
+SELECT * FROM tasks
+WHERE kind = @kind AND state IN ('queued', 'running') AND payload ->> @field::text = @value::text
+ORDER BY created_at;

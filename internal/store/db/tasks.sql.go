@@ -13,6 +13,59 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const activeTasksOf = `-- name: ActiveTasksOf :many
+SELECT id, kind, payload, dedupe_key, limit_key, priority, state, attempts, max_attempts, run_after, lease_until, last_error, progress, result, created_by, created_at, started_at, finished_at, updated_at FROM tasks
+WHERE kind = $1 AND state IN ('queued', 'running') AND payload ->> $2::text = $3::text
+ORDER BY created_at
+`
+
+type ActiveTasksOfParams struct {
+	Kind  string
+	Field string
+	Value string
+}
+
+// Queued and running tasks of a kind whose payload has field = value.
+func (q *Queries) ActiveTasksOf(ctx context.Context, arg ActiveTasksOfParams) ([]Task, error) {
+	rows, err := q.db.Query(ctx, activeTasksOf, arg.Kind, arg.Field, arg.Value)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Task{}
+	for rows.Next() {
+		var i Task
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Payload,
+			&i.DedupeKey,
+			&i.LimitKey,
+			&i.Priority,
+			&i.State,
+			&i.Attempts,
+			&i.MaxAttempts,
+			&i.RunAfter,
+			&i.LeaseUntil,
+			&i.LastError,
+			&i.Progress,
+			&i.Result,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const cancelQueuedTask = `-- name: CancelQueuedTask :one
 UPDATE tasks SET state = 'cancelled', finished_at = now(), updated_at = now()
 WHERE id = $1 AND state = 'queued'

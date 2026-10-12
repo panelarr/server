@@ -28,17 +28,18 @@ DELETE FROM plugins WHERE id = $1;
 -- name: UpsertSource :exec
 INSERT INTO sources (
     id, plugin_id, source_id, name, lang, content_rating, icon_url, home_url, capabilities,
-    health, health_reason, health_message, health_checked_at, package_id, package_name, present
+    health, health_reason, health_message, health_checked_at, package_id, package_name, health_checks_disabled, present
 ) VALUES (
     @id, @plugin_id, @source_id, @name, @lang, @content_rating, @icon_url, @home_url, @capabilities,
-    @health, @health_reason, @health_message, @health_checked_at, @package_id, @package_name, true
+    @health, @health_reason, @health_message, @health_checked_at, @package_id, @package_name, @health_checks_disabled, true
 )
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name, lang = EXCLUDED.lang, content_rating = EXCLUDED.content_rating,
     icon_url = EXCLUDED.icon_url, home_url = EXCLUDED.home_url, capabilities = EXCLUDED.capabilities,
     health = EXCLUDED.health, health_reason = EXCLUDED.health_reason, health_message = EXCLUDED.health_message,
     health_checked_at = EXCLUDED.health_checked_at, package_id = EXCLUDED.package_id,
-    package_name = EXCLUDED.package_name, present = true, unavailable_reason = '', updated_at = now();
+    package_name = EXCLUDED.package_name, health_checks_disabled = EXCLUDED.health_checks_disabled,
+    present = true, unavailable_reason = '', updated_at = now();
 
 -- name: SetUnavailableReasons :exec
 -- Why a plugin's absent sources are absent: "language" for those its

@@ -386,3 +386,92 @@ func AcceptsProfiles(info *sourcev1.PluginInfo) bool {
 func AcceptsSolver(info *sourcev1.PluginInfo) bool {
 	return slices.Contains(info.GetCommonServices(), sourcev1.CommonService_COMMON_SERVICE_SOLVER)
 }
+
+// ErrNoHealthChecks is a plugin without the health checks capability.
+var ErrNoHealthChecks = errors.New("plugins: the plugin doesn't run source health checks")
+
+// HasHealthChecks reports whether a plugin runs scheduled source health
+// checks that can be turned off per source.
+func HasHealthChecks(info *sourcev1.PluginInfo) bool {
+	return slices.Contains(info.GetCapabilities(), sourcev1.PluginCapability_PLUGIN_CAPABILITY_HEALTH_CHECKS)
+}
+
+// Origins lists where a plugin's packages come from (e.g. stores), with
+// their state.
+func (h *Host) Origins(ctx context.Context, id string) ([]*sourcev1.Origin, error) {
+	c, err := h.packagesClient(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	res, err := c.ListOrigins(ctx, &sourcev1.ListOriginsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return res.GetOrigins(), nil
+}
+
+// RefreshOrigin fetches an origin's package list again now.
+func (h *Host) RefreshOrigin(ctx context.Context, id, origin string) (*sourcev1.Origin, error) {
+	c, err := h.packagesClient(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	cctx, cancel := context.WithTimeout(ctx, packageTimeout)
+	defer cancel()
+	res, err := c.RefreshOrigin(cctx, &sourcev1.RefreshOriginRequest{OriginId: origin})
+	if err != nil {
+		return nil, err
+	}
+	h.log.InfoContext(ctx, "package origin refreshed", "component", "audit", "plugin", id, "origin", origin)
+	return res.GetOrigin(), nil
+}
+
+// ReloadPackage loads an installed package again (retrying a failed load,
+// or applying settings that need it), then syncs the plugin.
+func (h *Host) ReloadPackage(ctx context.Context, id, pkg string) (*sourcev1.Package, error) {
+	c, err := h.packagesClient(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	cctx, cancel := context.WithTimeout(ctx, packageTimeout)
+	defer cancel()
+	res, err := c.ReloadPackage(cctx, &sourcev1.ReloadPackageRequest{PackageId: pkg})
+	if err != nil {
+		return nil, err
+	}
+	h.log.InfoContext(ctx, "package reloaded", "component", "audit", "plugin", id, "package", pkg)
+	h.packageChanged(ctx, id)
+	return res.GetPackage(), nil
+}
+
+// SetHealthCheck turns a source's scheduled health checks on or off, then
+// syncs its plugin so the source shows it.
+func (h *Host) SetHealthCheck(ctx context.Context, sourceID string, enabled bool) (Source, error) {
+	s, err := h.Source(ctx, sourceID, Viewer{Admin: true, Testing: true})
+	if err != nil {
+		return Source{}, err
+	}
+	p, err := h.Get(ctx, s.PluginID)
+	if err != nil {
+		return Source{}, err
+	}
+	if !HasHealthChecks(p.Info) {
+		return Source{}, ErrNoHealthChecks
+	}
+	c, err := h.Client(ctx, s.PluginID)
+	if err != nil {
+		return Source{}, err
+	}
+	cctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	if _, err := c.SetSourceHealthCheck(cctx, &sourcev1.SetSourceHealthCheckRequest{SourceId: s.SourceID, Enabled: enabled}); err != nil {
+		return Source{}, err
+	}
+	h.log.InfoContext(ctx, "source health checks changed", "component", "audit", "source", sourceID, "enabled", enabled)
+	if _, err := h.Sync(ctx, s.PluginID); err != nil {
+		return Source{}, err
+	}
+	return h.Source(ctx, sourceID, Viewer{Admin: true, AnyKnown: true})
+}

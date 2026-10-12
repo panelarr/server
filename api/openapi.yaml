@@ -2221,6 +2221,96 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /plugins/{plugin_id}/origins:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+    get:
+      operationId: listPackageOrigins
+      tags: [plugins]
+      summary: Where a plugin's packages come from (e.g. its stores)
+      description: "With each origin's state: last refresh, its error, how many packages it offers, the pinned signing key. Origins are added and removed in the plugin's settings. Needs a plugin with the `packages` capability (else `422`, code `no_packages`) that is turned on (else `409`, code `plugin_disabled`)."
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The origins.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackageOriginList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}/origins/{origin_id}/refresh:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+      - name: origin_id
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 200
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    post:
+      operationId: refreshPackageOrigin
+      tags: [plugins]
+      summary: Fetch an origin's package list again now
+      description: "A store that can't be reached answers `502`, code `store_fetch_failed`; a broken one `store_invalid`. Needs a plugin with the `packages` capability (else `422`, code `no_packages`) that is turned on (else `409`, code `plugin_disabled`)."
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The origin after the refresh.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackageOrigin"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /plugins/{plugin_id}/packages/{package_id}/reload:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+      - $ref: "#/components/parameters/PackageId"
+    post:
+      operationId: reloadPackage
+      tags: [plugins]
+      summary: Load an installed package again
+      description: "Without downloading it: retries a failed load or applies settings that need a reload. `409`, code `not_installed`, for a package that isn't installed. The plugin is synced after. Needs a plugin with the `packages` capability (else `422`, code `no_packages`) that is turned on (else `409`, code `plugin_disabled`)."
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The package after the reload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Package"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /sources/{source_id}/health-check:
+    parameters:
+      - $ref: "#/components/parameters/SourceId"
+    put:
+      operationId: setSourceHealthCheck
+      tags: [sources]
+      summary: Turn a source's scheduled health checks on or off
+      description: "For plugins with the `health_checks` capability (else `422`, code `unsupported`). Shown as `health.checks_disabled`. Run a check now through the plugin's jobs."
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetHealthCheckRequest"
+      responses:
+        "200":
+          description: The source.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceInfo"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /sources:
     get:
       operationId: listSources
@@ -5103,6 +5193,9 @@ components:
         checked_at:
           type: string
           format: date-time
+        checks_disabled:
+          type: boolean
+          description: Its scheduled health checks are turned off (plugins with the `health_checks` capability).
     SourceInfo:
       type: object
       required: [id, plugin_id, name, lang, content_rating, capabilities, health, enabled, present]
@@ -5220,6 +5313,8 @@ components:
         error:
           type: string
           description: Why an installed package isn't working.
+        details:
+          $ref: "#/components/schemas/PackageDetails"
         icon_url:
           type: string
           description: The server's URL for the package's icon, when it has one.
@@ -6355,6 +6450,58 @@ components:
           type: boolean
         error:
           type: string
+    PackageDetails:
+      type: object
+      description: Set on installed packages.
+      properties:
+        signing_fingerprint:
+          type: string
+        api_version:
+          type: string
+          description: The version of the API the package was built for.
+        installed_at:
+          type: string
+          format: date-time
+        sha256:
+          type: string
+        origin_id:
+          type: string
+          description: The origin it was installed from.
+    PackageOrigin:
+      type: object
+      required: [id, name, package_count]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+        refreshed_at:
+          type: string
+          format: date-time
+        error:
+          type: string
+          description: Why the last refresh failed.
+        package_count:
+          type: integer
+        signing_key_fingerprint:
+          type: string
+          description: The pinned signing key of its packages.
+    PackageOriginList:
+      type: object
+      required: [origins]
+      properties:
+        origins:
+          type: array
+          items:
+            $ref: "#/components/schemas/PackageOrigin"
+    SetHealthCheckRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
     SeriesMatchRef:
       type: object
       description: How a work already knows a series.

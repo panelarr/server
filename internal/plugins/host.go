@@ -603,7 +603,7 @@ func sourceParams(pluginID string, s *sourcev1.Source) db.UpsertSourceParams {
 		case sourcev1.SourceHealthStatus_SOURCE_HEALTH_STATUS_FAILING:
 			p.Health = "failing"
 		}
-		p.HealthReason, p.HealthMessage = hl.GetReason(), hl.GetMessage()
+		p.HealthReason, p.HealthMessage, p.HealthChecksDisabled = hl.GetReason(), hl.GetMessage(), hl.GetChecksDisabled()
 		if hl.GetCheckedAt() != nil {
 			t := hl.GetCheckedAt().AsTime()
 			p.HealthCheckedAt = &t

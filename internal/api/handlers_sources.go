@@ -72,7 +72,7 @@ func (s *Server) toSourceInfo(src plugins.Source) apigen.SourceInfo {
 		Capabilities: nonNil(src.Capabilities), Enabled: src.Enabled, Present: src.Present,
 		PackageId: nonEmpty(src.PackageID), PackageName: nonEmpty(src.PackageName),
 		Health: apigen.SourceHealth{
-			Status: apigen.SourceHealthStatus(src.Health), Reason: nonEmpty(src.HealthReason),
+			Status: apigen.SourceHealthStatus(src.Health), Reason: nonEmpty(src.HealthReason), ChecksDisabled: nonZero(src.HealthChecksDisabled),
 			Message: nonEmpty(src.HealthMessage), CheckedAt: src.HealthCheckedAt,
 		},
 	}
@@ -343,4 +343,13 @@ func nonNilMap(m map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	return m
+}
+
+// SetSourceHealthCheck turns a source's scheduled health checks on or off.
+func (s *Server) SetSourceHealthCheck(ctx context.Context, req apigen.SetSourceHealthCheckRequestObject) (apigen.SetSourceHealthCheckResponseObject, error) {
+	src, err := s.deps.Plugins.SetHealthCheck(ctx, req.SourceId, req.Body.Enabled)
+	if err != nil {
+		return nil, pluginError(ctx, err)
+	}
+	return apigen.SetSourceHealthCheck200JSONResponse(s.toSourceInfo(src)), nil
 }

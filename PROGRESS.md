@@ -41,7 +41,7 @@ Everything an admin does in mihon-source's or meta's own admin can be done from 
 - [x] **S1. Meta admin:** providers and sync runs, meta's health, jobs (the shared jobs view), duplicates review and its decision model, the search engine (secrets write-only throughout).
 - [x] **S2. Custom solvers and proxies:** solvers and proxies custom to one plugin, extension, source or provider, like profiles; usable only by that owner's profiles and removed with its plugin.
 - [ ] **S3. Plugin jobs:** the shared jobs view for plugins that declare jobs (source.v1).
-- [ ] **S4. Package origins and details:** stores' status and refresh, package load details.
+- [x] **S4. Package origins and details:** origins (stores) with their state and refresh now, package details (signing fingerprint, API version, checksum, origin) and reload, the per-source health check switch (`health_checks` capability).
 
 ## Working assumptions
 

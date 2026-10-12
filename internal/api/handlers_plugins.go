@@ -52,6 +52,8 @@ func pluginError(ctx context.Context, err error) error {
 		return NewProblem(http.StatusUnprocessableEntity, "unsupported", "the source doesn't support this")
 	case errors.Is(err, plugins.ErrNoPackages):
 		return NewProblem(http.StatusUnprocessableEntity, "no_packages", "the plugin doesn't install packages")
+	case errors.Is(err, plugins.ErrNoHealthChecks):
+		return NewProblem(http.StatusUnprocessableEntity, "unsupported", "the plugin doesn't run source health checks")
 	case errors.As(err, &pe) && pe.Reason == plugin.ReasonStoreFetchFailed:
 		return NewProblem(http.StatusBadGateway, "store_fetch_failed", pe.Message)
 	case errors.As(err, &pe) && pe.Reason == plugin.ReasonStoreInvalid:
@@ -203,6 +205,16 @@ func (s *Server) toPackage(pluginID string, p *sourcev1.Package, task *uuid.UUID
 		Supported: p.GetSupported(), Offers: []apigen.PackageOffer{}, Sources: []apigen.PackageSource{},
 		EnabledLangs: nonNil(p.GetSettings().GetEnabledLangs()), Error: nonEmpty(p.GetError()), TaskId: task,
 		IconUrl: s.packageIconURL(pluginID, p.GetId(), p.GetIconUrl()),
+	}
+	if d := p.GetDetails(); d != nil {
+		out.Details = &apigen.PackageDetails{
+			SigningFingerprint: nonEmpty(d.GetSigningFingerprint()), ApiVersion: nonEmpty(d.GetApiVersion()),
+			Sha256: nonEmpty(d.GetSha256()), OriginId: nonEmpty(d.GetOriginId()),
+		}
+		if d.GetInstalledAt() != nil {
+			at := d.GetInstalledAt().AsTime()
+			out.Details.InstalledAt = &at
+		}
 	}
 	for _, o := range p.GetOffers() {
 		out.Offers = append(out.Offers, apigen.PackageOffer{
@@ -363,5 +375,55 @@ func packageError(ctx context.Context, err error) error {
 	if errors.As(err, &pe) && pe.Code == plugin.CodeInvalidArgument && pe.Reason == "" {
 		return NewProblem(http.StatusUnprocessableEntity, "package_rejected", pe.Message)
 	}
+	if errors.As(err, &pe) && pe.Code == plugin.CodeFailedPrecondition && pe.Reason == "" {
+		return NewProblem(http.StatusConflict, "not_installed", pe.Message)
+	}
 	return pluginError(ctx, err)
+}
+
+func toOrigin(o *sourcev1.Origin) apigen.PackageOrigin {
+	out := apigen.PackageOrigin{
+		Id: o.GetId(), Name: o.GetName(), Url: nonEmpty(o.GetUrl()), Error: nonEmpty(o.GetError()),
+		PackageCount: int(o.GetPackageCount()), SigningKeyFingerprint: nonEmpty(o.GetSigningKeyFingerprint()),
+	}
+	if o.GetRefreshedAt() != nil {
+		at := o.GetRefreshedAt().AsTime()
+		out.RefreshedAt = &at
+	}
+	return out
+}
+
+// ListPackageOrigins lists where a plugin's packages come from.
+func (s *Server) ListPackageOrigins(ctx context.Context, req apigen.ListPackageOriginsRequestObject) (apigen.ListPackageOriginsResponseObject, error) {
+	list, err := s.deps.Plugins.Origins(ctx, req.PluginId)
+	if err != nil {
+		return nil, packageError(ctx, err)
+	}
+	out := apigen.ListPackageOrigins200JSONResponse{Origins: make([]apigen.PackageOrigin, len(list))}
+	for i, o := range list {
+		out.Origins[i] = toOrigin(o)
+	}
+	return out, nil
+}
+
+// RefreshPackageOrigin refreshes one origin now.
+func (s *Server) RefreshPackageOrigin(ctx context.Context, req apigen.RefreshPackageOriginRequestObject) (apigen.RefreshPackageOriginResponseObject, error) {
+	o, err := s.deps.Plugins.RefreshOrigin(ctx, req.PluginId, req.OriginId)
+	if err != nil {
+		return nil, packageError(ctx, err)
+	}
+	return apigen.RefreshPackageOrigin200JSONResponse(toOrigin(o)), nil
+}
+
+// ReloadPackage loads an installed package again.
+func (s *Server) ReloadPackage(ctx context.Context, req apigen.ReloadPackageRequestObject) (apigen.ReloadPackageResponseObject, error) {
+	p, err := s.deps.Plugins.ReloadPackage(ctx, req.PluginId, req.PackageId)
+	if err != nil {
+		return nil, packageError(ctx, err)
+	}
+	pending, err := s.deps.Plugins.PendingPackageTasks(ctx, req.PluginId)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.ReloadPackage200JSONResponse(s.toPackage(req.PluginId, p, pendingTask(pending, p.GetId()))), nil
 }

@@ -162,3 +162,52 @@ func TestSingleSitePluginHasNoPackages(t *testing.T) {
 	admin.expectProblem(http.MethodPost, "/api/v1/plugins/single/packages/x/install", nil, 422, "no_packages")
 	admin.expectProblem(http.MethodGet, "/api/v1/plugins/nope/packages", nil, 404, CodeNotFound)
 }
+
+func TestPackageOriginsDetailsAndHealthChecks(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	admin, _ := h.setupAdmin()
+	fake := plugintest.New()
+	call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins", map[string]string{"url": pluginstest.Serve(t, fake, pluginKey), "api_key": pluginKey}, 201)
+	const base = "/api/v1/plugins/fake"
+
+	// Origins (stores) with their state; refresh one now.
+	origins := call[apigen.PackageOriginList](admin, http.MethodGet, base+"/origins", nil, 200)
+	if len(origins.Origins) != 2 || origins.Origins[0].Id != "store-a" || origins.Origins[0].PackageCount == 0 {
+		t.Fatalf("origins %+v", origins)
+	}
+	if o := call[apigen.PackageOrigin](admin, http.MethodPost, base+"/origins/store-a/refresh", nil, 200); o.RefreshedAt == nil || o.Error != nil {
+		t.Fatalf("refreshed %+v", o)
+	}
+	fake.BreakOrigin("store-b", true)
+	admin.expectProblem(http.MethodPost, base+"/origins/store-b/refresh", nil, 502, "store_fetch_failed")
+	admin.expectProblem(http.MethodPost, base+"/origins/nope/refresh", nil, 404, CodeNotFound)
+
+	// Installed packages carry details; reload one.
+	ex := call[apigen.Package](admin, http.MethodGet, base+"/packages/example.comics", nil, 200)
+	if ex.Details == nil || ex.Details.OriginId == nil || *ex.Details.OriginId != "store-a" {
+		t.Fatalf("details %+v", ex.Details)
+	}
+	if p := call[apigen.Package](admin, http.MethodGet, base+"/packages/multi.comics", nil, 200); p.Details != nil {
+		t.Fatalf("details of a package not installed %+v", p.Details)
+	}
+	if p := call[apigen.Package](admin, http.MethodPost, base+"/packages/example.comics/reload", nil, 200); !p.Installed {
+		t.Fatalf("reloaded %+v", p)
+	}
+	admin.expectProblem(http.MethodPost, base+"/packages/multi.comics/reload", nil, 409, "not_installed")
+
+	// A source's scheduled health checks, off and on.
+	src := call[apigen.SourceInfo](admin, http.MethodPut, "/api/v1/sources/fake:1001/health-check", map[string]bool{"enabled": false}, 200)
+	if src.Health.ChecksDisabled == nil || !*src.Health.ChecksDisabled {
+		t.Fatalf("checks off %+v", src.Health)
+	}
+	if src := call[apigen.SourceInfo](admin, http.MethodPut, "/api/v1/sources/fake:1001/health-check", map[string]bool{"enabled": true}, 200); src.Health.ChecksDisabled != nil {
+		t.Fatalf("checks on %+v", src.Health)
+	}
+
+	// A plugin without these capabilities.
+	single := plugintest.New()
+	single.ID, single.Packages = "single", nil
+	call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins", map[string]string{"url": pluginstest.Serve(t, single, pluginKey), "api_key": pluginKey}, 201)
+	admin.expectProblem(http.MethodGet, "/api/v1/plugins/single/origins", nil, 422, "no_packages")
+}

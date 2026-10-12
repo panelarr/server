@@ -68,6 +68,11 @@ tags:
     description: Searching and browsing the metadata catalogue, to find works to add.
   - name: plugins
     description: Source plugins (admins).
+  - name: network
+    description: |
+      Shared network services (admins): challenge solvers and proxies, set
+      up once and used through network profiles. They are options: nothing
+      uses one until an admin assigns a profile.
   - name: sources
     description: |
       Listing and browsing sources through their plugins (admins). Sources
@@ -1135,6 +1140,263 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Package"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /network/solvers:
+    get:
+      operationId: listSolvers
+      tags: [network]
+      summary: The solvers
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The solvers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SolverList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createSolver
+      tags: [network]
+      summary: Add a solver
+      description: "A FlareSolverr-compatible endpoint (FlareSolverr, Byparr). The check asks it for its state."
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewSolver"
+      responses:
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Solver"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /network/solvers/test:
+    post:
+      operationId: testSolverSettings
+      tags: [network]
+      summary: Check a solver before saving it
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewSolver"
+      responses:
+        "200":
+          description: How the check went.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkTest"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /network/solvers/{solver_id}:
+    parameters:
+      - $ref: "#/components/parameters/SolverId"
+    get:
+      operationId: getSolver
+      tags: [network]
+      summary: One solver
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The solver.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Solver"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateSolver
+      tags: [network]
+      summary: Change a solver
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSolverRequest"
+      responses:
+        "200":
+          description: Changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Solver"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteSolver
+      tags: [network]
+      summary: Remove a solver
+      description: "A solver a network profile uses can't be removed: `409`, code `in_use`."
+      x-panelarr-access: admin
+      responses:
+        "204":
+          description: Removed.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /network/solvers/{solver_id}/test:
+    parameters:
+      - $ref: "#/components/parameters/SolverId"
+    post:
+      operationId: testSolver
+      tags: [network]
+      summary: Check a saved solver
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: How the check went.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkTest"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /network/proxies:
+    get:
+      operationId: listProxies
+      tags: [network]
+      summary: The proxys
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The proxys.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProxyList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createProxy
+      tags: [network]
+      summary: Add a proxy
+      description: "An HTTP, HTTPS or SOCKS5 proxy, e.g. a VPN container. The password is stored encrypted and never returned."
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewProxy"
+      responses:
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Proxy"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /network/proxies/test:
+    post:
+      operationId: testProxySettings
+      tags: [network]
+      summary: Check a proxy before saving it
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProxyTestRequest"
+      responses:
+        "200":
+          description: How the check went.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkTest"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /network/proxies/{proxy_id}:
+    parameters:
+      - $ref: "#/components/parameters/ProxyId"
+    get:
+      operationId: getProxy
+      tags: [network]
+      summary: One proxy
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The proxy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Proxy"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateProxy
+      tags: [network]
+      summary: Change a proxy
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProxyRequest"
+      responses:
+        "200":
+          description: Changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Proxy"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteProxy
+      tags: [network]
+      summary: Remove a proxy
+      description: "A proxy a network profile uses can't be removed: `409`, code `in_use`."
+      x-panelarr-access: admin
+      responses:
+        "204":
+          description: Removed.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /network/proxies/{proxy_id}/test:
+    parameters:
+      - $ref: "#/components/parameters/ProxyId"
+    post:
+      operationId: testProxy
+      tags: [network]
+      summary: Check a saved proxy
+      x-panelarr-access: admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProxyTarget"
+      responses:
+        "200":
+          description: How the check went.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkTest"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -2575,6 +2837,20 @@ components:
       description: A personal API key as a bearer token.
 
   parameters:
+    SolverId:
+      name: solver_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9_-]{0,39}$"
+    ProxyId:
+      name: proxy_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9_-]{0,39}$"
     StorageId:
       name: storage_id
       in: path
@@ -4113,6 +4389,193 @@ components:
             type: string
             minLength: 1
             maxLength: 35
+    Solver:
+      type: object
+      description: A challenge solver (FlareSolverr-compatible).
+      required: [id, name, type, url, as_response_fallback, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/SolverType"
+        url:
+          type: string
+          description: Its base URL, e.g. http://flaresolverr:8191.
+        session_ttl_seconds:
+          type: integer
+          description: How long a session or its clearance cookies are reused; absent means the plugin's default.
+        max_timeout_seconds:
+          type: integer
+          description: Upper bound for one solve; absent means the plugin's default.
+        as_response_fallback:
+          type: boolean
+          description: Use the solver's own response when a fresh request still fails.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    SolverType:
+      type: string
+      enum: [flaresolverr, byparr]
+    SolverList:
+      type: object
+      required: [solvers]
+      properties:
+        solvers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Solver"
+    NewSolver:
+      type: object
+      required: [id, name, type, url]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]{0,39}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        type:
+          $ref: "#/components/schemas/SolverType"
+        url:
+          type: string
+          maxLength: 2000
+        session_ttl_seconds:
+          type: integer
+          minimum: 0
+          maximum: 604800
+        max_timeout_seconds:
+          type: integer
+          minimum: 0
+          maximum: 3600
+        as_response_fallback:
+          type: boolean
+    UpdateSolverRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        type:
+          $ref: "#/components/schemas/SolverType"
+        url:
+          type: string
+          maxLength: 2000
+        session_ttl_seconds:
+          type: integer
+          minimum: 0
+          maximum: 604800
+        max_timeout_seconds:
+          type: integer
+          minimum: 0
+          maximum: 3600
+        as_response_fallback:
+          type: boolean
+    Proxy:
+      type: object
+      description: An HTTP, HTTPS or SOCKS5 proxy. The password is never returned.
+      required: [id, name, url, has_password, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+          description: http://, https:// or socks5://host:port, without credentials.
+        username:
+          type: string
+        has_password:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProxyList:
+      type: object
+      required: [proxies]
+      properties:
+        proxies:
+          type: array
+          items:
+            $ref: "#/components/schemas/Proxy"
+    NewProxy:
+      type: object
+      required: [id, name, url]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]{0,39}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        url:
+          type: string
+          maxLength: 2000
+        username:
+          type: string
+          maxLength: 500
+        password:
+          type: string
+          maxLength: 2000
+          description: Stored encrypted; never returned.
+    UpdateProxyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        url:
+          type: string
+          maxLength: 2000
+        username:
+          type: string
+          maxLength: 500
+          description: Empty removes the credentials.
+        password:
+          type: string
+          maxLength: 2000
+          description: Empty or absent keeps the stored one.
+    ProxyTarget:
+      type: object
+      properties:
+        url:
+          type: string
+          maxLength: 2000
+          description: An http(s) URL to request through the proxy. Without it, the check only connects to the proxy.
+    ProxyTestRequest:
+      type: object
+      required: [proxy]
+      properties:
+        proxy:
+          $ref: "#/components/schemas/NewProxy"
+        url:
+          type: string
+          maxLength: 2000
+          description: An http(s) URL to request through the proxy. Without it, the check only connects to the proxy. A saved proxy's stored password is used when the password is left empty.
+    NetworkTest:
+      type: object
+      required: [ok, message, latency_ms]
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+        version:
+          type: string
+          description: The solver's version, when it says.
+        latency_ms:
+          type: integer
     SeriesMatchRef:
       type: object
       description: How a work already knows a series.

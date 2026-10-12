@@ -32,6 +32,7 @@ import (
 	"github.com/panelarr/server/internal/logging"
 	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/metrics"
+	"github.com/panelarr/server/internal/network"
 	"github.com/panelarr/server/internal/plugins"
 	"github.com/panelarr/server/internal/queue"
 	"github.com/panelarr/server/internal/reader"
@@ -241,6 +242,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		Reader:         rdr,
 		Downloads:      dl,
 		Storages:       storages,
+		Network:        network.New(st, box, logging.Component(log, "network")),
 		SecureCookies:  cfg.SecureCookies(),
 		TrustedProxies: cfg.TrustedProxies,
 		Web:            webui.Handler(webFiles),

@@ -38,7 +38,7 @@ func (s *Server) browseViewer(ctx context.Context) plugins.Viewer {
 	return v
 }
 
-// imageURL is the server's signed URL for an image of a source.
+// imageURL is the server's signed URL for an image of a source (a cover).
 func (s *Server) imageURL(sourceID, ref string) *string {
 	if ref == "" {
 		return nil
@@ -48,11 +48,23 @@ func (s *Server) imageURL(sourceID, ref string) *string {
 	return &u
 }
 
+// iconURL is the server's signed URL for a source's icon. Icons are fetched
+// from the plugin's address, not through the source (see Host.Icon); the
+// kind is part of the signature.
+func (s *Server) iconURL(sourceID, ref string) *string {
+	if ref == "" {
+		return nil
+	}
+	q := url.Values{"ref": {ref}, "kind": {"icon"}, "sig": {s.deps.Signer.Sign("icon", sourceID, ref)}}
+	u := BasePath + "/sources/" + url.PathEscape(sourceID) + "/image?" + q.Encode()
+	return &u
+}
+
 func (s *Server) toSourceInfo(src plugins.Source) apigen.SourceInfo {
 	out := apigen.SourceInfo{
 		Id: src.ID, PluginId: src.PluginID, Name: src.Name, Lang: src.Lang,
 		ContentRating: apigen.SourceInfoContentRating(src.ContentRating),
-		IconUrl:       s.imageURL(src.ID, src.IconUrl), HomeUrl: nonEmpty(src.HomeUrl),
+		IconUrl:       s.iconURL(src.ID, src.IconUrl), HomeUrl: nonEmpty(src.HomeUrl),
 		Capabilities: nonNil(src.Capabilities), Enabled: src.Enabled, Present: src.Present,
 		PackageId: nonEmpty(src.PackageID), PackageName: nonEmpty(src.PackageName),
 		Health: apigen.SourceHealth{
@@ -231,26 +243,48 @@ func (s *Server) SourceChapters(ctx context.Context, req apigen.SourceChaptersRe
 // SourceImage serves a signed image of a source, fetched through its plugin
 // and cached.
 func (s *Server) SourceImage(ctx context.Context, req apigen.SourceImageRequestObject) (apigen.SourceImageResponseObject, error) {
-	if !s.deps.Signer.Verify(req.Params.Sig, req.SourceId, req.Params.Ref) {
+	icon := req.Params.Kind != nil && *req.Params.Kind == apigen.SourceImageParamsKindIcon
+	signed := s.deps.Signer.Verify(req.Params.Sig, req.SourceId, req.Params.Ref)
+	if icon {
+		signed = s.deps.Signer.Verify(req.Params.Sig, "icon", req.SourceId, req.Params.Ref)
+	}
+	if !signed {
 		return nil, NewProblem(http.StatusForbidden, "bad_signature", "not an image link from this server")
 	}
 	v := s.browseViewer(ctx)
+	// Admins list absent sources too; their icons still show.
+	v.AnyKnown = icon && v.Admin
 	if _, err := s.deps.Plugins.Source(ctx, req.SourceId, v); err != nil {
 		return nil, pluginError(ctx, err)
 	}
-	img, err := s.deps.Images.GetWith(ctx, "source\x00"+req.SourceId+"\x00"+req.Params.Ref, func(ctx context.Context) (string, io.Reader, error) {
-		ct, data, err := s.deps.Plugins.Image(ctx, v, req.SourceId, req.Params.Ref)
-		if err != nil {
-			return "", nil, err
-		}
-		return ct, bytes.NewReader(data), nil
-	})
+	var (
+		img imagecache.Image
+		err error
+	)
+	if icon {
+		// Icons may change; failures aren't kept, so the next request
+		// tries again.
+		img, err = s.deps.Images.GetFresh(ctx, "source-icon\x00"+req.SourceId+"\x00"+req.Params.Ref, iconMaxAge, func(ctx context.Context) (string, io.Reader, error) {
+			return s.deps.Plugins.SourceIcon(ctx, v, req.SourceId, req.Params.Ref)
+		})
+	} else {
+		img, err = s.deps.Images.GetWith(ctx, "source\x00"+req.SourceId+"\x00"+req.Params.Ref, func(ctx context.Context) (string, io.Reader, error) {
+			ct, data, err := s.deps.Plugins.Image(ctx, v, req.SourceId, req.Params.Ref)
+			if err != nil {
+				return "", nil, err
+			}
+			return ct, bytes.NewReader(data), nil
+		})
+	}
 	if errors.Is(err, imagecache.ErrNotImage) {
 		return nil, NewProblem(http.StatusNotFound, CodeNotFound, "not a usable image")
 	}
 	if err != nil {
-		s.deps.Log.WarnContext(ctx, "source image failed", "source", req.SourceId, "err", err)
-		return nil, pluginError(ctx, err)
+		s.deps.Log.WarnContext(ctx, "source image failed", "source", req.SourceId, "icon", icon, "err", err)
+		if p := pluginError(ctx, err); p != err || !icon { //nolint:errorlint // identity: was it mapped
+			return nil, p
+		}
+		return nil, NewProblem(http.StatusBadGateway, "icon_failed", "the icon couldn't be fetched")
 	}
 	f, err := os.Open(img.Path)
 	if err != nil {

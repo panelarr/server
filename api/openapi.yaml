@@ -1364,6 +1364,12 @@ paths:
             type: string
             minLength: 1
             maxLength: 4000
+        - name: kind
+          in: query
+          description: "`icon` for a source's icon (part of the signed link): fetched from the plugin's address rather than through the source, and refreshed weekly."
+          schema:
+            type: string
+            enum: [icon]
         - name: sig
           in: query
           required: true

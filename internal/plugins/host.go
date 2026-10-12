@@ -125,6 +125,28 @@ func sourceLimit(info *sourcev1.PluginInfo) limits.Limit {
 	return l
 }
 
+// Unbounded is the concurrency of a key nobody caps.
+const Unbounded = 1024
+
+// ImageKey is the limits key of a source's image fetches, apart from its
+// other calls ("source:<id>").
+func ImageKey(sourceID string) string { return "image:" + sourceID }
+
+// imageLimit turns a plugin's declared image limits into a source's image
+// cap: no pacing unless it declares an image rate, and its image
+// concurrency (unbounded when it declares none).
+func imageLimit(info *sourcev1.PluginInfo) limits.Limit {
+	l := limits.Limit{Concurrency: Unbounded}
+	if c := info.GetLimits().GetMaxImageConcurrencyPerSource(); c > 0 {
+		l.Concurrency = int(c)
+	}
+	if rl := info.GetLimits().GetImageRateLimit(); rl.GetRequests() > 0 && rl.GetPeriod().AsDuration() > 0 {
+		l.Every = rl.GetPeriod().AsDuration() / time.Duration(rl.GetRequests())
+		l.Burst = max(int(rl.GetBurst()), 1)
+	}
+	return l
+}
+
 // NewHost returns a host that reaches plugins with dial.
 func NewHost(st *store.Store, box *secret.Box, dial Dialer, log *slog.Logger) *Host {
 	if log == nil {
@@ -496,9 +518,10 @@ func (h *Host) sync(ctx context.Context, id string) (Plugin, error) {
 	// With network profiles, the push after the sync sets each source's
 	// cap (the profile's limits, else the plugin's).
 	if h.limits != nil && h.net == nil {
-		l := sourceLimit(info)
+		l, il := sourceLimit(info), imageLimit(info)
 		for _, s := range res.GetSources() {
 			h.limits.Set("source:"+id+":"+s.GetId(), l)
+			h.limits.Set(ImageKey(id+":"+s.GetId()), il)
 		}
 	}
 	p, err := h.saveState(ctx, cur, state)

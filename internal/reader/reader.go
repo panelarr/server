@@ -343,7 +343,14 @@ func (s *Service) Page(ctx context.Context, v library.Viewer, chapterID uuid.UUI
 	if index < 0 || index >= len(pages) {
 		return "", nil, ErrPageNotFound
 	}
-	if err := s.limits.For("source:" + vv.SourceID).Wait(ctx); err != nil {
+	// Images have their own budget (the plugin's image limits, or the
+	// network profile's).
+	key := s.limits.For(plugins.ImageKey(vv.SourceID))
+	if err := key.Acquire(ctx); err != nil {
+		return "", nil, err
+	}
+	defer key.Release()
+	if err := key.Wait(ctx); err != nil {
 		return "", nil, err
 	}
 	ct, data, err := s.host.Image(ctx, plugins.Viewer{Grants: v.Grants, Admin: v.Admin, HideUnknown: v.HideUnknown}, vv.SourceID, pages[index].ref)

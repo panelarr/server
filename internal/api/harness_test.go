@@ -28,6 +28,7 @@ import (
 	"github.com/panelarr/server/internal/imagecache"
 	"github.com/panelarr/server/internal/jobs"
 	"github.com/panelarr/server/internal/library"
+	"github.com/panelarr/server/internal/limits"
 	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/metrics"
 	"github.com/panelarr/server/internal/network"
@@ -102,9 +103,12 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	box := secret.NewBox("", filepath.Join(t.TempDir(), "secret.key"))
 	m := meta.NewService(st, box, meta.Conn{}, nil)
 	host := plugins.NewHost(st, box, plugins.RemoteDialer, nil)
+	// One registry of source limits, shared as in the server.
+	lim := limits.NewRegistry()
+	host.SetLimits(lim)
 	hub := events.NewHub()
 	host.SetHub(hub)
-	q := queue.New(st, hub, nil, nil, nil)
+	q := queue.New(st, hub, lim, nil, nil)
 	q.Poll = 20 * time.Millisecond
 	q.Backoff = func(int32) time.Duration { return time.Hour }
 	q.Register("demo.task", queue.Kind{MaxAttempts: 1, Handler: func(_ context.Context, task *queue.Task) (any, error) {
@@ -117,20 +121,20 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		}
 		return nil, nil
 	}})
-	lib := library.NewService(st, m, host, q, nil, hub, nil)
-	chs := chapters.NewService(st, host, q, nil, hub, nil)
+	lib := library.NewService(st, m, host, q, lim, hub, nil)
+	chs := chapters.NewService(st, host, q, lim, hub, nil)
 	lib.SetChapterHooks(chs)
 	host.SetSourcesChanged(chs.SourcesChanged)
 	host.RegisterPackageTasks(q)
 	netSvc := network.New(st, box, nil)
 	host.SetNetwork(netSvc, q)
-	rdr := reader.NewService(st, host, lib, chs, nil, hub, nil)
+	rdr := reader.NewService(st, host, lib, chs, lim, hub, nil)
 	storages := storage.NewManager(st, box, nil)
 	dataDir := t.TempDir()
 	if err := storages.EnsureDefault(context.Background(), filepath.Join(dataDir, "library")); err != nil {
 		t.Fatal(err)
 	}
-	dl := downloads.NewService(st, host, storages, m, q, nil, hub, filepath.Join(dataDir, ".tmp"), nil)
+	dl := downloads.NewService(st, host, storages, m, q, lim, hub, filepath.Join(dataDir, ".tmp"), nil)
 	rdr.SetFiles(dl)
 	chs.OnNewChapters(dl.NewChapters)
 	jm := jobs.NewManager(st, hub, nil, nil)

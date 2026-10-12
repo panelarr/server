@@ -35,8 +35,19 @@ func (h *Host) SetNetwork(n *network.Service, q *queue.Queue, also ...func(conte
 	h.alsoPush = also
 	q.Register(KindNetworkPush, queue.Kind{Handler: h.handleNetworkPush, Concurrency: 1, MaxAttempts: 3})
 	n.SetChanged(func(ctx context.Context) {
-		if _, _, err := q.Enqueue(ctx, queue.NewTask{Kind: KindNetworkPush, DedupeKey: KindNetworkPush, Priority: 10}); err != nil {
-			h.log.WarnContext(ctx, "queue network push", "err", err)
+		// One live task per dedupe key, queued or running: a change made
+		// while a push runs must not join it (it may be past reading the
+		// change). Pushes run one at a time, so of two keys at least one
+		// has no running task; a change always lands in a queued push.
+		for _, key := range []string{KindNetworkPush, KindNetworkPush + ".next"} {
+			t, _, err := q.Enqueue(ctx, queue.NewTask{Kind: KindNetworkPush, DedupeKey: key, Priority: 10})
+			if err != nil {
+				h.log.WarnContext(ctx, "queue network push", "err", err)
+				return
+			}
+			if t.State != "running" {
+				return
+			}
 		}
 	})
 }

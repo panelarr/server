@@ -28,6 +28,7 @@ import (
 	"github.com/panelarr/source-api/sdk/plugin"
 
 	"github.com/panelarr/server/internal/cbz"
+	"github.com/panelarr/server/internal/chapters"
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/limits"
 	"github.com/panelarr/server/internal/meta"
@@ -356,7 +357,7 @@ var ageRatings = map[string]string{
 // adds the people, summary and genres when the metadata service answers.
 func (s *Service) comicInfo(ctx context.Context, w db.Work, ch db.Chapter, v *db.ChapterVariantsRow) cbz.ComicInfo {
 	info := cbz.ComicInfo{
-		Series: w.Title, Title: ch.Title, LanguageISO: v.SourceChapter.Lang, Web: v.SourceChapter.Url,
+		Series: w.Title, Title: chapters.DisplayTitle(ch.Title), LanguageISO: v.SourceChapter.Lang, Web: v.SourceChapter.Url,
 		Translator: v.SourceChapter.Scanlator, AgeRating: ageRatings[w.ContentRating],
 		Notes: fmt.Sprintf("panelarr:work=%s chapter=%s entry=%s", w.ID, ch.ID, w.MetaEntryID),
 	}

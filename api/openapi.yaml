@@ -4490,8 +4490,11 @@ components:
 
     ChapterVariant:
       type: object
-      required: [id, series_id, source_id, source_name, key, name, priority, source_health]
+      required: [id, series_id, source_id, source_name, key, name, display_title, priority, source_health]
       properties:
+        display_title:
+          type: string
+          description: 'The chapter''s own name without its number, volume or scanlator noise ("Vol. 1 Chapter 1: Double Dungeon" → "Double Dungeon"); empty when the name says nothing else, so show "Chapter N".' 
         id:
           type: string
           format: uuid
@@ -4524,8 +4527,11 @@ components:
           enum: [ok, failing, unknown]
     UnifiedChapter:
       type: object
-      required: [id, title, extra, available, new, variants, reason, pinned, downloaded, bookmarked, created_at]
+      required: [id, title, display_title, extra, available, new, variants, reason, pinned, downloaded, bookmarked, created_at]
       properties:
+        display_title:
+          type: string
+          description: 'The chapter''s own name without its number, volume or scanlator noise ("Vol. 1 Chapter 1: Double Dungeon" → "Double Dungeon"); empty when the name says nothing else, so show "Chapter N".' 
         bookmarked:
           type: boolean
           description: You bookmarked it.
@@ -4590,8 +4596,11 @@ components:
           format: uuid
     SeriesChapter:
       type: object
-      required: [key, name, present]
+      required: [key, name, display_title, present]
       properties:
+        display_title:
+          type: string
+          description: 'The chapter''s own name without its number, volume or scanlator noise ("Vol. 1 Chapter 1: Double Dungeon" → "Double Dungeon"); empty when the name says nothing else, so show "Chapter N".' 
         key:
           type: string
         name:

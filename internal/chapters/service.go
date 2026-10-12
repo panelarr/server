@@ -245,7 +245,7 @@ func variantOf(r db.WorkVariantsRow) Variant {
 	c := r.SourceChapter
 	return Variant{
 		ID: c.ID, SeriesID: c.SourceSeriesID, SourceID: r.SourceID, Key: c.Key, Name: c.Name, Number: c.Number,
-		Volume: c.Volume, Scanlator: c.Scanlator, Lang: c.Lang, UploadedAt: c.UploadedAt, Position: c.Position,
+		Volume: VolumeOf(c.Volume, c.Name), Scanlator: c.Scanlator, Lang: c.Lang, UploadedAt: c.UploadedAt, Position: c.Position,
 		Priority: r.SeriesPriority, Health: r.SourceHealth, Unusable: !r.SourceUsable,
 	}
 }

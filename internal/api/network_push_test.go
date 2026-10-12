@@ -21,6 +21,8 @@ type pushFake struct {
 	*plugintest.Fake
 	instance atomic.Value
 	pushes   atomic.Int64
+	// slow delays each push.
+	slow atomic.Int64
 }
 
 func (f *pushFake) Health(context.Context, *sourcev1.HealthRequest) (*sourcev1.HealthResponse, error) {
@@ -30,6 +32,7 @@ func (f *pushFake) Health(context.Context, *sourcev1.HealthRequest) (*sourcev1.H
 
 func (f *pushFake) SetNetworkProfile(ctx context.Context, r *sourcev1.SetNetworkProfileRequest) (*sourcev1.SetNetworkProfileResponse, error) {
 	f.pushes.Add(1)
+	time.Sleep(time.Duration(f.slow.Load()))
 	return f.Fake.SetNetworkProfile(ctx, r)
 }
 
@@ -111,5 +114,29 @@ func TestNetworkProfilesPush(t *testing.T) {
 	call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins/fake/sync", nil, 200)
 	if n := fake.pushes.Load() - before; n != 2 {
 		t.Fatalf("%d pushes after a restart, want 2", n)
+	}
+}
+
+func TestNetworkChangeDuringPush(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	admin, _ := h.setupAdmin()
+	fake := &pushFake{Fake: plugintest.New()}
+	fake.instance.Store("one")
+	call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins", map[string]string{"url": pluginstest.Serve(t, fake, pluginKey), "api_key": pluginKey}, 201)
+	call[apigen.Proxy](admin, http.MethodPost, "/api/v1/network/proxies", map[string]any{"id": "nl", "name": "NL", "url": "http://gluetun:8888", "username": "u", "password": "pw-1"}, 201)
+	call[apigen.NetworkProfile](admin, http.MethodPost, "/api/v1/network/profiles", map[string]any{"id": "vpn", "name": "VPN", "proxy_id": "nl"}, 201)
+
+	// A slow plugin: the push is still going when the password changes.
+	fake.slow.Store(int64(400 * time.Millisecond))
+	call[apigen.NetworkAssignment](admin, http.MethodPut, "/api/v1/network/assignments", map[string]any{"target_kind": "plugin", "target_id": "fake", "profile_id": "vpn"}, 200)
+	waitFor(t, "the push to start", func() bool { return fake.pushes.Load() > 0 })
+	call[apigen.Proxy](admin, http.MethodPatch, "/api/v1/network/proxies/nl", map[string]any{"password": "pw-2"}, 200)
+	deadline := time.Now().Add(8 * time.Second)
+	for fake.Profile("1001").GetProxy().GetPassword() != "pw-2" || fake.Profile("2001").GetProxy().GetPassword() != "pw-2" {
+		if time.Now().After(deadline) {
+			t.Fatal("a change made during a push was lost")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

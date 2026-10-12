@@ -4,7 +4,6 @@ package chapters
 
 import (
 	"math"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -54,26 +53,41 @@ const (
 	ReasonFirstListed = "first_listed"
 )
 
-var numberInName = regexp.MustCompile(`(?i)(?:\bch(?:apter|\.)?|\bep(?:isode|\.)?|#|第)\s*(\d+(?:[.,]\d+)?)`)
-
 // roundNumber keeps three decimals, so 12.5 from two sources is one key.
 func roundNumber(f float64) float64 { return math.Round(f*1000) / 1000 }
 
 // NumberOf is a variant's chapter number: the source's, or one read from
-// its name ("Chapter 12.5", "Ch. 3", "#7"). Negative numbers mean unknown.
+// its name ("Chapter 12.5", "Ch. 3", "#7", "12"; see Parse). Negative
+// numbers mean unknown. Extras (a name starting with "Side Story",
+// "Special", "Extra", "Notice", …) have none: they stand apart from the
+// numbered run, whatever number the source gives them.
 func NumberOf(number *float64, name string) *float64 {
+	p := Parse(name)
+	if p.Extra {
+		return nil
+	}
 	if number != nil && *number >= 0 && !math.IsNaN(*number) && !math.IsInf(*number, 0) {
 		n := roundNumber(*number)
 		return &n
 	}
-	if m := numberInName.FindStringSubmatch(name); m != nil {
-		if f, err := strconv.ParseFloat(strings.ReplaceAll(m[1], ",", "."), 64); err == nil {
-			n := roundNumber(f)
-			return &n
-		}
-	}
-	return nil
+	return p.Number
 }
+
+// VolumeOf is a variant's volume: the source's, or one read from its
+// name ("Vol. 2", "Volume 2", "v2", "第2卷"), without leading zeros.
+func VolumeOf(volume, name string) string {
+	if v := strings.TrimSpace(volume); v != "" {
+		if _, err := strconv.ParseFloat(strings.ReplaceAll(v, ",", "."), 64); err == nil {
+			return cleanVolume(v)
+		}
+		return v
+	}
+	return Parse(name).Volume
+}
+
+// DisplayTitle is a chapter's own name for showing, without its number,
+// volume or scanlator noise; empty when the name has nothing else.
+func DisplayTitle(name string) string { return Parse(name).Title }
 
 // GroupVariants groups variants into canonical chapters by number; each
 // variant without a number is a chapter of its own. Groups come in number

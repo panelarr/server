@@ -41,7 +41,8 @@ func (s *Server) visibleSources(ctx context.Context) (map[string]bool, error) {
 func toVariant(v chapters.VariantView) apigen.ChapterVariant {
 	out := apigen.ChapterVariant{
 		Id: v.ID, SeriesId: v.SeriesID, SourceId: v.SourceID, SourceName: v.SourceName, Key: v.Key, Name: v.Name,
-		Volume: nonEmpty(v.Volume), Scanlator: nonEmpty(v.Scanlator), Lang: nonEmpty(v.Lang), UploadedAt: v.UploadedAt,
+		DisplayTitle: chapters.DisplayTitle(v.Name),
+		Volume:       nonEmpty(v.Volume), Scanlator: nonEmpty(v.Scanlator), Lang: nonEmpty(v.Lang), UploadedAt: v.UploadedAt,
 		Priority: int(v.Priority), SourceHealth: apigen.ChapterVariantSourceHealth(v.Health),
 	}
 	if n := chapters.NumberOf(v.Number, v.Name); n != nil {
@@ -57,7 +58,7 @@ func toVariant(v chapters.VariantView) apigen.ChapterVariant {
 // the caller may use.
 func toUnified(c chapters.Chapter, visible map[string]bool, downloaded bool) apigen.UnifiedChapter {
 	out := apigen.UnifiedChapter{
-		Id: c.ID, Volume: nonEmpty(c.Volume), Title: c.Title, Extra: c.Number == nil, Available: c.Available,
+		Id: c.ID, Volume: nonEmpty(c.Volume), Title: c.Title, DisplayTitle: chapters.DisplayTitle(c.Title), Extra: c.Number == nil, Available: c.Available,
 		New: c.New, Variants: c.Variants, Reason: c.Reason, Pinned: c.PinnedVariantID.Valid, CreatedAt: c.CreatedAt,
 		Downloaded: downloaded,
 	}
@@ -193,7 +194,7 @@ func (s *Server) ListSeriesChapters(ctx context.Context, req apigen.ListSeriesCh
 	}
 	for i, c := range list {
 		sc := apigen.SeriesChapter{
-			Key: c.Key, Name: c.Name, Volume: nonEmpty(c.Volume), Scanlator: nonEmpty(c.Scanlator), Lang: nonEmpty(c.Lang),
+			Key: c.Key, Name: c.Name, DisplayTitle: chapters.DisplayTitle(c.Name), Volume: nonEmpty(c.Volume), Scanlator: nonEmpty(c.Scanlator), Lang: nonEmpty(c.Lang),
 			Url: nonEmpty(c.Url), UploadedAt: c.UploadedAt, Present: c.Present,
 		}
 		if c.Number != nil {

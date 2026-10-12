@@ -57,7 +57,7 @@ func TestUnifiedChapters(t *testing.T) {
 		return len(cs) == 3 && cs[0].Variants == 2 && cs[2].Variants == 2
 	})
 	for i, c := range chs {
-		if c.Number == nil || *c.Number != float32(i+1) || c.Chosen == nil || c.Reason == "" || !c.New || !c.Available {
+		if c.Number == nil || *c.Number != float32(i+1) || c.Chosen == nil || c.Reason == "" || !c.New || !c.Available || c.DisplayTitle != "" {
 			t.Fatalf("chapter %d: %+v", i, c)
 		}
 	}

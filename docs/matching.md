@@ -36,7 +36,7 @@ The instance setting `matching` (JSON) overrides the defaults: `max_queries` (5)
 
 ## Chapters
 
-Every attached series' chapters are kept exactly as its source lists them (the per-source view on a work's page). Across sources, chapters with the same number become **one chapter** (numbers are read from the source, or from the name such as "Chapter 12.5" when the source gives none); the volume is the one most sources give. Chapters without a number stay per source and are listed after the numbered ones. So a chapter missing on one source is filled from another.
+Every attached series' chapters are kept exactly as its source lists them (the per-source view on a work's page). Across sources, chapters with the same number become **one chapter**. Numbers come from the source, or from the name when the source gives none: "Chapter 12.5", "Ch. 3", "Ep. 7", "#7", "第12话", a bare "12", ranges such as "10-11" (by their first number). The volume comes from the source, or from the name ("Vol. 2", "Volume 2", "v2", "第2卷"), and a chapter takes the one most of its copies give. Names starting with "Extra", "Special", "Side Story", "Bonus", "Notice", "Hiatus" and the like are extras: they stand apart from the numbered run even when the source numbers them. Chapters without a number (extras included) stay per source and are listed after the numbered ones. Each chapter also gets a **display title**, its own name without the number, volume and scanlator noise ("Vol. 1 Volume 1 Chapter 1: Double Dungeon" → "Double Dungeon"; "Ch. 200 OFFICIAL TRANSLATION" → none, shown as "Chapter 200"); downloads use it as the ComicInfo title. So a chapter missing on one source is filled from another.
 
 Each chapter shows one chosen copy and why:
 

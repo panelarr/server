@@ -35,6 +35,7 @@ type Client struct {
 	Meta    metav1connect.MetaServiceClient
 	Admin   metav1connect.MetaAdminServiceClient
 	Clients metav1connect.MetaClientsServiceClient
+	Jobs    metav1connect.MetaJobsServiceClient
 }
 
 // newHTTPClient returns an HTTP/2 client: TLS for https and cleartext
@@ -65,6 +66,7 @@ func NewClient(conn Conn, hc *http.Client) *Client {
 		Meta:    metav1connect.NewMetaServiceClient(hc, base, opts...),
 		Admin:   metav1connect.NewMetaAdminServiceClient(hc, base, opts...),
 		Clients: metav1connect.NewMetaClientsServiceClient(hc, base, opts...),
+		Jobs:    metav1connect.NewMetaJobsServiceClient(hc, base, opts...),
 	}
 }
 

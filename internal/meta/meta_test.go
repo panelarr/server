@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
@@ -262,5 +263,72 @@ func TestErrorClassification(t *testing.T) {
 	}
 	if c := s.Check(ctx, true); c.Reachable || !strings.Contains(c.Problem, "Can't reach") {
 		t.Fatalf("check while down: %+v", c)
+	}
+}
+
+func TestCheckNotSpoiledByACancelledCaller(t *testing.T) {
+	t.Parallel()
+	fake := metatest.New(t)
+	fake.SetProviders(map[string]int64{"books": 1})
+	s := newService(t, meta.Conn{URL: fake.URL, APIKey: metatest.AdminKey})
+	if err := s.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	fake.SetDelay(150 * time.Millisecond)
+
+	// A caller that gives up mid-check gets an uncached "didn't finish".
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	c := s.Check(ctx, true)
+	cancel()
+	if c.Ready || !strings.Contains(c.Problem, "didn't finish") {
+		t.Fatalf("cancelled caller: %+v", c)
+	}
+	// The check carried on; others see its real result, never the
+	// caller's cancellation.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		c = s.Check(context.Background(), false)
+		if c.Ready {
+			break
+		}
+		if strings.Contains(c.Problem, "context canceled") || time.Now().After(deadline) {
+			t.Fatalf("cached check: %+v", c)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := s.ReadyCheck(context.Background()); err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+}
+
+func TestRunSyncUsesTheJobsAPI(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	fake := metatest.New(t)
+	fake.SetProviders(map[string]int64{"books": 1})
+	s := newService(t, meta.Conn{URL: fake.URL, APIKey: metatest.AdminKey})
+	if err := s.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := s.RunSync(ctx, "books", "dump"); err != nil || id == "" {
+		t.Fatalf("jobs: %q %v", id, err)
+	}
+	// An older service without the jobs API gets the older call.
+	fake.SetLegacy(true)
+	if id, err := s.RunSync(ctx, "books", "delta"); err != nil || id == "" {
+		t.Fatalf("legacy: %q %v", id, err)
+	}
+	if via := fake.SyncVia(); len(via) != 2 || via[0] != "jobs" || via[1] != "admin" {
+		t.Fatalf("via %v", via)
+	}
+	if syncs := fake.Syncs(); syncs[0].GetKind() != "dump" || syncs[1].GetKind() != "delta" {
+		t.Fatalf("syncs %v", syncs)
+	}
+	// A down provider is reported the same through the jobs API.
+	fake.SetLegacy(false)
+	fake.SetProviderDown("books", true)
+	var pu *meta.ProviderUnavailableError
+	if _, err := s.RunSync(ctx, "books", "dump"); !errors.As(err, &pu) || pu.Provider != "books" {
+		t.Fatalf("down: %v", err)
 	}
 }

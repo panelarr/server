@@ -11,9 +11,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
@@ -40,6 +42,12 @@ type Fake struct {
 	explicit     bool
 	// failWith makes catalogue calls answer with this error code.
 	failWith connect.Code
+	// legacy: no jobs API (an older service).
+	legacy bool
+	// delay slows every call down.
+	delay time.Duration
+	// via records which API started each sync: "jobs" or "admin".
+	via []string
 }
 
 // New starts a fake with one admin key, AdminKey, and no providers.
@@ -51,6 +59,7 @@ func New(t testing.TB) *Fake {
 	mux.Handle(metav1connect.NewMetaServiceHandler(&metaHandler{f: f}, opts))
 	mux.Handle(metav1connect.NewMetaAdminServiceHandler(&adminHandler{f: f}, opts))
 	mux.Handle(metav1connect.NewMetaClientsServiceHandler(&clientsHandler{f: f}, opts))
+	mux.Handle(metav1connect.NewMetaJobsServiceHandler(&jobsHandler{f: f}, opts))
 	// Down means no answer at all: the connection is cut.
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -122,6 +131,27 @@ func (f *Fake) FailWith(code connect.Code) {
 	f.failWith = code
 }
 
+// SetLegacy makes the service lack the jobs API, like an older version.
+func (f *Fake) SetLegacy(legacy bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.legacy = legacy
+}
+
+// SetDelay slows every call down.
+func (f *Fake) SetDelay(d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delay = d
+}
+
+// SyncVia returns which API started each sync, in order.
+func (f *Fake) SyncVia() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.via)
+}
+
 // SetDown makes the service unreachable: connections are cut without an
 // answer.
 func (f *Fake) SetDown(down bool) {
@@ -149,7 +179,11 @@ func (f *Fake) auth() connect.UnaryInterceptorFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			f.mu.Lock()
 			scopes, ok := f.keys[strings.TrimPrefix(req.Header().Get("Authorization"), "Bearer ")]
+			delay := f.delay
 			f.mu.Unlock()
+			if delay > 0 {
+				time.Sleep(delay)
+			}
 			if !ok {
 				return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("unknown key"))
 			}
@@ -196,25 +230,64 @@ func (h *adminHandler) RunSync(ctx context.Context, req *connect.Request[metav1.
 	if err := requireAdmin(ctx); err != nil {
 		return nil, err
 	}
-	h.f.mu.Lock()
-	defer h.f.mu.Unlock()
-	found := slices.ContainsFunc(h.f.providers, func(p *metav1.Provider) bool { return p.Id == req.Msg.GetProvider() })
+	run, err := h.f.startSync(req.Msg.GetProvider(), req.Msg.GetKind(), "admin")
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&metav1.RunSyncResponse{Run: run}), nil
+}
+
+// startSync starts a sync as the service does, or answers why it can't.
+func (f *Fake) startSync(provider, kind, via string) (*metav1.SyncRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	found := slices.ContainsFunc(f.providers, func(p *metav1.Provider) bool { return p.Id == provider })
 	if !found {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("no such provider"))
 	}
-	if h.f.providerDown[req.Msg.GetProvider()] {
+	if f.providerDown[provider] {
 		cerr := connect.NewError(connect.CodeUnavailable, errors.New("plugin is not connected"))
-		if h.f.explicit {
+		if f.explicit {
 			if d, err := connect.NewErrorDetail(&errdetails.ErrorInfo{
-				Reason: "PROVIDER_UNAVAILABLE", Domain: "panelarr.meta", Metadata: map[string]string{"provider": req.Msg.GetProvider()},
+				Reason: "PROVIDER_UNAVAILABLE", Domain: "panelarr.meta", Metadata: map[string]string{"provider": provider},
 			}); err == nil {
 				cerr.AddDetail(d)
 			}
 		}
 		return nil, cerr
 	}
-	h.f.syncs = append(h.f.syncs, req.Msg)
-	return connect.NewResponse(&metav1.RunSyncResponse{Run: &metav1.SyncRun{Id: "run-1", Provider: req.Msg.GetProvider(), Kind: req.Msg.GetKind()}}), nil
+	f.syncs = append(f.syncs, &metav1.RunSyncRequest{Provider: provider, Kind: kind})
+	f.via = append(f.via, via)
+	return &metav1.SyncRun{Id: "run-" + strconv.Itoa(len(f.syncs)), Provider: provider, Kind: kind}, nil
+}
+
+type jobsHandler struct {
+	metav1connect.UnimplementedMetaJobsServiceHandler
+	f *Fake
+}
+
+func (h *jobsHandler) RunJob(ctx context.Context, req *connect.Request[metav1.RunJobRequest]) (*connect.Response[metav1.RunJobResponse], error) {
+	h.f.mu.Lock()
+	legacy := h.f.legacy
+	h.f.mu.Unlock()
+	if legacy {
+		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("no jobs API"))
+	}
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	parts := strings.Split(req.Msg.GetJobId(), ".")
+	if len(parts) != 3 || parts[0] != "sync" {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("no job "+req.Msg.GetJobId()))
+	}
+	run, err := h.f.startSync(parts[1], parts[2], "jobs")
+	if err != nil {
+		if connect.CodeOf(err) == connect.CodeNotFound {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("no job "+req.Msg.GetJobId()))
+		}
+		return nil, err
+	}
+	return connect.NewResponse(&metav1.RunJobResponse{Run: &metav1.JobRunSummary{Id: run.GetId(), JobId: req.Msg.GetJobId(), TriggeredBy: "test client"}}), nil
 }
 
 type metaHandler struct {

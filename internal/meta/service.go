@@ -17,6 +17,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/sync/singleflight"
 
 	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
 
@@ -93,6 +94,7 @@ type Service struct {
 	conn   Conn
 	client *Client
 	last   Check
+	checks singleflight.Group
 
 	covers coverIndex
 }
@@ -175,13 +177,26 @@ func (s *Service) Check(ctx context.Context, fresh bool) Check {
 	if !fresh && !last.CheckedAt.IsZero() && s.now().Sub(last.CheckedAt) < checkTTL {
 		return last
 	}
-	c := s.check(ctx, client)
-	s.mu.Lock()
-	if s.client == client {
-		s.last = c
+	// The check runs detached from the caller and is shared by callers
+	// asking at the same time: one caller giving up (a closed browser tab,
+	// a probe's short timeout) must not cut the check short and leave its
+	// cancellation cached as everyone's result for checkTTL.
+	ch := s.checks.DoChan("check", func() (any, error) {
+		c := s.check(context.WithoutCancel(ctx), client)
+		s.mu.Lock()
+		if s.client == client {
+			s.last = c
+		}
+		s.mu.Unlock()
+		return c, nil
+	})
+	select {
+	case res := <-ch:
+		return res.Val.(Check)
+	case <-ctx.Done():
+		// Not cached: the check carries on and caches its own result.
+		return Check{Configured: true, Problem: "The check of the metadata service didn't finish in time.", CheckedAt: s.now()}
 	}
-	s.mu.Unlock()
-	return c
 }
 
 // ReadyCheck is the readiness check: it fails while the service isn't
@@ -289,14 +304,26 @@ func (s *Service) RunSync(ctx context.Context, provider, kind string) (string, e
 	if err != nil {
 		return "", err
 	}
-	res, err := client.Admin.RunSync(ctx, connect.NewRequest(&metav1.RunSyncRequest{Provider: provider, Kind: kind}))
-	if err != nil {
+	// The jobs API records who started the run (the server's client in
+	// the metadata service); a service without it gets the older call.
+	var id string
+	res, err := client.Jobs.RunJob(ctx, connect.NewRequest(&metav1.RunJobRequest{JobId: "sync." + provider + "." + kind}))
+	switch {
+	case err == nil:
+		id = res.Msg.GetRun().GetId()
+	case connect.CodeOf(err) == connect.CodeUnimplemented:
+		old, oerr := client.Admin.RunSync(ctx, connect.NewRequest(&metav1.RunSyncRequest{Provider: provider, Kind: kind}))
+		if oerr != nil {
+			return "", wrap("run sync", providerError(oerr, provider))
+		}
+		id = old.Msg.GetRun().GetId()
+	default:
 		return "", wrap("run sync", providerError(err, provider))
 	}
 	s.mu.Lock()
 	s.last = Check{} // the next check sees the new state
 	s.mu.Unlock()
-	return res.Msg.GetRun().GetId(), nil
+	return id, nil
 }
 
 func validURL(raw string) error {

@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/google/uuid"
+
 	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
 	metadatav1 "github.com/panelarr/meta/gen/panelarr/metadata/v1"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/panelarr/server/internal/auth"
 	"github.com/panelarr/server/internal/imagecache"
 	"github.com/panelarr/server/internal/meta"
+	"github.com/panelarr/server/internal/store/db"
 	"github.com/panelarr/server/internal/users"
 )
 
@@ -148,6 +151,23 @@ func catalogQuery(ctx context.Context, types, statuses, genres *[]string, yearFr
 	return q
 }
 
+// libraryWorks maps catalogue entries in the caller's library to their
+// works.
+func (s *Server) libraryWorks(ctx context.Context, entryIDs []string) (map[string]uuid.UUID, error) {
+	if len(entryIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := s.deps.Store.LibraryWorksByEntries(ctx, db.LibraryWorksByEntriesParams{UserID: auth.FromContext(ctx).User.ID, EntryIds: entryIDs})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]uuid.UUID, len(rows))
+	for _, r := range rows {
+		out[r.MetaEntryID] = r.ID
+	}
+	return out, nil
+}
+
 // SearchCatalog searches the catalogue.
 func (s *Server) SearchCatalog(ctx context.Context, req apigen.SearchCatalogRequestObject) (apigen.SearchCatalogResponseObject, error) {
 	p := req.Params
@@ -167,8 +187,19 @@ func (s *Server) SearchCatalog(ctx context.Context, req apigen.SearchCatalogRequ
 	if res.GetTotalSize() > 0 {
 		out.TotalSize = ptr(res.GetTotalSize())
 	}
+	ids := make([]string, 0, len(res.GetHits()))
+	for _, h := range res.GetHits() {
+		ids = append(ids, h.GetEntry().GetId())
+	}
+	inLib, err := s.libraryWorks(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	for _, h := range res.GetHits() {
 		hit := apigen.CatalogSearchHit{Entry: toSummary(h.GetEntry())}
+		if w, ok := inLib[h.GetEntry().GetId()]; ok {
+			hit.Entry.LibraryWorkId = &w
+		}
 		if m := h.GetMatched(); m != "" && m != h.GetEntry().GetTitle() {
 			hit.Matched = &m
 		}
@@ -194,8 +225,20 @@ func (s *Server) BrowseCatalog(ctx context.Context, req apigen.BrowseCatalogRequ
 	if res.GetTotalSize() > 0 {
 		out.TotalSize = ptr(res.GetTotalSize())
 	}
+	ids := make([]string, 0, len(res.GetEntries()))
 	for _, e := range res.GetEntries() {
-		out.Entries = append(out.Entries, toSummary(e))
+		ids = append(ids, e.GetId())
+	}
+	inLib, err := s.libraryWorks(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range res.GetEntries() {
+		sum := toSummary(e)
+		if w, ok := inLib[e.GetId()]; ok {
+			sum.LibraryWorkId = &w
+		}
+		out.Entries = append(out.Entries, sum)
 	}
 	return out, nil
 }
@@ -206,7 +249,15 @@ func (s *Server) GetCatalogEntry(ctx context.Context, req apigen.GetCatalogEntry
 	if err != nil {
 		return nil, metaError(err)
 	}
-	return apigen.GetCatalogEntry200JSONResponse(toEntry(e)), nil
+	out := toEntry(e)
+	inLib, err := s.libraryWorks(ctx, []string{e.GetId()})
+	if err != nil {
+		return nil, err
+	}
+	if w, ok := inLib[e.GetId()]; ok {
+		out.LibraryWorkId = &w
+	}
+	return apigen.GetCatalogEntry200JSONResponse(out), nil
 }
 
 func toEntry(e *metav1.Entry) apigen.CatalogEntry {

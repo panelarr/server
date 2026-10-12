@@ -99,6 +99,8 @@ type Querier interface {
 	InsertTask(ctx context.Context, arg InsertTaskParams) (Task, error)
 	LastJobRuns(ctx context.Context) ([]JobRun, error)
 	LibraryUserIDs(ctx context.Context, workID uuid.UUID) ([]uuid.UUID, error)
+	// Which of these catalogue entries are in a user's library, as which work.
+	LibraryWorksByEntries(ctx context.Context, arg LibraryWorksByEntriesParams) ([]LibraryWorksByEntriesRow, error)
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ApiKey, error)
 	ListChapters(ctx context.Context, workID uuid.UUID) ([]Chapter, error)
 	// Download tasks with their chapter and work, newest first; users see the

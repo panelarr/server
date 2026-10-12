@@ -274,7 +274,7 @@ func (s *Server) ListDownloads(ctx context.Context, req apigen.ListDownloadsRequ
 		out.NextPageToken = timeCursor(last.CreatedAt, last.ID)
 	}
 	for _, it := range items {
-		d := apigen.DownloadItem{Task: toTask(it.Task), WorkId: it.WorkID, WorkTitle: it.WorkTitle, ChapterTitle: it.ChapterTitle}
+		d := apigen.DownloadItem{Task: toTask(it.Task), WorkId: it.WorkID, WorkTitle: it.WorkTitle, ChapterId: it.ChapterID, ChapterTitle: it.ChapterTitle}
 		if it.ChapterNumber != nil {
 			d.ChapterNumber = ptr(float32(*it.ChapterNumber))
 		}

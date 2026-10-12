@@ -573,6 +573,7 @@ func (s *Service) moveOne(ctx context.Context, src, dst storage.Storage, dstID s
 // Item is a download task with its chapter and work.
 type Item struct {
 	Task          db.Task
+	ChapterID     uuid.UUID
 	WorkID        uuid.UUID
 	WorkTitle     string
 	ChapterNumber *float64
@@ -599,7 +600,7 @@ func (s *Service) List(ctx context.Context, userID *uuid.UUID, state string, bef
 	}
 	out := make([]Item, len(rows))
 	for i, r := range rows {
-		out[i] = Item{Task: r.Task, WorkID: r.WorkID, WorkTitle: r.WorkTitle, ChapterNumber: r.ChapterNumber, ChapterTitle: r.ChapterTitle}
+		out[i] = Item{Task: r.Task, ChapterID: r.ChapterID, WorkID: r.WorkID, WorkTitle: r.WorkTitle, ChapterNumber: r.ChapterNumber, ChapterTitle: r.ChapterTitle}
 	}
 	return out, nil
 }

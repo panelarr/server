@@ -34,8 +34,8 @@ func TestJobsAPI(t *testing.T) {
 		t.Fatalf("run %+v", run)
 	}
 	p := admin.expectProblem(http.MethodPost, "/api/v1/jobs/demo.job/run", nil, 409, "already_running")
-	if !strings.Contains(*p.Detail, run.Id.String()) {
-		t.Fatalf("detail %q", *p.Detail)
+	if !strings.Contains(*p.Detail, run.Id.String()) || p.CurrentRunId == nil || *p.CurrentRunId != run.Id {
+		t.Fatalf("problem %+v", p)
 	}
 	job := call[apigen.Job](admin, http.MethodGet, "/api/v1/jobs/demo.job", nil, 200)
 	if !job.Running || job.CurrentRunId == nil || *job.CurrentRunId != run.Id {

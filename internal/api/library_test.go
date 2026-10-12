@@ -94,6 +94,18 @@ func TestLibraryFlow(t *testing.T) {
 	}
 	user.expectProblem(http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "missing"}, 404, CodeNotFound)
 
+	// The catalogue says which entries are in your library.
+	found := call[apigen.CatalogSearchPage](user, http.MethodGet, "/api/v1/catalog/search?q=lantern", nil, 200)
+	if len(found.Hits) != 1 || found.Hits[0].Entry.LibraryWorkId == nil || *found.Hits[0].Entry.LibraryWorkId != entry.Work.Id {
+		t.Fatalf("search %+v", found)
+	}
+	if e := call[apigen.CatalogEntry](user, http.MethodGet, "/api/v1/catalog/entries/e1", nil, 200); e.LibraryWorkId == nil {
+		t.Fatal("entry without library_work_id")
+	}
+	if e := call[apigen.CatalogEntry](user, http.MethodGet, "/api/v1/catalog/entries/e2", nil, 200); e.LibraryWorkId != nil {
+		t.Fatal("entry not in the library has library_work_id")
+	}
+
 	w := waitWorkMatched(t, user, entry.Work.Id.String())
 	if !w.InLibrary || w.AttachedSources != 2 {
 		t.Fatalf("work %+v", w)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
+	"github.com/google/uuid"
 
 	"github.com/panelarr/server/internal/api/apigen"
 )
@@ -30,6 +31,8 @@ type Problem struct {
 	Code   string
 	Detail string
 	Fields []apigen.FieldError
+	// CurrentRunID goes with already_running.
+	CurrentRunID *uuid.UUID
 }
 
 func (p *Problem) Error() string { return p.Code + ": " + p.Detail }
@@ -57,6 +60,7 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p *Problem) {
 	if len(p.Fields) > 0 {
 		body.Errors = &p.Fields
 	}
+	body.CurrentRunId = p.CurrentRunID
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(p.Status)
 	_ = json.NewEncoder(w).Encode(body)

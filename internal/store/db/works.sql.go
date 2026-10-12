@@ -335,6 +335,43 @@ func (q *Queries) LibraryUserIDs(ctx context.Context, workID uuid.UUID) ([]uuid.
 	return items, nil
 }
 
+const libraryWorksByEntries = `-- name: LibraryWorksByEntries :many
+SELECT works.id, works.meta_entry_id FROM works
+JOIN library_entries ON library_entries.work_id = works.id
+WHERE library_entries.user_id = $1 AND works.meta_entry_id = ANY($2::text[])
+`
+
+type LibraryWorksByEntriesParams struct {
+	UserID   uuid.UUID
+	EntryIds []string
+}
+
+type LibraryWorksByEntriesRow struct {
+	ID          uuid.UUID
+	MetaEntryID string
+}
+
+// Which of these catalogue entries are in a user's library, as which work.
+func (q *Queries) LibraryWorksByEntries(ctx context.Context, arg LibraryWorksByEntriesParams) ([]LibraryWorksByEntriesRow, error) {
+	rows, err := q.db.Query(ctx, libraryWorksByEntries, arg.UserID, arg.EntryIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LibraryWorksByEntriesRow{}
+	for rows.Next() {
+		var i LibraryWorksByEntriesRow
+		if err := rows.Scan(&i.ID, &i.MetaEntryID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLibrary = `-- name: ListLibrary :many
 SELECT works.id, works.meta_entry_id, works.title, works.sort_title, works.type, works.status, works.content_rating, works.year, works.original_language, works.cover_url, works.meta_synced_at, works.created_at, works.updated_at, library_entries.added_at, library_entries.auto_download
 FROM library_entries JOIN works ON works.id = library_entries.work_id

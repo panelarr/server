@@ -103,3 +103,9 @@ SELECT * FROM works
 WHERE EXISTS (SELECT 1 FROM library_entries WHERE library_entries.work_id = works.id)
 ORDER BY meta_synced_at
 LIMIT @lim;
+
+-- name: LibraryWorksByEntries :many
+-- Which of these catalogue entries are in a user's library, as which work.
+SELECT works.id, works.meta_entry_id FROM works
+JOIN library_entries ON library_entries.work_id = works.id
+WHERE library_entries.user_id = @user_id AND works.meta_entry_id = ANY(@entry_ids::text[]);

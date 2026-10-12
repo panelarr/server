@@ -61,7 +61,7 @@ WHERE library_entries.work_id = $1 AND library_entries.auto_download;
 -- name: ListDownloadTasks :many
 -- Download tasks with their chapter and work, newest first; users see the
 -- ones they asked for, admins all.
-SELECT sqlc.embed(tasks), chapters.number AS chapter_number, chapters.title AS chapter_title,
+SELECT sqlc.embed(tasks), chapters.id AS chapter_id, chapters.number AS chapter_number, chapters.title AS chapter_title,
        works.id AS work_id, works.title AS work_title
 FROM tasks
 JOIN chapters ON chapters.id = (tasks.payload->>'chapter_id')::uuid

@@ -314,7 +314,7 @@ func (q *Queries) InsertChapterFile(ctx context.Context, arg InsertChapterFilePa
 }
 
 const listDownloadTasks = `-- name: ListDownloadTasks :many
-SELECT tasks.id, tasks.kind, tasks.payload, tasks.dedupe_key, tasks.limit_key, tasks.priority, tasks.state, tasks.attempts, tasks.max_attempts, tasks.run_after, tasks.lease_until, tasks.last_error, tasks.progress, tasks.result, tasks.created_by, tasks.created_at, tasks.started_at, tasks.finished_at, tasks.updated_at, chapters.number AS chapter_number, chapters.title AS chapter_title,
+SELECT tasks.id, tasks.kind, tasks.payload, tasks.dedupe_key, tasks.limit_key, tasks.priority, tasks.state, tasks.attempts, tasks.max_attempts, tasks.run_after, tasks.lease_until, tasks.last_error, tasks.progress, tasks.result, tasks.created_by, tasks.created_at, tasks.started_at, tasks.finished_at, tasks.updated_at, chapters.id AS chapter_id, chapters.number AS chapter_number, chapters.title AS chapter_title,
        works.id AS work_id, works.title AS work_title
 FROM tasks
 JOIN chapters ON chapters.id = (tasks.payload->>'chapter_id')::uuid
@@ -337,6 +337,7 @@ type ListDownloadTasksParams struct {
 
 type ListDownloadTasksRow struct {
 	Task          Task
+	ChapterID     uuid.UUID
 	ChapterNumber *float64
 	ChapterTitle  string
 	WorkID        uuid.UUID
@@ -380,6 +381,7 @@ func (q *Queries) ListDownloadTasks(ctx context.Context, arg ListDownloadTasksPa
 			&i.Task.StartedAt,
 			&i.Task.FinishedAt,
 			&i.Task.UpdatedAt,
+			&i.ChapterID,
 			&i.ChapterNumber,
 			&i.ChapterTitle,
 			&i.WorkID,

@@ -59,7 +59,7 @@ func TestDownloads(t *testing.T) {
 	call[apigen.DownloadsQueued](admin, http.MethodPost, "/api/v1/works/"+id+"/downloads", map[string]any{"chapter_ids": []string{chs[0].Id.String()}}, 202)
 	waitDownloads(t, admin, 3)
 	mine := call[apigen.DownloadPage](downloader, http.MethodGet, "/api/v1/downloads", nil, 200)
-	if len(mine.Items) != 3 || mine.Items[0].WorkTitle != "The Lantern Keeper" {
+	if len(mine.Items) != 3 || mine.Items[0].WorkTitle != "The Lantern Keeper" || mine.Items[0].ChapterId.String() == "00000000-0000-0000-0000-000000000000" {
 		t.Fatalf("my downloads %+v", mine)
 	}
 	if again := call[apigen.DownloadsQueued](downloader, http.MethodPost, "/api/v1/works/"+id+"/downloads", map[string]string{"scope": "all"}, 202); again.Downloaded != 3 || again.Queued != 0 {

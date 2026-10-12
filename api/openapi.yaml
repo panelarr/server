@@ -1383,6 +1383,17 @@ paths:
         event's `data` is JSON. The stream opens with a `ready` event and
         sends a comment every 25 seconds to keep proxies from closing it.
         Events aren't replayed: after reconnecting, refetch what you show.
+
+        | Event | Who gets it | `data` schema |
+        |---|---|---|
+        | `ready` | the caller | `{}` |
+        | `task.queued`, `task.started`, `task.progress`, `task.updated` | admins, the task's requester | `TaskEvent` |
+        | `job.started`, `job.progress`, `job.done`, `job.failed` | admins | `JobEvent` |
+        | `work.updated` | admins, the work's followers | `WorkEvent` |
+        | `chapters.new` | admins, the work's followers | `WorkEvent` (`new`) |
+        | `chapter.downloaded` | admins, the work's followers | `WorkEvent` (`chapter_id`) |
+        | `library.changed` | the user | `WorkEvent` |
+        | `progress.synced` | the user (all devices) | `WorkEvent` (`chapter_id`, `page`, `completed` when one chapter changed) |
       x-panelarr-access: user
       responses:
         "200":
@@ -2597,10 +2608,13 @@ components:
           description: No source lists them.
     DownloadItem:
       type: object
-      required: [task, work_id, work_title, chapter_title]
+      required: [task, work_id, work_title, chapter_id, chapter_title]
       properties:
         task:
           $ref: "#/components/schemas/Task"
+        chapter_id:
+          type: string
+          format: uuid
         work_id:
           type: string
           format: uuid
@@ -3164,6 +3178,56 @@ components:
           minimum: -1000
           maximum: 1000
 
+    TaskEvent:
+      type: object
+      description: Data of `task.*` events.
+      required: [id, kind, state, attempts]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+        state:
+          $ref: "#/components/schemas/TaskState"
+        attempts:
+          type: integer
+        last_error:
+          type: string
+        progress:
+          $ref: "#/components/schemas/JobProgress"
+    JobEvent:
+      type: object
+      description: Data of `job.*` events.
+      required: [job_id, run_id]
+      properties:
+        job_id:
+          type: string
+        run_id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/JobRunStatus"
+        progress:
+          $ref: "#/components/schemas/JobProgress"
+    WorkEvent:
+      type: object
+      description: Data of `work.updated`, `chapters.new`, `chapter.downloaded`, `library.changed` and `progress.synced`.
+      required: [work_id]
+      properties:
+        work_id:
+          type: string
+          format: uuid
+        chapter_id:
+          type: string
+          format: uuid
+        new:
+          type: integer
+          description: "`chapters.new`: how many chapters appeared."
+        page:
+          type: integer
+        completed:
+          type: boolean
     JobParam:
       type: object
       required: [name, type, required]
@@ -3173,6 +3237,7 @@ components:
         type:
           type: string
           enum: [bool, int, string, string_list]
+          description: How to send the value in `params`, always as a string; `string_list` is comma-separated (e.g. "en,de").
         description:
           type: string
         required:
@@ -3813,6 +3878,10 @@ components:
       type: object
       required: [id, title, content_rating, genres, attribution]
       properties:
+        library_work_id:
+          type: string
+          format: uuid
+          description: The work, when this entry is in your library.
         id:
           type: string
         title:
@@ -3955,6 +4024,10 @@ components:
       type: object
       required: [id, title, content_rating, titles, descriptions, credits, genres, tags, external_ids, links, attribution]
       properties:
+        library_work_id:
+          type: string
+          format: uuid
+          description: The work, when this entry is in your library.
         id:
           type: string
         title:
@@ -4038,6 +4111,10 @@ components:
         request_id:
           type: string
           description: The request's ID, also in the X-Request-Id header and the server log.
+        current_run_id:
+          type: string
+          format: uuid
+          description: With code `already_running`, the run that is going on.
         errors:
           type: array
           description: Per-field validation errors.

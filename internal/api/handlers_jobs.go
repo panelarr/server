@@ -26,7 +26,7 @@ func jobsError(err error) error {
 	case err == nil:
 		return nil
 	case errors.As(err, &busy):
-		return NewProblem(http.StatusConflict, "already_running", "the job is running as "+busy.RunID.String())
+		return &Problem{Status: http.StatusConflict, Code: "already_running", Detail: "the job is running as " + busy.RunID.String(), CurrentRunID: &busy.RunID}
 	case errors.As(err, &bad):
 		return fieldProblem("params."+bad.Name, bad.Reason)
 	case errors.Is(err, jobs.ErrNotFound), errors.Is(err, queue.ErrNotFound):

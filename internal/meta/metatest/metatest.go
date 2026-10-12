@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -52,6 +53,9 @@ type Fake struct {
 	via []string
 	// pushed are network profiles pushed per provider; unsupported are
 	// providers whose plugin takes no profiles.
+	// jobs and runs are meta's own jobs (not syncs), runs newest last.
+	jobs        []*metav1.Job
+	runs        []*metav1.JobRun
 	pushed      map[string]*metadatav1.NetworkProfile
 	pushedAt    map[string]time.Time
 	unsupported map[string]bool
@@ -284,6 +288,12 @@ func (h *jobsHandler) RunJob(ctx context.Context, req *connect.Request[metav1.Ru
 	if err := requireAdmin(ctx); err != nil {
 		return nil, err
 	}
+	if run, ok, err := h.f.runJob(req.Msg.GetJobId(), req.Msg.GetParams()); ok {
+		if err != nil {
+			return nil, err
+		}
+		return connect.NewResponse(&metav1.RunJobResponse{Run: run}), nil
+	}
 	parts := strings.Split(req.Msg.GetJobId(), ".")
 	if len(parts) != 3 || parts[0] != "sync" {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("no job "+req.Msg.GetJobId()))
@@ -459,4 +469,149 @@ func (h *integrationsHandler) SetPushedProfile(_ context.Context, req *connect.R
 		delete(f.pushedAt, id)
 	}
 	return connect.NewResponse(&metav1.SetPushedProfileResponse{}), nil
+}
+
+// AddJob adds one of meta's jobs (not a sync): RunJob starts a run that
+// stays running until cancelled or finished with FinishRun.
+func (f *Fake) AddJob(j *metav1.Job) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.jobs = append(f.jobs, j)
+}
+
+// FinishRun ends a run as succeeded.
+func (f *Fake) FinishRun(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if r := f.run(id); r != nil {
+		r.Summary.Status = metav1.JobRunStatus_JOB_RUN_STATUS_SUCCEEDED
+		r.Summary.FinishedAt = timestamppb.Now()
+	}
+}
+
+// run finds a run; call with f.mu held.
+func (f *Fake) run(id string) *metav1.JobRun {
+	for _, r := range f.runs {
+		if r.GetSummary().GetId() == id {
+			return r
+		}
+	}
+	return nil
+}
+
+// job is a job as listed now; call with f.mu held.
+func (f *Fake) job(id string) *metav1.Job {
+	for _, j := range f.jobs {
+		if j.GetId() != id {
+			continue
+		}
+		out := proto.Clone(j).(*metav1.Job)
+		for i := len(f.runs) - 1; i >= 0; i-- {
+			if r := f.runs[i].GetSummary(); r.GetJobId() == id {
+				out.LastRun = r
+				if r.GetStatus() == metav1.JobRunStatus_JOB_RUN_STATUS_RUNNING {
+					out.Running, out.CurrentRunId = true, r.GetId()
+				}
+				break
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func (f *Fake) runJob(id string, params map[string]string) (*metav1.JobRunSummary, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	j := f.job(id)
+	if j == nil {
+		return nil, false, nil
+	}
+	if j.GetRunning() {
+		cerr := connect.NewError(connect.CodeAlreadyExists, errors.New("the job is running"))
+		if d, err := connect.NewErrorDetail(&metav1.JobAlreadyRunning{CurrentRunId: j.GetCurrentRunId()}); err == nil {
+			cerr.AddDetail(d)
+		}
+		return nil, true, cerr
+	}
+	sum := &metav1.JobRunSummary{
+		Id: uuid.NewString(), JobId: id, Status: metav1.JobRunStatus_JOB_RUN_STATUS_RUNNING,
+		Trigger: metav1.JobTrigger_JOB_TRIGGER_MANUAL, StartedAt: timestamppb.Now(), TriggeredBy: "test client",
+	}
+	f.runs = append(f.runs, &metav1.JobRun{Summary: sum, Params: params, Progress: &metav1.JobProgress{Phase: "working", Done: 1, Total: 10}})
+	return sum, true, nil
+}
+
+func (h *jobsHandler) ListJobs(ctx context.Context, _ *connect.Request[metav1.ListJobsRequest]) (*connect.Response[metav1.ListJobsResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	f := h.f
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	res := &metav1.ListJobsResponse{}
+	for _, j := range f.jobs {
+		res.Jobs = append(res.Jobs, f.job(j.GetId()))
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *jobsHandler) GetJob(ctx context.Context, req *connect.Request[metav1.GetJobRequest]) (*connect.Response[metav1.GetJobResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	j := h.f.job(req.Msg.GetJobId())
+	if j == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("no such job"))
+	}
+	return connect.NewResponse(&metav1.GetJobResponse{Job: j}), nil
+}
+
+func (h *jobsHandler) ListJobRuns(ctx context.Context, req *connect.Request[metav1.ListJobRunsRequest]) (*connect.Response[metav1.ListJobRunsResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	f := h.f
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.job(req.Msg.GetJobId()) == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("no such job"))
+	}
+	res := &metav1.ListJobRunsResponse{}
+	for i := len(f.runs) - 1; i >= 0; i-- {
+		r := f.runs[i].GetSummary()
+		if r.GetJobId() == req.Msg.GetJobId() && (req.Msg.GetStatus() == metav1.JobRunStatus_JOB_RUN_STATUS_UNSPECIFIED || r.GetStatus() == req.Msg.GetStatus()) {
+			res.Runs = append(res.Runs, r)
+		}
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *jobsHandler) GetJobRun(ctx context.Context, req *connect.Request[metav1.GetJobRunRequest]) (*connect.Response[metav1.GetJobRunResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	r := h.f.run(req.Msg.GetRunId())
+	if r == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("no such run"))
+	}
+	return connect.NewResponse(&metav1.GetJobRunResponse{Run: proto.Clone(r).(*metav1.JobRun)}), nil
+}
+
+func (h *jobsHandler) CancelJobRun(ctx context.Context, req *connect.Request[metav1.CancelJobRunRequest]) (*connect.Response[metav1.CancelJobRunResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	r := h.f.run(req.Msg.GetRunId())
+	if r == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("no such run"))
+	}
+	r.Summary.Status, r.Summary.FinishedAt, r.Summary.Message = metav1.JobRunStatus_JOB_RUN_STATUS_CANCELLED, timestamppb.Now(), "cancelled"
+	return connect.NewResponse(&metav1.CancelJobRunResponse{Run: r.GetSummary()}), nil
 }

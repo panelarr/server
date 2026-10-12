@@ -47,6 +47,10 @@ Entries without a known content rating are shown to users by default. To hide th
 
 Covers are fetched by the server and cached under `<config>/cache/images` (safe to delete).
 
+The metadata service's own admin is available inside Panelarr's, through the server (the browser never talks to meta), apart from meta's API clients and keys:
+
+- **Jobs** (`/api/v1/system/meta/jobs`): meta's background jobs in the same shape as the server's own (provider syncs, duplicate finding, the search index rebuild, …), with their runs; run now and cancel. Their schedules are set in meta's configuration and shown read-only. Runs send no events: poll a running one.
+
 ## Source plugins
 
 Sources come from plugins that run as their own services. An admin adds a plugin by its URL (and API key, stored encrypted); the server checks it speaks the source plugin contract, lists its sources and refreshes them with their health every five minutes. A plugin's settings are edited in the app, kept encrypted, and handed back to the plugin whenever it restarts. A plugin that is down marks the server `degraded`; its sources stay known. A plugin found down is rechecked after 10 seconds, 30 seconds and a minute (then the regular sync takes over), so one that was only restarting shows as ok again within seconds. Plugins apply saved settings in the background (adding stores, installing extensions) and report problems in their health, so the server also checks a plugin 5 and 30 seconds after its settings are saved; each check is sent to admins as a `plugin.health` event. At startup, a plugin that doesn't answer yet gets a few seconds before it is marked down.

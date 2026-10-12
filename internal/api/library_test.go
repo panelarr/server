@@ -114,7 +114,20 @@ func TestLibraryFlow(t *testing.T) {
 		if s.Attached == nil || s.Attached.Evidence.TitleScore != 1 || s.Attached.CoverUrl == nil {
 			t.Fatalf("source %s: %+v", s.Source.Id, s)
 		}
+		// Sources are admin-only, but a user sees the work's: with their
+		// language, their series' chapter lists and their covers.
+		if s.Source.Lang == "" {
+			t.Fatalf("source %s without a language", s.Source.Id)
+		}
+		chs := call[apigen.SeriesChapterList](user, http.MethodGet, "/api/v1/works/"+entry.Work.Id.String()+"/series/"+s.Attached.Id.String()+"/chapters", nil, 200)
+		if chs.Series.Id != s.Attached.Id {
+			t.Fatalf("chapters of %s: %+v", s.Source.Id, chs.Series)
+		}
+		if res := user.do(http.MethodGet, *s.Attached.CoverUrl, nil); res.status != 200 {
+			t.Fatalf("series cover %d", res.status)
+		}
 	}
+	user.expectProblem(http.MethodGet, "/api/v1/sources", nil, 403, "forbidden")
 	res := user.do(http.MethodGet, *entry.Work.CoverUrl, nil)
 	if res.status != 200 || res.header.Get("Content-Type") != "image/png" {
 		t.Fatalf("cover %d", res.status)

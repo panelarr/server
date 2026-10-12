@@ -63,51 +63,62 @@ func TestSourcesBrowse(t *testing.T) {
 	user, _ := h.createUser(admin, "reader", nil)
 	limited, _ := h.createUser(admin, "limited", map[string]any{"all_sources": false, "allowed_sources": []string{"fake:2001"}})
 
-	srcs := call[apigen.SourceList](user, http.MethodGet, "/api/v1/sources", nil, 200)
-	if len(srcs.Sources) != 2 || srcs.Sources[0].Health.Status == "" {
+	srcs := call[apigen.SourceList](admin, http.MethodGet, "/api/v1/sources", nil, 200)
+	if len(srcs.Sources) != 2 || srcs.Sources[0].Health.Status == "" || srcs.Sources[0].Lang == "" {
 		t.Fatalf("sources %+v", srcs)
 	}
-	if l := call[apigen.SourceList](user, http.MethodGet, "/api/v1/sources?lang=de", nil, 200); len(l.Sources) != 1 {
+	if l := call[apigen.SourceList](admin, http.MethodGet, "/api/v1/sources?lang=de", nil, 200); len(l.Sources) != 1 {
 		t.Fatalf("lang filter %d", len(l.Sources))
 	}
-	if l := call[apigen.SourceList](limited, http.MethodGet, "/api/v1/sources", nil, 200); len(l.Sources) != 1 || l.Sources[0].Id != "fake:2001" {
-		t.Fatalf("limited %+v", l)
-	}
-	// A source outside the allowed list is invisible: 404, not 403.
-	limited.expectProblem(http.MethodGet, "/api/v1/sources/fake:1001/popular", nil, 404, CodeNotFound)
 
-	pop := call[apigen.SourceSeriesPage](user, http.MethodGet, "/api/v1/sources/fake:1001/popular?page=1", nil, 200)
+	pop := call[apigen.SourceSeriesPage](admin, http.MethodGet, "/api/v1/sources/fake:1001/popular?page=1", nil, 200)
 	if len(pop.Series) == 0 || pop.Series[0].CoverUrl == nil {
 		t.Fatalf("popular %+v", pop)
 	}
-	user.expectProblem(http.MethodGet, "/api/v1/sources/fake:2001/latest", nil, 422, "unsupported")
+	admin.expectProblem(http.MethodGet, "/api/v1/sources/fake:2001/latest", nil, 422, "unsupported")
 
-	found := call[apigen.SourceSeriesPage](user, http.MethodPost, "/api/v1/sources/fake:1001/search", map[string]any{"query": "lantern"}, 200)
+	found := call[apigen.SourceSeriesPage](admin, http.MethodPost, "/api/v1/sources/fake:1001/search", map[string]any{"query": "lantern"}, 200)
 	if len(found.Series) != 1 || found.Series[0].Title != "The Lantern Keeper" {
 		t.Fatalf("search %+v", found)
 	}
-	user.expectProblem(http.MethodPost, "/api/v1/sources/fake:1001/search", map[string]any{}, 400, CodeInvalidRequest)
-	user.expectProblem(http.MethodPost, "/api/v1/sources/fake:1001/search", map[string]any{"filters": []any{map[string]any{"nope": 1}}}, 400, CodeInvalidRequest)
-	// A read-only key may search (a POST that only reads).
-	readKey := h.keyClient(user.newAPIKey("read"))
-	call[apigen.SourceSeriesPage](readKey, http.MethodPost, "/api/v1/sources/fake:1001/search", map[string]any{"query": "salt"}, 200)
+	admin.expectProblem(http.MethodPost, "/api/v1/sources/fake:1001/search", map[string]any{}, 400, CodeInvalidRequest)
+	admin.expectProblem(http.MethodPost, "/api/v1/sources/fake:1001/search", map[string]any{"filters": []any{map[string]any{"nope": 1}}}, 400, CodeInvalidRequest)
+	// Searching only reads: read and admin scopes are enough, without write;
+	// read alone isn't.
+	readAdminKey := h.keyClient(admin.newAPIKey("read", "admin"))
+	call[apigen.SourceSeriesPage](readAdminKey, http.MethodPost, "/api/v1/sources/fake:1001/search", map[string]any{"query": "salt"}, 200)
+	h.keyClient(admin.newAPIKey("read")).expectProblem(http.MethodPost, "/api/v1/sources/fake:1001/search", map[string]any{"query": "salt"}, 403, "insufficient_scope")
 
-	filters := call[apigen.SourceFilters](user, http.MethodGet, "/api/v1/sources/fake:1001/filters", nil, 200)
+	filters := call[apigen.SourceFilters](admin, http.MethodGet, "/api/v1/sources/fake:1001/filters", nil, 200)
 	if len(filters.Filters) == 0 {
 		t.Fatal("no filters")
 	}
 
 	key := url.QueryEscape(found.Series[0].Key)
-	series := call[apigen.SourceSeries](user, http.MethodGet, "/api/v1/sources/fake:1001/series?key="+key, nil, 200)
+	series := call[apigen.SourceSeries](admin, http.MethodGet, "/api/v1/sources/fake:1001/series?key="+key, nil, 200)
 	if series.Title != "The Lantern Keeper" || len(series.Authors) != 1 || len(series.AltTitles) != 2 {
 		t.Fatalf("series %+v", series)
 	}
-	chs := call[apigen.SourceChapterList](user, http.MethodGet, "/api/v1/sources/fake:1001/chapters?key="+key, nil, 200)
+	chs := call[apigen.SourceChapterList](admin, http.MethodGet, "/api/v1/sources/fake:1001/chapters?key="+key, nil, 200)
 	if len(chs.Chapters) != 3 || chs.Chapters[0].Number == nil || chs.Chapters[0].UploadedAt == nil {
 		t.Fatalf("chapters %+v", chs)
 	}
 
-	// Covers come through the server, signed.
+	// Sources are admin-only: users (whatever their grants) and their keys
+	// can't list or browse them.
+	userKey := h.keyClient(user.newAPIKey("read", "write"))
+	for _, c := range []*client{user, limited, userKey} {
+		c.expectProblem(http.MethodGet, "/api/v1/sources", nil, 403, "forbidden")
+		c.expectProblem(http.MethodGet, "/api/v1/sources/fake:1001/popular", nil, 403, "forbidden")
+		c.expectProblem(http.MethodGet, "/api/v1/sources/fake:1001/latest", nil, 403, "forbidden")
+		c.expectProblem(http.MethodPost, "/api/v1/sources/fake:1001/search", map[string]any{"query": "salt"}, 403, "forbidden")
+		c.expectProblem(http.MethodGet, "/api/v1/sources/fake:1001/filters", nil, 403, "forbidden")
+		c.expectProblem(http.MethodGet, "/api/v1/sources/fake:1001/series?key="+key, nil, 403, "forbidden")
+		c.expectProblem(http.MethodGet, "/api/v1/sources/fake:1001/chapters?key="+key, nil, 403, "forbidden")
+	}
+
+	// Covers come through the server, signed, and stay open to users within
+	// their grants (a work's series show them).
 	res := user.do(http.MethodGet, *series.CoverUrl, nil)
 	if res.status != 200 || res.header.Get("Content-Type") != "image/png" || len(res.body) == 0 {
 		t.Fatalf("cover %d %v", res.status, res.header)
@@ -116,8 +127,13 @@ func TestSourcesBrowse(t *testing.T) {
 	user.expectProblem(http.MethodGet, tampered, nil, 403, "bad_signature")
 	limited.expectProblem(http.MethodGet, *series.CoverUrl, nil, 404, CodeNotFound)
 
-	// Disabling a source hides it from users.
+	// A disabled source can't be browsed, even by admins, until it's back.
 	call[apigen.SourceInfo](admin, http.MethodPatch, "/api/v1/sources/fake:1001", map[string]any{"enabled": false}, 200)
-	user.expectProblem(http.MethodGet, "/api/v1/sources/fake:1001/popular", nil, 404, CodeNotFound)
+	admin.expectProblem(http.MethodGet, "/api/v1/sources/fake:1001/popular", nil, 404, CodeNotFound)
+	user.expectProblem(http.MethodGet, *series.CoverUrl, nil, 404, CodeNotFound)
+	if l := call[apigen.SourceList](admin, http.MethodGet, "/api/v1/sources?all=true", nil, 200); len(l.Sources) != 2 {
+		t.Fatalf("all sources %d", len(l.Sources))
+	}
+	user.expectProblem(http.MethodPatch, "/api/v1/sources/fake:1001", map[string]any{"enabled": true}, 403, "forbidden")
 	admin.expectProblem(http.MethodPatch, "/api/v1/sources/fake:9999", map[string]any{"enabled": true}, 404, CodeNotFound)
 }

@@ -71,12 +71,15 @@ func fromMetaJob(j *metav1.Job) apigen.Job {
 	}
 	if c := j.GetSchedule().GetCron(); c != "" {
 		out.Schedule.Cron = &c
-		// meta runs its cron in UTC unless an expression names a zone.
+		// meta runs its cron in UTC unless an expression names a zone;
+		// "@every …" is an interval, with no zone.
 		zone := cronZone(c)
-		if zone == "" {
+		if zone == "" && !strings.HasPrefix(strings.TrimSpace(c), "@every") {
 			zone = "UTC"
 		}
-		out.Schedule.TimeZone = &zone
+		if zone != "" {
+			out.Schedule.TimeZone = &zone
+		}
 	}
 	if iv := j.GetSchedule().GetInterval(); iv != nil {
 		out.Schedule.IntervalSeconds = ptr(int(iv.AsDuration().Seconds()))

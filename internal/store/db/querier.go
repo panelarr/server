@@ -131,6 +131,7 @@ type Querier interface {
 	ListPlugins(ctx context.Context) ([]Plugin, error)
 	ListProfiles(ctx context.Context) ([]NetworkProfile, error)
 	ListProxies(ctx context.Context) ([]NetworkProxy, error)
+	ListPushes(ctx context.Context, targetKind string) ([]NetworkPush, error)
 	ListReaderSettings(ctx context.Context, arg ListReaderSettingsParams) ([]ReaderSetting, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]Session, error)
 	ListSettings(ctx context.Context) ([]Setting, error)
@@ -197,6 +198,7 @@ type Querier interface {
 	UpdateWorkDisplay(ctx context.Context, arg UpdateWorkDisplayParams) (Work, error)
 	UpsertAssignment(ctx context.Context, arg UpsertAssignmentParams) (NetworkAssignment, error)
 	UpsertProgress(ctx context.Context, arg UpsertProgressParams) (Progress, error)
+	UpsertPush(ctx context.Context, arg UpsertPushParams) error
 	UpsertSource(ctx context.Context, arg UpsertSourceParams) error
 	UpsertSourceChapter(ctx context.Context, arg UpsertSourceChapterParams) error
 	// Records a series found for a work. An attached or rejected series keeps

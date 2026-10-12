@@ -81,3 +81,12 @@ RETURNING *;
 
 -- name: DeleteAssignment :execrows
 DELETE FROM network_assignments WHERE target_kind = @target_kind AND target_id = @target_id;
+
+-- name: ListPushes :many
+SELECT * FROM network_pushes WHERE target_kind = @target_kind;
+
+-- name: UpsertPush :exec
+INSERT INTO network_pushes (target_kind, target_id, plugin_id, hash, error, pushed_at)
+VALUES (@target_kind, @target_id, @plugin_id, @hash, @error, now())
+ON CONFLICT (target_kind, target_id) DO UPDATE SET
+    plugin_id = EXCLUDED.plugin_id, hash = EXCLUDED.hash, error = EXCLUDED.error, pushed_at = now();

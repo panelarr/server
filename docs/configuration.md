@@ -67,6 +67,8 @@ Admins set up shared network services once, in Panelarr, under `/api/v1/network`
 
 They are options: nothing is assigned by default, so plugins keep their own settings until an admin assigns a profile. A solver, proxy or profile in use can't be removed.
 
+The server **pushes** each source's profile to its plugin, with the proxy's password and the solver inline, and only to plugins that declare they take network profiles (the solver only to those that take solvers too). A plugin whose source falls back to "the plugin's own settings" is told so. Changes are pushed within seconds (a `network.push` task); each plugin sync pushes what changed or failed, and everything is pushed again after a plugin restarts (its `instance_id` changes, it comes back from down, or the server starts). The plugin page shows each source's push state, and `GET /api/v1/sources/{id}/network` asks the plugin what it actually applies. The server's own per-source limits follow the profile's rate limit and concurrency where it sets them, else the plugin's declared limits.
+
 ## Background work
 
 Two kinds of background work show in the admin:

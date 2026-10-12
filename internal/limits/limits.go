@@ -68,6 +68,14 @@ func (r *Registry) Set(key string, l Limit) {
 	r.keys[key] = newKey(l)
 }
 
+// Limit returns the cap set for key, if any.
+func (r *Registry) Limit(key string) (Limit, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	l, ok := r.set[key]
+	return l, ok
+}
+
 // For returns the live cap of key.
 func (r *Registry) For(key string) *Key {
 	r.mu.Lock()

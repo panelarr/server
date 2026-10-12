@@ -1590,6 +1590,25 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /sources/{source_id}/network:
+    parameters:
+      - $ref: "#/components/parameters/SourceId"
+    get:
+      operationId: getSourceNetwork
+      tags: [network]
+      summary: A source's network profile, and what its plugin applies
+      description: As in GET /plugins/{plugin_id}/network, plus `applied`, which asks the plugin.
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The source's network settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceNetwork"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /sources:
     get:
       operationId: listSources
@@ -5136,6 +5155,40 @@ components:
           $ref: "#/components/schemas/NetworkAssignment"
         effective:
           $ref: "#/components/schemas/NetworkEffective"
+        push:
+          $ref: "#/components/schemas/NetworkPush"
+        applied:
+          $ref: "#/components/schemas/NetworkApplied"
+    NetworkPush:
+      type: object
+      required: [state]
+      description: Whether the plugin has the profile in force.
+      properties:
+        state:
+          type: string
+          enum: [pushed, pending, failed, not_needed, not_accepted]
+          description: |
+            `pushed`: the plugin has it; `pending`: it changed and is on its
+            way (or the plugin is down); `failed`: the last push failed
+            (tried again at the next sync); `not_needed`: nothing assigned
+            and nothing pushed before; `not_accepted`: the plugin doesn't
+            take network profiles.
+        pushed_at:
+          type: string
+          format: date-time
+        error:
+          type: string
+    NetworkApplied:
+      type: object
+      required: [origin]
+      description: What the plugin says it applies (only from GET /sources/{source_id}/network).
+      properties:
+        origin:
+          type: string
+          enum: [pushed, plugin, none, unknown]
+          description: "`pushed`: Panelarr's profile; `plugin`: the plugin's own settings; `none`: a direct connection; `unknown`: the plugin can't say."
+        profile_name:
+          type: string
     PluginNetwork:
       type: object
       required: [plugin_id, accepts_profiles, accepts_solver, packages, sources]

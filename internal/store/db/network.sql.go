@@ -410,6 +410,37 @@ func (q *Queries) ListProxies(ctx context.Context) ([]NetworkProxy, error) {
 	return items, nil
 }
 
+const listPushes = `-- name: ListPushes :many
+SELECT target_kind, target_id, plugin_id, hash, error, pushed_at FROM network_pushes WHERE target_kind = $1
+`
+
+func (q *Queries) ListPushes(ctx context.Context, targetKind string) ([]NetworkPush, error) {
+	rows, err := q.db.Query(ctx, listPushes, targetKind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NetworkPush{}
+	for rows.Next() {
+		var i NetworkPush
+		if err := rows.Scan(
+			&i.TargetKind,
+			&i.TargetID,
+			&i.PluginID,
+			&i.Hash,
+			&i.Error,
+			&i.PushedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSolvers = `-- name: ListSolvers :many
 SELECT id, name, type, url, session_ttl_seconds, max_timeout_seconds, as_response_fallback, created_at, updated_at FROM network_solvers ORDER BY lower(name), id
 `
@@ -632,4 +663,30 @@ func (q *Queries) UpsertAssignment(ctx context.Context, arg UpsertAssignmentPara
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertPush = `-- name: UpsertPush :exec
+INSERT INTO network_pushes (target_kind, target_id, plugin_id, hash, error, pushed_at)
+VALUES ($1, $2, $3, $4, $5, now())
+ON CONFLICT (target_kind, target_id) DO UPDATE SET
+    plugin_id = EXCLUDED.plugin_id, hash = EXCLUDED.hash, error = EXCLUDED.error, pushed_at = now()
+`
+
+type UpsertPushParams struct {
+	TargetKind string
+	TargetID   string
+	PluginID   pgtype.Text
+	Hash       string
+	Error      string
+}
+
+func (q *Queries) UpsertPush(ctx context.Context, arg UpsertPushParams) error {
+	_, err := q.db.Exec(ctx, upsertPush,
+		arg.TargetKind,
+		arg.TargetID,
+		arg.PluginID,
+		arg.Hash,
+		arg.Error,
+	)
+	return err
 }

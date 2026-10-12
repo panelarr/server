@@ -174,6 +174,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	chs := chapters.NewService(st, host, q, lim, hub, logging.Component(log, "chapters"))
 	lib.SetChapterHooks(chs)
 	host.SetSourcesChanged(chs.SourcesChanged)
+	host.RegisterPackageTasks(q)
 	// Connecting to plugins can take a while; the API serves meanwhile.
 	go func() {
 		if err := host.Load(ctx); err != nil {

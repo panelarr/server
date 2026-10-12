@@ -92,6 +92,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	chs := chapters.NewService(st, host, q, nil, hub, nil)
 	lib.SetChapterHooks(chs)
 	host.SetSourcesChanged(chs.SourcesChanged)
+	host.RegisterPackageTasks(q)
 	rdr := reader.NewService(st, host, lib, chs, nil, hub, nil)
 	storages := storage.NewManager(st, box, nil)
 	dataDir := t.TempDir()

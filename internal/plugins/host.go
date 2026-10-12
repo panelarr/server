@@ -32,6 +32,7 @@ import (
 
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/limits"
+	"github.com/panelarr/server/internal/queue"
 	"github.com/panelarr/server/internal/secret"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/store/db"
@@ -93,6 +94,8 @@ type Host struct {
 	hub        *events.Hub
 	// sourcesChanged runs when sources become usable or stop being usable.
 	sourcesChanged func(ctx context.Context, sourceIDs []string)
+	// queue runs package tasks (packages.go).
+	queue *queue.Queue
 }
 
 // SetHub makes the host tell admins about each plugin sync
@@ -451,6 +454,7 @@ func (h *Host) sync(ctx context.Context, id string) (Plugin, error) {
 		state.Health, state.HealthMessage = "down", "listing sources failed: "+errorMessage(err)
 		return h.saveState(ctx, cur, state)
 	}
+	pkgs := h.installedPackages(ctx, c, info)
 	before, err := h.usable(ctx, id)
 	if err != nil {
 		return Plugin{}, err
@@ -459,11 +463,19 @@ func (h *Host) sync(ctx context.Context, id string) (Plugin, error) {
 		listed := make([]string, 0, len(res.GetSources()))
 		for _, s := range res.GetSources() {
 			listed = append(listed, s.GetId())
-			if err := q.UpsertSource(ctx, sourceParams(id, s)); err != nil {
+			params := sourceParams(id, s)
+			params.PackageName = pkgs.names[params.PackageID]
+			if err := q.UpsertSource(ctx, params); err != nil {
 				return err
 			}
 		}
-		return q.MarkSourcesAbsent(ctx, db.MarkSourcesAbsentParams{PluginID: id, Listed: listed})
+		if err := q.MarkSourcesAbsent(ctx, db.MarkSourcesAbsentParams{PluginID: id, Listed: listed}); err != nil {
+			return err
+		}
+		if !pkgs.ok {
+			return nil // keep the reasons known so far
+		}
+		return q.SetUnavailableReasons(ctx, db.SetUnavailableReasonsParams{PluginID: id, LanguageOff: pkgs.languageOff})
 	})
 	if err != nil {
 		return Plugin{}, err
@@ -516,6 +528,7 @@ func sourceParams(pluginID string, s *sourcev1.Source) db.UpsertSourceParams {
 		ID: pluginID + ":" + s.GetId(), PluginID: pluginID, SourceID: s.GetId(),
 		Name: s.GetName(), Lang: s.GetLang(), ContentRating: sourceRating(s.GetContentRating()),
 		IconUrl: s.GetIconUrl(), HomeUrl: s.GetHomeUrl(), Capabilities: caps, Health: "unknown",
+		PackageID: s.GetPackageId(),
 	}
 	if hl := s.GetHealth(); hl != nil {
 		switch hl.GetStatus() {
@@ -532,6 +545,9 @@ func sourceParams(pluginID string, s *sourcev1.Source) db.UpsertSourceParams {
 	}
 	return p
 }
+
+// RatingName is a content rating's name: safe, mixed, nsfw or unknown.
+func RatingName(r sourcev1.ContentRating) string { return sourceRating(r) }
 
 func sourceRating(r sourcev1.ContentRating) string {
 	switch r {

@@ -4675,7 +4675,7 @@ components:
           description: Sources a series is attached on.
     LibraryEntry:
       type: object
-      required: [work, added_at, new_chapters, bookmarks, auto_download]
+      required: [work, added_at, new_chapters, bookmarks, auto_download, chapters, unread, downloaded, started]
       properties:
         auto_download:
           type: boolean
@@ -4691,6 +4691,33 @@ components:
         bookmarks:
           type: integer
           description: Chapters of it you bookmarked.
+        chapters:
+          type: integer
+          format: int64
+          description: Its available chapters (as in its chapter list).
+        unread:
+          type: integer
+          format: int64
+          description: Its available chapters you haven't finished (the cover badge).
+        downloaded:
+          type: integer
+          format: int64
+          description: Its chapters stored as files.
+        started:
+          type: boolean
+          description: You read some of it.
+        continue_chapter_id:
+          type: string
+          format: uuid
+          description: The chapter "Continue" opens (as GET /works/{work_id}/progress says); absent when there's nothing to read.
+        last_read_at:
+          type: string
+          format: date-time
+          description: When you last read in it.
+        latest_chapter_at:
+          type: string
+          format: date-time
+          description: When its newest chapter came out (or was first seen, when the source gives no date).
     LibraryPage:
       type: object
       required: [entries, next_page_token]

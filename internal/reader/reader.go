@@ -461,11 +461,27 @@ func (s *Service) WorkProgress(ctx context.Context, v library.Viewer, workID uui
 	if err != nil {
 		return nil, nil, err
 	}
-	// The chapter read last; ties (chapters marked read together) go to
-	// the later one in reading order.
-	order := make(map[uuid.UUID]int, len(list))
+	order := make([]readingChapter, len(list))
 	for i, c := range list {
-		order[c.ID] = i
+		order[i] = readingChapter{ID: c.ID, Available: c.Available}
+	}
+	return rows, continueAt(order, rows), nil
+}
+
+// readingChapter is a chapter in reading order, for continueAt.
+type readingChapter struct {
+	ID        uuid.UUID
+	Available bool
+}
+
+// continueAt is where to continue a work: the chapter read last when it
+// isn't finished, else the first available chapter after it that isn't
+// read (from the start when nothing was read). Ties (chapters marked read
+// together) go to the later one in reading order.
+func continueAt(order []readingChapter, rows []db.Progress) *uuid.UUID {
+	pos := make(map[uuid.UUID]int, len(order))
+	for i, c := range order {
+		pos[c.ID] = i
 	}
 	byChapter := make(map[uuid.UUID]db.Progress, len(rows))
 	var last *db.Progress
@@ -473,7 +489,7 @@ func (s *Service) WorkProgress(ctx context.Context, v library.Viewer, workID uui
 		r := &rows[i]
 		byChapter[r.ChapterID] = *r
 		if last == nil || r.UpdatedAt.After(last.UpdatedAt) ||
-			(r.UpdatedAt.Equal(last.UpdatedAt) && order[r.ChapterID] > order[last.ChapterID]) {
+			(r.UpdatedAt.Equal(last.UpdatedAt) && pos[r.ChapterID] > pos[last.ChapterID]) {
 			last = r
 		}
 	}
@@ -481,20 +497,17 @@ func (s *Service) WorkProgress(ctx context.Context, v library.Viewer, workID uui
 	if last != nil {
 		if !last.Completed {
 			id := last.ChapterID
-			return rows, &id, nil
+			return &id
 		}
-		start = order[last.ChapterID] + 1
+		start = pos[last.ChapterID] + 1
 	}
-	// Continue at the first available chapter from there that isn't read.
-	var cont *uuid.UUID
-	for _, c := range list[min(start, len(list)):] {
+	for _, c := range order[min(start, len(order)):] {
 		if p, ok := byChapter[c.ID]; c.Available && (!ok || !p.Completed) {
 			id := c.ID
-			cont = &id
-			break
+			return &id
 		}
 	}
-	return rows, cont, nil
+	return nil
 }
 
 // HistoryItem is a chapter a user read.
@@ -612,6 +625,98 @@ func (s *Service) BookmarkCounts(ctx context.Context, userID uuid.UUID, workIDs 
 	out := make(map[uuid.UUID]int64, len(rows))
 	for _, r := range rows {
 		out[r.WorkID] = r.Bookmarks
+	}
+	return out, nil
+}
+
+// ReadingStats is a user's reading of one work, for the library.
+type ReadingStats struct {
+	// Chapters and Unread count available chapters (all, and those not
+	// finished); Downloaded those stored.
+	Chapters, Unread, Downloaded int64
+	// Started: the user read some of it.
+	Started bool
+	// LastReadAt is when the user last read in it; LatestChapterAt when
+	// its newest chapter came out (or was first seen).
+	LastReadAt, LatestChapterAt *time.Time
+	// Continue is the chapter "Continue" opens.
+	Continue *uuid.UUID
+}
+
+// LibraryStats is a user's reading of some works, in a few queries.
+func (s *Service) LibraryStats(ctx context.Context, userID uuid.UUID, workIDs []uuid.UUID) (map[uuid.UUID]ReadingStats, error) {
+	chs, err := s.st.LibraryChapters(ctx, workIDs)
+	if err != nil {
+		return nil, err
+	}
+	prog, err := s.st.LibraryProgress(ctx, db.LibraryProgressParams{UserID: userID, WorkIds: workIDs})
+	if err != nil {
+		return nil, err
+	}
+	files, err := s.st.CountDownloadedByWork(ctx, workIDs)
+	if err != nil {
+		return nil, err
+	}
+	// Reading order as in the work's chapter list: by number, chapters
+	// without one after, oldest first.
+	slices.SortStableFunc(chs, func(a, b db.LibraryChaptersRow) int {
+		switch {
+		case a.Number == nil && b.Number == nil:
+			return a.CreatedAt.Compare(b.CreatedAt)
+		case a.Number == nil:
+			return 1
+		case b.Number == nil:
+			return -1
+		case *a.Number < *b.Number:
+			return -1
+		case *a.Number > *b.Number:
+			return 1
+		}
+		return 0
+	})
+	byWork := map[uuid.UUID][]db.Progress{}
+	finished := map[uuid.UUID]bool{}
+	out := make(map[uuid.UUID]ReadingStats, len(workIDs))
+	for _, p := range prog {
+		byWork[p.WorkID] = append(byWork[p.WorkID], p)
+		finished[p.ChapterID] = p.Completed
+		st := out[p.WorkID]
+		st.Started = true
+		if st.LastReadAt == nil || p.UpdatedAt.After(*st.LastReadAt) {
+			at := p.UpdatedAt
+			st.LastReadAt = &at
+		}
+		out[p.WorkID] = st
+	}
+	order := map[uuid.UUID][]readingChapter{}
+	for _, c := range chs {
+		order[c.WorkID] = append(order[c.WorkID], readingChapter{ID: c.ID, Available: c.Available})
+		if !c.Available {
+			continue
+		}
+		st := out[c.WorkID]
+		st.Chapters++
+		if !finished[c.ID] {
+			st.Unread++
+		}
+		at := c.CreatedAt
+		if c.UploadedAt != nil {
+			at = *c.UploadedAt
+		}
+		if st.LatestChapterAt == nil || at.After(*st.LatestChapterAt) {
+			st.LatestChapterAt = &at
+		}
+		out[c.WorkID] = st
+	}
+	for _, f := range files {
+		st := out[f.WorkID]
+		st.Downloaded = f.Downloaded
+		out[f.WorkID] = st
+	}
+	for id, list := range order {
+		st := out[id]
+		st.Continue = continueAt(list, byWork[id])
+		out[id] = st
 	}
 	return out, nil
 }

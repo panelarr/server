@@ -65,6 +65,38 @@ func (q *Queries) CountBookmarks(ctx context.Context, arg CountBookmarksParams) 
 	return items, nil
 }
 
+const countDownloadedByWork = `-- name: CountDownloadedByWork :many
+SELECT chapters.work_id, count(*) AS downloaded
+FROM chapter_files JOIN chapters ON chapters.id = chapter_files.chapter_id
+WHERE chapters.work_id = ANY($1::uuid[])
+GROUP BY chapters.work_id
+`
+
+type CountDownloadedByWorkRow struct {
+	WorkID     uuid.UUID
+	Downloaded int64
+}
+
+func (q *Queries) CountDownloadedByWork(ctx context.Context, workIds []uuid.UUID) ([]CountDownloadedByWorkRow, error) {
+	rows, err := q.db.Query(ctx, countDownloadedByWork, workIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountDownloadedByWorkRow{}
+	for rows.Next() {
+		var i CountDownloadedByWorkRow
+		if err := rows.Scan(&i.WorkID, &i.Downloaded); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteBookmarks = `-- name: DeleteBookmarks :exec
 DELETE FROM bookmarks WHERE user_id = $1 AND chapter_id = ANY($2::uuid[])
 `
@@ -207,6 +239,87 @@ func (q *Queries) History(ctx context.Context, arg HistoryParams) ([]HistoryRow,
 			&i.Chapter.UpdatedAt,
 			&i.WorkTitle,
 			&i.WorkCoverUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const libraryChapters = `-- name: LibraryChapters :many
+SELECT chapters.id, chapters.work_id, chapters.number, chapters.available, chapters.created_at,
+       source_chapters.uploaded_at
+FROM chapters LEFT JOIN source_chapters ON source_chapters.id = chapters.preferred_variant_id
+WHERE chapters.work_id = ANY($1::uuid[])
+`
+
+type LibraryChaptersRow struct {
+	ID         uuid.UUID
+	WorkID     uuid.UUID
+	Number     *float64
+	Available  bool
+	CreatedAt  time.Time
+	UploadedAt *time.Time
+}
+
+// The chapters of some works, with when their chosen copy was uploaded.
+func (q *Queries) LibraryChapters(ctx context.Context, workIds []uuid.UUID) ([]LibraryChaptersRow, error) {
+	rows, err := q.db.Query(ctx, libraryChapters, workIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LibraryChaptersRow{}
+	for rows.Next() {
+		var i LibraryChaptersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkID,
+			&i.Number,
+			&i.Available,
+			&i.CreatedAt,
+			&i.UploadedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const libraryProgress = `-- name: LibraryProgress :many
+SELECT user_id, chapter_id, work_id, page, pages, completed, updated_at FROM progress WHERE user_id = $1 AND work_id = ANY($2::uuid[])
+`
+
+type LibraryProgressParams struct {
+	UserID  uuid.UUID
+	WorkIds []uuid.UUID
+}
+
+func (q *Queries) LibraryProgress(ctx context.Context, arg LibraryProgressParams) ([]Progress, error) {
+	rows, err := q.db.Query(ctx, libraryProgress, arg.UserID, arg.WorkIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Progress{}
+	for rows.Next() {
+		var i Progress
+		if err := rows.Scan(
+			&i.UserID,
+			&i.ChapterID,
+			&i.WorkID,
+			&i.Page,
+			&i.Pages,
+			&i.Completed,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

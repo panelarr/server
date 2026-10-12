@@ -296,3 +296,47 @@ func TestPageImagesUseTheImageBudget(t *testing.T) {
 		t.Fatalf("20 images took %s", took)
 	}
 }
+
+func TestLibraryReadingStats(t *testing.T) {
+	t.Parallel()
+	f := newLibraryFixture(t)
+	user := f.user
+	entry := call[apigen.LibraryEntry](user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 201)
+	id := entry.Work.Id.String()
+	waitWorkMatched(t, user, id)
+	chs := waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool { return len(cs) == 3 })
+	entryOf := func() apigen.LibraryEntry {
+		lib := call[apigen.LibraryPage](user, http.MethodGet, "/api/v1/library", nil, 200)
+		if len(lib.Entries) != 1 {
+			t.Fatalf("library %+v", lib)
+		}
+		return lib.Entries[0]
+	}
+
+	// Nothing read: all unread, continue at the first chapter.
+	e := entryOf()
+	if e.Chapters != 3 || e.Unread != 3 || e.Started || e.LastReadAt != nil || e.Downloaded != 0 ||
+		e.ContinueChapterId == nil || *e.ContinueChapterId != chs[0].Id || e.LatestChapterAt == nil {
+		t.Fatalf("before reading %+v", e)
+	}
+
+	// Halfway through the first chapter.
+	call[apigen.ChapterProgress](user, http.MethodPut, "/api/v1/chapters/"+chs[0].Id.String()+"/progress", map[string]int{"page": 1, "pages": 4}, 200)
+	e = entryOf()
+	if !e.Started || e.Unread != 3 || e.LastReadAt == nil || *e.ContinueChapterId != chs[0].Id {
+		t.Fatalf("reading %+v", e)
+	}
+	// The first two read: one left, continue at the third, as the work's
+	// progress says.
+	call[struct{}](user, http.MethodPost, "/api/v1/works/"+id+"/progress", map[string]any{"chapter_ids": []string{chs[0].Id.String(), chs[1].Id.String()}, "read": true}, 204)
+	e = entryOf()
+	wp := call[apigen.WorkProgress](user, http.MethodGet, "/api/v1/works/"+id+"/progress", nil, 200)
+	if e.Unread != 1 || e.ContinueChapterId == nil || *e.ContinueChapterId != chs[2].Id || wp.ContinueChapterId == nil || *wp.ContinueChapterId != *e.ContinueChapterId {
+		t.Fatalf("two read %+v (work says %v)", e, wp.ContinueChapterId)
+	}
+	// All read: nothing to continue.
+	call[struct{}](user, http.MethodPost, "/api/v1/works/"+id+"/progress", map[string]any{"chapter_ids": []string{chs[2].Id.String()}, "read": true}, 204)
+	if e = entryOf(); e.Unread != 0 || e.ContinueChapterId != nil {
+		t.Fatalf("all read %+v", e)
+	}
+}

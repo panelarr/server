@@ -24,7 +24,7 @@ Users with the `may_manage_matches` grant (and admins) can:
 
 ## Adding from a source
 
-A series found while browsing a source can be added directly. The server searches the catalogue with the series' titles; when the entry is clear (an exact title and a shared author, and only one such entry) the work is added with the series attached. Otherwise the likely entries are offered to pick from.
+A series found while browsing a source (an admin view) can be added directly. The server searches the catalogue with the series' titles; when the entry is clear (an exact title and a shared author, and only one such entry) the work is added with the series attached. Otherwise the likely entries are offered to pick from.
 
 ## Who sees what
 

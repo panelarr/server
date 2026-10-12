@@ -16,6 +16,14 @@ The plan for the server's first version, in slices. Each slice works end to end,
   - [x] authorization and security review: every endpoint is covered by the matrix; API responses get `nosniff`, a `default-src 'none'` CSP and no framing; page images limited to raster types (no SVG from plugins or archives);
   - [x] container image: Dockerfile (distroless, non-root, `/config` and `/data`, port 8900, health check; sibling modules and the web build as named build contexts) and Dockerfile.release; GoReleaser publishes multi-arch `panelarr/server`. The full-stack compose lives outside this repo.
 
+## Extensions, source languages, admin-only sources
+
+Sources become an admin concern; plugins that host many sites get an extensions (packages) API with languages.
+
+- [x] **S1. Admin-only sources:** listing sources and browsing one directly (popular, latest, search, filters, series, chapters) are admin endpoints; users see sources only on their works (sources with language and health, a series' chapters, covers). Signed source images and adding from a source stay open to users within their grants. The one deliberate break within v1, noted in the spec and [docs/api.md](docs/api.md).
+- [ ] **S2. Source filters and absent sources:** filter sources by plugin, enabled and present; disabled, turned-off and absent sources skipped by search, browse, matching and URL resolving; works keep their history when a source disappears.
+- [ ] **S3. Packages:** for plugins with the package capability, list available packages (languages, versions, updates, content rating), install, update, uninstall (as tasks) and per-package languages; sources carry their providing package; the plugin is synced right after a change.
+
 ## Working assumptions
 
 Settled for now, cheap to change:
@@ -25,8 +33,10 @@ Settled for now, cheap to change:
 - Chapters group by normalized number; the volume is an attribute. Chapters without a number stay per source.
 - Storage: local and S3-compatible first; several named storages with one default.
 - Content ratings use the metadata service's scale; source ratings map onto it; "unknown" is shown unless an admin hides it.
+- `POST /library/from-source` stays open to users (grants and `may_add` apply) although source browsing is for admins.
+- The server keeps no language setting of its own: the plugin's settings and each package's settings decide which sources a plugin lists.
 - The sibling modules (`source-api`, `meta`) are used through `replace` directives to local clones until they are published.
 
 ## Next
 
-The first version is complete. Next: additive API follow-ups for the web app, then what the plan brings (managed plugins, network profiles, search, trackers, backups).
+The first version is complete. Now: extensions, source languages and admin-only sources (above). Then what the plan brings (managed plugins, network profiles, search, trackers, backups).

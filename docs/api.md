@@ -24,6 +24,16 @@ Until the first account exists, every endpoint except `GET /system/info`, `GET /
 
 `/catalog/search`, `/catalog/browse` and `/catalog/entries/{id}` show the metadata service's catalogue, limited to the caller's content-rating ceiling (entries above it answer `404` like missing ones). Covers come from `/catalog/entries/{id}/cover`, served by Panelarr, never from the metadata sites. Text comes in the `lang` parameter's language, else the `Accept-Language` header's.
 
+## Sources
+
+Sources are an admin concern. Listing sources (`GET /sources`) and browsing one directly (its popular and latest lists, search, filters, a series and its chapters under `/sources/{source_id}/…`) are admin endpoints, so an API key needs the `admin` scope for them. Regular users see sources only where they belong to a work: `GET /works/{work_id}` lists the work's sources with their language and health, and `GET /works/{work_id}/series/{series_id}/chapters` lists one source's chapters of it. A user's source grants (`all_sources`, `allowed_sources`) decide which sources may serve their works. Two source endpoints stay open to users: `GET /sources/{source_id}/image`, which only serves links the server signed (a work's series covers), and `POST /library/from-source`, which still checks the caller's grants and `may_add`.
+
+## Changes within v1
+
+Endpoints and fields are only added within v1, with one deliberate exception:
+
+- **Admin-only sources.** `GET /sources` and the source browsing endpoints (`/sources/{source_id}/popular`, `/latest`, `/search`, `/filters`, `/series`, `/chapters`) used to be open to every user and now answer `403 forbidden` to non-admins. Sources are managed and browsed by admins only; users reach them through their works (see [Sources](#sources)).
+
 ## Validation
 
 Requests are checked against the spec before they reach a handler: wrong types, missing fields, unknown enum values, lengths and patterns answer `400 invalid_request` with one `errors` entry per field.

@@ -70,7 +70,8 @@ func fromMetaJob(j *metav1.Job) apigen.Job {
 	out := apigen.Job{
 		Id: j.GetId(), Name: j.GetName(), Description: j.GetDescription(), Group: j.GetGroup(), Running: j.GetRunning(),
 		Cancellable: j.GetCancellable(), Params: make([]apigen.JobParam, 0, len(j.GetParams())),
-		Schedule: apigen.JobSchedule{Enabled: j.GetSchedule().GetEnabled(), Source: nonEmpty(j.GetSchedule().GetSource())},
+		Schedule:       apigen.JobSchedule{Enabled: j.GetSchedule().GetEnabled(), Source: nonEmpty(j.GetSchedule().GetSource())},
+		DisabledReason: nonEmpty(j.GetDisabledReason()),
 	}
 	if c := j.GetSchedule().GetCron(); c != "" {
 		out.Schedule.Cron = &c

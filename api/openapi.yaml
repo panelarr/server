@@ -1641,6 +1641,107 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /system/meta/providers:
+    get:
+      operationId: listMetaProviders
+      tags: [meta]
+      summary: The metadata service's providers
+      description: Each with its plugin, health, sync schedules (set in meta's configuration, read-only here), record count and last sync runs. Start a sync with `POST /system/meta/providers/{provider}/sync` or through the jobs.
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The providers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaProviderList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/sync-runs:
+    get:
+      operationId: listMetaSyncRuns
+      tags: [meta]
+      summary: Provider sync runs, newest first
+      x-panelarr-access: admin
+      parameters:
+        - name: provider
+          in: query
+          description: Only this provider's runs.
+          schema:
+            type: string
+            maxLength: 100
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/PageToken"
+      responses:
+        "200":
+          description: A page of runs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaSyncRunList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/sync-runs/{sync_run_id}:
+    get:
+      operationId: getMetaSyncRun
+      tags: [meta]
+      summary: One sync run in full
+      x-panelarr-access: admin
+      parameters:
+        - name: sync_run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaSyncRun"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/health:
+    get:
+      operationId: getMetaHealth
+      tags: [meta]
+      summary: The metadata service's health, per component
+      description: Its database, its search backend and each provider's plugin.
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The health.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaServiceHealth"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/entries/{entry_id}/refresh:
+    post:
+      operationId: refreshMetaEntry
+      tags: [meta]
+      summary: Fetch fresh data for one catalogue entry from its providers now
+      x-panelarr-access: admin
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+      responses:
+        "200":
+          description: Which providers answered and which failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaEntryRefresh"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /system/meta/jobs:
     get:
       operationId: listMetaJobs
@@ -5497,6 +5598,178 @@ components:
         values:
           type: object
           additionalProperties: true
+    MetaProviderList:
+      type: object
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetaProviderDetail"
+    MetaProviderDetail:
+      type: object
+      required: [id, mode, health, schedules, record_count, last_runs]
+      properties:
+        id:
+          type: string
+        mode:
+          type: string
+          description: How meta runs its plugin (e.g. in process or as a service).
+        plugin_id:
+          type: string
+        plugin_name:
+          type: string
+        plugin_version:
+          type: string
+        health:
+          type: string
+          enum: [ok, degraded, down, unknown]
+        health_message:
+          type: string
+        schedules:
+          type: object
+          additionalProperties:
+            type: string
+          description: Sync schedules per ingestion kind, from meta's configuration (read-only).
+        record_count:
+          type: integer
+          format: int64
+        last_runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetaSyncRun"
+    MetaSyncRunList:
+      type: object
+      required: [runs, next_page_token]
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetaSyncRun"
+        next_page_token:
+          type: string
+    MetaSyncRun:
+      type: object
+      required: [id, provider, kind, status, trigger, upserts, changed, removals, merges, skipped, marked_removed, notices]
+      properties:
+        id:
+          type: string
+        provider:
+          type: string
+        kind:
+          type: string
+          description: The ingestion kind, e.g. dump or delta.
+        status:
+          type: string
+          enum: [running, succeeded, failed, cancelled, unknown]
+        trigger:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        snapshot_id:
+          type: string
+        cursor_start:
+          type: string
+        cursor_end:
+          type: string
+        upserts:
+          type: integer
+          format: int64
+          description: Records received.
+        changed:
+          type: integer
+          format: int64
+          description: Records that changed what meta had stored.
+        removals:
+          type: integer
+          format: int64
+        merges:
+          type: integer
+          format: int64
+        skipped:
+          type: integer
+          format: int64
+        marked_removed:
+          type: integer
+          format: int64
+          description: Records marked removed because a full snapshot no longer had them.
+        error:
+          type: string
+        notices:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetaNotice"
+        progress:
+          type: object
+          additionalProperties: true
+          description: The plugin's last progress report (its own fields, e.g. bytes downloaded).
+    MetaNotice:
+      type: object
+      required: [level, message]
+      properties:
+        level:
+          type: string
+        message:
+          type: string
+        ref:
+          type: string
+        at:
+          type: string
+          format: date-time
+    MetaServiceHealth:
+      type: object
+      required: [status, components]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down, unknown]
+        version:
+          type: string
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetaComponentHealth"
+    MetaComponentHealth:
+      type: object
+      required: [name, kind, status, details]
+      properties:
+        name:
+          type: string
+          description: '"database", "search" or "provider:<id>".'
+        kind:
+          type: string
+        status:
+          type: string
+          enum: [ok, degraded, down, unknown]
+        message:
+          type: string
+        latency_ms:
+          type: integer
+        checked_at:
+          type: string
+          format: date-time
+        details:
+          type: object
+          additionalProperties:
+            type: string
+    MetaEntryRefresh:
+      type: object
+      required: [refreshed, failed]
+      properties:
+        refreshed:
+          type: array
+          items:
+            type: string
+          description: Providers that returned fresh data.
+        failed:
+          type: object
+          additionalProperties:
+            type: string
+          description: Providers that failed, with the reason.
     SeriesMatchRef:
       type: object
       description: How a work already knows a series.

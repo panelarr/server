@@ -50,6 +50,7 @@ Covers are fetched by the server and cached under `<config>/cache/images` (safe 
 The metadata service's own admin is available inside Panelarr's, through the server (the browser never talks to meta), apart from meta's API clients and keys:
 
 - **Jobs** (`/api/v1/system/meta/jobs`): meta's background jobs in the same shape as the server's own (provider syncs, duplicate finding, the search index rebuild, …), with their runs; run now and cancel. Their schedules are set in meta's configuration and shown read-only. Runs send no events: poll a running one.
+- **Providers** (`/api/v1/system/meta/providers`): each provider with its plugin, health, sync schedules (from meta's configuration, read-only), record count and last sync runs; sync runs in full with their counts and notices (`/sync-runs`); meta's own health per component (`/health`); and fresh data for one entry from its providers (`POST /entries/{id}/refresh`).
 
 ## Source plugins
 

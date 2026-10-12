@@ -53,6 +53,8 @@ type Fake struct {
 	via []string
 	// pushed are network profiles pushed per provider; unsupported are
 	// providers whose plugin takes no profiles.
+	// syncRuns are the sync runs started, oldest first.
+	syncRuns []*metav1.SyncRun
 	// jobs and runs are meta's own jobs (not syncs), runs newest last.
 	jobs        []*metav1.Job
 	runs        []*metav1.JobRun
@@ -235,7 +237,87 @@ func (h *adminHandler) ListProviders(ctx context.Context, _ *connect.Request[met
 	}
 	h.f.mu.Lock()
 	defer h.f.mu.Unlock()
-	return connect.NewResponse(&metav1.ListProvidersResponse{Providers: h.f.providers}), nil
+	res := &metav1.ListProvidersResponse{}
+	for _, p := range h.f.providers {
+		p = proto.Clone(p).(*metav1.Provider)
+		for i := len(h.f.syncRuns) - 1; i >= 0 && len(p.LastRuns) < 3; i-- {
+			if r := h.f.syncRuns[i]; r.GetProvider() == p.GetId() {
+				p.LastRuns = append(p.LastRuns, r)
+			}
+		}
+		res.Providers = append(res.Providers, p)
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *adminHandler) ListSyncRuns(ctx context.Context, req *connect.Request[metav1.ListSyncRunsRequest]) (*connect.Response[metav1.ListSyncRunsResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	res := &metav1.ListSyncRunsResponse{}
+	for i := len(h.f.syncRuns) - 1; i >= 0; i-- {
+		if r := h.f.syncRuns[i]; req.Msg.GetProvider() == "" || r.GetProvider() == req.Msg.GetProvider() {
+			res.Runs = append(res.Runs, r)
+		}
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *adminHandler) GetSyncRun(ctx context.Context, req *connect.Request[metav1.GetSyncRunRequest]) (*connect.Response[metav1.GetSyncRunResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	for _, r := range h.f.syncRuns {
+		if r.GetId() == req.Msg.GetId() {
+			return connect.NewResponse(&metav1.GetSyncRunResponse{Run: r}), nil
+		}
+	}
+	return nil, connect.NewError(connect.CodeNotFound, errors.New("no such run"))
+}
+
+func (h *adminHandler) GetHealth(ctx context.Context, _ *connect.Request[metav1.GetHealthRequest]) (*connect.Response[metav1.GetHealthResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	res := &metav1.GetHealthResponse{Status: metadatav1.HealthStatus_HEALTH_STATUS_OK, Version: "test", Components: []*metav1.ComponentHealth{
+		{Name: "database", Kind: "database", Status: metadatav1.HealthStatus_HEALTH_STATUS_OK, Details: map[string]string{"engine": "postgres"}},
+	}}
+	for _, p := range h.f.providers {
+		st := metadatav1.HealthStatus_HEALTH_STATUS_OK
+		if h.f.providerDown[p.GetId()] {
+			st, res.Status = metadatav1.HealthStatus_HEALTH_STATUS_DOWN, metadatav1.HealthStatus_HEALTH_STATUS_DEGRADED
+		}
+		res.Components = append(res.Components, &metav1.ComponentHealth{Name: "provider:" + p.GetId(), Kind: "provider", Status: st})
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *adminHandler) RefreshEntry(ctx context.Context, req *connect.Request[metav1.RefreshEntryRequest]) (*connect.Response[metav1.RefreshEntryResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	for _, e := range h.f.entries {
+		if e.GetId() == req.Msg.GetId() {
+			res := &metav1.RefreshEntryResponse{Failed: map[string]string{}}
+			for _, p := range h.f.providers {
+				if h.f.providerDown[p.GetId()] {
+					res.Failed[p.GetId()] = "plugin is not connected"
+				} else {
+					res.Refreshed = append(res.Refreshed, p.GetId())
+				}
+			}
+			return connect.NewResponse(res), nil
+		}
+	}
+	return nil, connect.NewError(connect.CodeNotFound, errors.New("no such entry"))
 }
 
 func (h *adminHandler) RunSync(ctx context.Context, req *connect.Request[metav1.RunSyncRequest]) (*connect.Response[metav1.RunSyncResponse], error) {
@@ -270,7 +352,13 @@ func (f *Fake) startSync(provider, kind, via string) (*metav1.SyncRun, error) {
 	}
 	f.syncs = append(f.syncs, &metav1.RunSyncRequest{Provider: provider, Kind: kind})
 	f.via = append(f.via, via)
-	return &metav1.SyncRun{Id: "run-" + strconv.Itoa(len(f.syncs)), Provider: provider, Kind: kind}, nil
+	run := &metav1.SyncRun{
+		Id: "run-" + strconv.Itoa(len(f.syncs)), Provider: provider, Kind: kind, Status: metav1.SyncRunStatus_SYNC_RUN_STATUS_RUNNING,
+		Trigger: "manual", StartedAt: timestamppb.Now(), Upserts: 12, Changed: 3,
+		Notices: []*metav1.SyncRunNotice{{Level: metadatav1.NoticeLevel_NOTICE_LEVEL_WARNING, Message: "one record without a title"}},
+	}
+	f.syncRuns = append(f.syncRuns, run)
+	return run, nil
 }
 
 type jobsHandler struct {

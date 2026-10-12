@@ -555,3 +555,56 @@ func (c *pageCache) drop(id uuid.UUID) {
 	defer c.mu.Unlock()
 	delete(c.m, id)
 }
+
+// SetBookmarks bookmarks chapters of a work for v, or removes their
+// bookmarks, and returns the work's bookmarked chapters.
+func (s *Service) SetBookmarks(ctx context.Context, v library.Viewer, workID uuid.UUID, chapterIDs []uuid.UUID, on bool) ([]uuid.UUID, error) {
+	if _, err := s.library.Get(ctx, v, workID); err != nil {
+		if errors.Is(err, library.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	all, err := s.st.ListChapters(ctx, workID)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range chapterIDs {
+		if !slices.ContainsFunc(all, func(c db.Chapter) bool { return c.ID == id }) {
+			return nil, fmt.Errorf("%w: chapter %s isn't part of the work", ErrNotFound, id)
+		}
+	}
+	if on {
+		err = s.st.AddBookmarks(ctx, db.AddBookmarksParams{UserID: v.UserID, ChapterIds: chapterIDs, WorkID: workID})
+	} else {
+		err = s.st.DeleteBookmarks(ctx, db.DeleteBookmarksParams{UserID: v.UserID, ChapterIds: chapterIDs})
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.hub.Publish("bookmarks.changed", map[string]any{"work_id": workID}, events.Audience{Users: []uuid.UUID{v.UserID}})
+	return s.Bookmarks(ctx, v.UserID, workID)
+}
+
+// Bookmarks lists a user's bookmarked chapters of a work, oldest bookmark
+// first.
+func (s *Service) Bookmarks(ctx context.Context, userID, workID uuid.UUID) ([]uuid.UUID, error) {
+	ids, err := s.st.ListBookmarks(ctx, db.ListBookmarksParams{UserID: userID, WorkID: workID})
+	if ids == nil {
+		ids = []uuid.UUID{}
+	}
+	return ids, err
+}
+
+// BookmarkCounts counts a user's bookmarks per work.
+func (s *Service) BookmarkCounts(ctx context.Context, userID uuid.UUID, workIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	rows, err := s.st.CountBookmarks(ctx, db.CountBookmarksParams{UserID: userID, WorkIds: workIDs})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]int64, len(rows))
+	for _, r := range rows {
+		out[r.WorkID] = r.Bookmarks
+	}
+	return out, nil
+}

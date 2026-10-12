@@ -57,6 +57,10 @@ func (s *Server) GetChapterPages(ctx context.Context, req apigen.GetChapterPages
 		return nil, readerError(ctx, err)
 	}
 	visible := map[string]bool{p.Variant.SourceID: true}
+	marks, err := s.bookmarked(ctx, s.libraryViewer(ctx).UserID, p.WorkID)
+	if err != nil {
+		return nil, err
+	}
 	chosen := p.Chapter
 	chosen.Chosen = &p.Variant
 	out := apigen.GetChapterPages200JSONResponse{
@@ -64,6 +68,7 @@ func (s *Server) GetChapterPages(ctx context.Context, req apigen.GetChapterPages
 		Origin: apigen.ChapterPagesOrigin(p.Origin), Pages: make([]apigen.ReaderPage, len(p.Pages)),
 		PrevChapterId: p.Prev, NextChapterId: p.Next,
 	}
+	out.Chapter.Bookmarked = marks[p.Chapter.ID]
 	// Page links name the copy unless it is the chosen one, so a pinned
 	// or changed choice can't swap copies in the middle of reading.
 	var variant *uuid.UUID
@@ -125,6 +130,28 @@ func (s *Server) MarkChaptersRead(ctx context.Context, req apigen.MarkChaptersRe
 		return nil, readerError(ctx, err)
 	}
 	return apigen.MarkChaptersRead204Response{}, nil
+}
+
+// ListBookmarks lists the caller's bookmarked chapters of a work.
+func (s *Server) ListBookmarks(ctx context.Context, req apigen.ListBookmarksRequestObject) (apigen.ListBookmarksResponseObject, error) {
+	v := s.libraryViewer(ctx)
+	if _, err := s.deps.Library.Get(ctx, v, req.WorkId); err != nil {
+		return nil, libraryError(ctx, err)
+	}
+	ids, err := s.deps.Reader.Bookmarks(ctx, v.UserID, req.WorkId)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.ListBookmarks200JSONResponse{ChapterIds: ids}, nil
+}
+
+// SetBookmarks bookmarks chapters or removes their bookmarks.
+func (s *Server) SetBookmarks(ctx context.Context, req apigen.SetBookmarksRequestObject) (apigen.SetBookmarksResponseObject, error) {
+	ids, err := s.deps.Reader.SetBookmarks(ctx, s.libraryViewer(ctx), req.WorkId, req.Body.ChapterIds, req.Body.Bookmarked)
+	if err != nil {
+		return nil, readerError(ctx, err)
+	}
+	return apigen.SetBookmarks200JSONResponse{ChapterIds: ids}, nil
 }
 
 // GetMyHistory lists the chapters the caller read.

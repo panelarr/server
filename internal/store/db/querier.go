@@ -14,6 +14,7 @@ import (
 type Querier interface {
 	// Queued and running tasks of a kind whose payload has field = value.
 	ActiveTasksOf(ctx context.Context, arg ActiveTasksOfParams) ([]Task, error)
+	AddBookmarks(ctx context.Context, arg AddBookmarksParams) error
 	AddLibraryEntry(ctx context.Context, arg AddLibraryEntryParams) (LibraryEntry, error)
 	AssignVariants(ctx context.Context, arg AssignVariantsParams) error
 	// Attached series of works someone follows: what scheduled update checks
@@ -30,6 +31,7 @@ type Querier interface {
 	ClaimCandidates(ctx context.Context, arg ClaimCandidatesParams) ([]Task, error)
 	ClearDefaultStorage(ctx context.Context) error
 	CountAttachedByWork(ctx context.Context, workIds []uuid.UUID) ([]CountAttachedByWorkRow, error)
+	CountBookmarks(ctx context.Context, arg CountBookmarksParams) ([]CountBookmarksRow, error)
 	CountChaptersByWork(ctx context.Context, arg CountChaptersByWorkParams) ([]CountChaptersByWorkRow, error)
 	CountEnabledAdmins(ctx context.Context) (int64, error)
 	CountFilesByStorage(ctx context.Context, storageID string) (int64, error)
@@ -42,6 +44,7 @@ type Querier interface {
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateStorage(ctx context.Context, arg CreateStorageParams) (Storage, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteBookmarks(ctx context.Context, arg DeleteBookmarksParams) error
 	DeleteChapterFile(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	DeleteInvite(ctx context.Context, id uuid.UUID) (int64, error)
@@ -110,6 +113,7 @@ type Querier interface {
 	// Which of these catalogue entries are in a user's library, as which work.
 	LibraryWorksByEntries(ctx context.Context, arg LibraryWorksByEntriesParams) ([]LibraryWorksByEntriesRow, error)
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ApiKey, error)
+	ListBookmarks(ctx context.Context, arg ListBookmarksParams) ([]uuid.UUID, error)
 	ListChapters(ctx context.Context, workID uuid.UUID) ([]Chapter, error)
 	// Download tasks with their chapter and work, newest first; users see the
 	// ones they asked for, admins all.

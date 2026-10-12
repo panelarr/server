@@ -88,6 +88,16 @@ func (r *Registry) For(key string) *Key {
 	return k
 }
 
+// Acquire waits for a concurrency slot; Release gives it back.
+func (k *Key) Acquire(ctx context.Context) error {
+	select {
+	case k.sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // TryAcquire takes a concurrency slot if one is free.
 func (k *Key) TryAcquire() bool {
 	select {

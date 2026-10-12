@@ -274,8 +274,10 @@ func (s *Service) handleDownload(ctx context.Context, t *queue.Task) (any, error
 			arc.Abort()
 		}
 	}()
+	// Page images have their own budget (see plugins.ImageKey).
+	img := s.limits.For(plugins.ImageKey(v.SourceID))
 	for i, pg := range pages {
-		if err := key.Wait(ctx); err != nil {
+		if err := img.Wait(ctx); err != nil {
 			return nil, err
 		}
 		ref := pg.GetRef()

@@ -149,23 +149,26 @@ func wrapPush(err error) error {
 	return errors.New(errorMessage(err))
 }
 
-// limitFromProfile sets the server's own cap for a source: the profile's
-// rate limit and concurrency where it sets them, else the plugin's
-// declared limits.
+// limitFromProfile sets the server's own caps for a source, for its calls
+// and for its images: the profile's rate limit and concurrency where it
+// sets them (a profile's limits cover every request, images included),
+// else the plugin's declared limits.
 func (h *Host) limitFromProfile(p Plugin, s Source, prof *sourcev1.NetworkProfile) {
 	if h.limits == nil {
 		return
 	}
-	l := sourceLimit(p.Info)
+	l, il := sourceLimit(p.Info), imageLimit(p.Info)
 	if c := prof.GetConcurrency(); c > 0 {
-		l.Concurrency = int(c)
+		l.Concurrency, il.Concurrency = int(c), int(c)
 	}
 	if rl := prof.GetRateLimit(); rl.GetRequests() > 0 && rl.GetPeriod().AsDuration() > 0 &&
 		rl.GetScope() != sourcev1.RateLimitScope_RATE_LIMIT_SCOPE_HOST {
 		l.Every = rl.GetPeriod().AsDuration() / time.Duration(rl.GetRequests())
 		l.Burst = max(int(rl.GetBurst()), 1)
+		il.Every, il.Burst = l.Every, l.Burst
 	}
 	h.limits.Set("source:"+s.ID, l)
+	h.limits.Set(ImageKey(s.ID), il)
 }
 
 // Applied is what a plugin says it applies to a source: "pushed" (the

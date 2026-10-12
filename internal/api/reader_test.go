@@ -3,9 +3,17 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	sourcev1 "github.com/panelarr/source-api/gen/panelarr/source/v1"
+	"github.com/panelarr/source-api/sdk/plugin"
+	"github.com/panelarr/source-api/sdk/plugintest"
 
 	"github.com/panelarr/server/internal/api/apigen"
 )
@@ -214,4 +222,63 @@ func TestBookmarks(t *testing.T) {
 		t.Fatalf("after removing %+v", l)
 	}
 	user.expectProblem(http.MethodPost, base, map[string]any{"chapter_ids": []string{}, "bookmarked": true}, 400, CodeInvalidRequest)
+}
+
+// slowImages takes a while per image and records how many run at once.
+type slowImages struct {
+	*plugintest.Fake
+	inFlight, most atomic.Int64
+}
+
+func (f *slowImages) FetchImage(ctx context.Context, r *sourcev1.FetchImageRequest, send plugin.ImageSendFunc) error {
+	n := f.inFlight.Add(1)
+	defer f.inFlight.Add(-1)
+	for {
+		m := f.most.Load()
+		if n <= m || f.most.CompareAndSwap(m, n) {
+			break
+		}
+	}
+	time.Sleep(100 * time.Millisecond)
+	return f.Fake.FetchImage(ctx, r, send)
+}
+
+func TestPageImagesUseTheImageBudget(t *testing.T) {
+	t.Parallel()
+	var slow *slowImages
+	f := newLibraryFixture(t, func(fk *plugintest.Fake) plugin.Plugin {
+		slow = &slowImages{Fake: fk}
+		return slow
+	})
+	user := f.user
+	entry := call[apigen.LibraryEntry](user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 201)
+	id := entry.Work.Id.String()
+	waitWorkMatched(t, user, id)
+	chs := waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool { return len(cs) == 3 })
+	pages := call[apigen.ChapterPages](user, http.MethodGet, "/api/v1/chapters/"+chs[0].Id.String()+"/pages", nil, 200)
+
+	// The plugin declares no image rate and 4 images at a time per source
+	// (its API rate, 10 a second, would take 2 s for 20 images).
+	start := time.Now()
+	var wg sync.WaitGroup
+	failed := atomic.Int64{}
+	for i := range 20 {
+		wg.Go(func() {
+			if res := user.do(http.MethodGet, pages.Pages[i%len(pages.Pages)].Url, nil); res.status != 200 {
+				failed.Add(1)
+			}
+		})
+	}
+	wg.Wait()
+	took := time.Since(start)
+	if failed.Load() != 0 {
+		t.Fatalf("%d page fetches failed", failed.Load())
+	}
+	if most := slow.most.Load(); most > 4 || most < 2 {
+		t.Fatalf("%d images at once, want 2 to 4", most)
+	}
+	// 20 images, 4 at a time, 100 ms each: about half a second, no pacing.
+	if took > 1500*time.Millisecond {
+		t.Fatalf("20 images took %s", took)
+	}
 }

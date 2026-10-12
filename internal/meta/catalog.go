@@ -78,7 +78,9 @@ func (s *Service) HideUnknown(ctx context.Context) bool {
 		return false
 	}
 	if err != nil {
-		s.log.WarnContext(ctx, "read setting", "key", settingHideUnknown, "err", err)
+		if ctx.Err() == nil { // not just a request whose client went away
+			s.log.WarnContext(ctx, "read setting", "key", settingHideUnknown, "err", err)
+		}
 		return true // fail closed
 	}
 	var hide bool

@@ -76,7 +76,7 @@ func (s *Service) matchSettings(ctx context.Context) MatchSettings {
 	raw, err := s.st.GetSetting(ctx, settingMatching)
 	if err == nil {
 		_ = json.Unmarshal(raw, &m)
-	} else if !errors.Is(err, pgx.ErrNoRows) {
+	} else if !errors.Is(err, pgx.ErrNoRows) && ctx.Err() == nil {
 		s.log.WarnContext(ctx, "read setting", "key", settingMatching, "err", err)
 	}
 	return m

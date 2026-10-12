@@ -173,7 +173,9 @@ func TestConfigSaveFollowUpFindingItDown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	h, _ := newHost(t)
-	h.SetConfigFollowUp(30 * time.Millisecond)
+	// One follow-up, late enough to find the plugin down even on a busy
+	// machine; only the rechecks it hands over to bring it back.
+	h.SetConfigFollowUp(500 * time.Millisecond)
 	h.SetRecheck(100*time.Millisecond, 100*time.Millisecond, 100*time.Millisecond)
 	svc := pluginstest.ServeSwitchable(t, configurable(t), key)
 	if _, err := h.Register(ctx, plugins.NewPlugin{URL: svc.URL, APIKey: key}); err != nil {
@@ -187,8 +189,8 @@ func TestConfigSaveFollowUpFindingItDown(t *testing.T) {
 	}
 	// Applying the settings takes the plugin down for a moment.
 	svc.Down.Store(true)
-	waitHealth(t, h, "fake", "down", time.Second)
+	waitHealth(t, h, "fake", "down", 3*time.Second)
 	svc.Down.Store(false)
 	// The follow-up carries on as rechecks.
-	waitHealth(t, h, "fake", "ok", 2*time.Second)
+	waitHealth(t, h, "fake", "ok", 3*time.Second)
 }

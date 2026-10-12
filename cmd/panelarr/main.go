@@ -177,7 +177,10 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	host.SetSourcesChanged(chs.SourcesChanged)
 	host.RegisterPackageTasks(q)
 	netSvc := network.New(st, box, logging.Component(log, "network"))
-	host.SetNetwork(netSvc, q)
+	host.SetNetwork(netSvc, q, func(ctx context.Context) error {
+		_, _, err := netSvc.PushMeta(ctx, metaSvc, false)
+		return err
+	})
 	// Connecting to plugins can take a while; the API serves meanwhile.
 	go func() {
 		if err := host.Load(ctx); err != nil {
@@ -193,7 +196,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	rdr.SetFiles(dl)
 	chs.OnNewChapters(dl.NewChapters)
 	jm := jobs.NewManager(st, hub, m, logging.Component(log, "jobs"))
-	registerJobs(jm, st, authSvc, host, lib, chs)
+	registerJobs(jm, st, authSvc, host, lib, chs, netSvc, metaSvc)
 	if err := jm.Start(ctx); err != nil {
 		return err
 	}

@@ -94,6 +94,8 @@ func (s *Server) SetMetaConnection(ctx context.Context, req apigen.SetMetaConnec
 	}
 	st := s.deps.Meta.Status(ctx)
 	st.Check = check
+	// A newly connected meta gets its providers' network profiles.
+	s.deps.Network.Touch(ctx)
 	return apigen.SetMetaConnection200JSONResponse(toMetaConnection(st)), nil
 }
 

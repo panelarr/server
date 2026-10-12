@@ -28,9 +28,11 @@ const KindNetworkPush = "network.push"
 const pushTimeout = 2 * time.Minute
 
 // SetNetwork makes the host push network profiles from n, and queue a push
-// whenever a profile or assignment changes.
-func (h *Host) SetNetwork(n *network.Service, q *queue.Queue) {
+// whenever a profile or assignment changes; also runs in that push (e.g.
+// to metadata providers).
+func (h *Host) SetNetwork(n *network.Service, q *queue.Queue, also ...func(context.Context) error) {
 	h.net = n
+	h.alsoPush = also
 	q.Register(KindNetworkPush, queue.Kind{Handler: h.handleNetworkPush, Concurrency: 1, MaxAttempts: 3})
 	n.SetChanged(func(ctx context.Context) {
 		if _, _, err := q.Enqueue(ctx, queue.NewTask{Kind: KindNetworkPush, DedupeKey: KindNetworkPush, Priority: 10}); err != nil {
@@ -54,6 +56,11 @@ func (h *Host) handleNetworkPush(ctx context.Context, _ *queue.Task) (any, error
 			return nil, err
 		}
 		pushed, failed = pushed+n, failed+f
+	}
+	for _, fn := range h.alsoPush {
+		if err := fn(ctx); err != nil {
+			return nil, err
+		}
 	}
 	return map[string]int{"pushed": pushed, "failed": failed}, nil
 }

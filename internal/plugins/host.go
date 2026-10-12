@@ -100,6 +100,7 @@ type Host struct {
 	// net is where network profiles come from (network.go); pushMu keeps
 	// pushes one at a time; instances are the plugins' last instance IDs.
 	net       *network.Service
+	alsoPush  []func(context.Context) error
 	pushMu    sync.Mutex
 	instances map[string]string
 }

@@ -19,6 +19,8 @@ import (
 
 	"connectrpc.com/connect"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
 	"github.com/panelarr/meta/gen/panelarr/meta/v1/metav1connect"
@@ -48,6 +50,11 @@ type Fake struct {
 	delay time.Duration
 	// via records which API started each sync: "jobs" or "admin".
 	via []string
+	// pushed are network profiles pushed per provider; unsupported are
+	// providers whose plugin takes no profiles.
+	pushed      map[string]*metadatav1.NetworkProfile
+	pushedAt    map[string]time.Time
+	unsupported map[string]bool
 }
 
 // New starts a fake with one admin key, AdminKey, and no providers.
@@ -60,6 +67,7 @@ func New(t testing.TB) *Fake {
 	mux.Handle(metav1connect.NewMetaAdminServiceHandler(&adminHandler{f: f}, opts))
 	mux.Handle(metav1connect.NewMetaClientsServiceHandler(&clientsHandler{f: f}, opts))
 	mux.Handle(metav1connect.NewMetaJobsServiceHandler(&jobsHandler{f: f}, opts))
+	mux.Handle(metav1connect.NewMetaIntegrationsServiceHandler(&integrationsHandler{f: f}, opts))
 	// Down means no answer at all: the connection is cut.
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -379,4 +387,76 @@ func (h *metaHandler) GetEntry(_ context.Context, req *connect.Request[metav1.Ge
 		}
 	}
 	return nil, connect.NewError(connect.CodeNotFound, errors.New("no such entry"))
+}
+
+// SetUnsupported marks a provider whose plugin takes no network profiles.
+func (f *Fake) SetUnsupported(provider string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.unsupported == nil {
+		f.unsupported = map[string]bool{}
+	}
+	f.unsupported[provider] = true
+}
+
+// Pushed returns the profile pushed to a provider (password included), or
+// nil.
+func (f *Fake) Pushed(provider string) *metadatav1.NetworkProfile {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pushed[provider]
+}
+
+// ForgetPushed drops every pushed profile, like a reset meta.
+func (f *Fake) ForgetPushed() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pushed, f.pushedAt = nil, nil
+}
+
+type integrationsHandler struct {
+	metav1connect.UnimplementedMetaIntegrationsServiceHandler
+	f *Fake
+}
+
+func (h *integrationsHandler) ListAssignments(context.Context, *connect.Request[metav1.ListAssignmentsRequest]) (*connect.Response[metav1.ListAssignmentsResponse], error) {
+	f := h.f
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	res := &metav1.ListAssignmentsResponse{}
+	for _, p := range f.providers {
+		a := &metav1.Assignment{ProviderId: p.GetId(), Supported: !f.unsupported[p.GetId()], Effective: metav1.ProfileOrigin_PROFILE_ORIGIN_NONE}
+		if pp := f.pushed[p.GetId()]; pp != nil {
+			shown := proto.Clone(pp).(*metadatav1.NetworkProfile)
+			if shown.GetProxy() != nil {
+				a.PushedProxyPasswordSet = shown.GetProxy().GetPassword() != ""
+				shown.Proxy.Password = ""
+			}
+			a.PushedProfile, a.PushedProfileName = shown, pp.GetName()
+			a.PushedAt = timestamppb.New(f.pushedAt[p.GetId()])
+			a.Effective = metav1.ProfileOrigin_PROFILE_ORIGIN_PUSHED
+		}
+		res.Assignments = append(res.Assignments, a)
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *integrationsHandler) SetPushedProfile(_ context.Context, req *connect.Request[metav1.SetPushedProfileRequest]) (*connect.Response[metav1.SetPushedProfileResponse], error) {
+	f := h.f
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := req.Msg.GetProviderId()
+	if !slices.ContainsFunc(f.providers, func(p *metav1.Provider) bool { return p.GetId() == id }) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("no such provider"))
+	}
+	if f.pushed == nil {
+		f.pushed, f.pushedAt = map[string]*metadatav1.NetworkProfile{}, map[string]time.Time{}
+	}
+	if p := req.Msg.GetProfile(); p != nil {
+		f.pushed[id], f.pushedAt[id] = p, time.Now()
+	} else {
+		delete(f.pushed, id)
+		delete(f.pushedAt, id)
+	}
+	return connect.NewResponse(&metav1.SetPushedProfileResponse{}), nil
 }

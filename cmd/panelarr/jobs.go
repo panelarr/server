@@ -12,6 +12,8 @@ import (
 	"github.com/panelarr/server/internal/chapters"
 	"github.com/panelarr/server/internal/jobs"
 	"github.com/panelarr/server/internal/library"
+	"github.com/panelarr/server/internal/meta"
+	"github.com/panelarr/server/internal/network"
 	"github.com/panelarr/server/internal/plugins"
 	"github.com/panelarr/server/internal/store"
 )
@@ -20,7 +22,7 @@ import (
 const taskRetention = 7 * 24 * time.Hour
 
 // registerJobs adds the server's named background jobs.
-func registerJobs(m *jobs.Manager, st *store.Store, a *auth.Service, host *plugins.Host, lib *library.Service, chs *chapters.Service) {
+func registerJobs(m *jobs.Manager, st *store.Store, a *auth.Service, host *plugins.Host, lib *library.Service, chs *chapters.Service, nw *network.Service, ms *meta.Service) {
 	m.Register(jobs.Definition{
 		ID: "updates.check", Name: "Check for new chapters", Group: "Library",
 		Description: "Queues a chapter check of every attached series of works someone follows, spread over half an hour so sources aren't hit at once.",
@@ -56,6 +58,17 @@ func registerJobs(m *jobs.Manager, st *store.Store, a *auth.Service, host *plugi
 			r.Count("ok", int64(ok))
 			r.Count("down", int64(down))
 			r.SetMessage(fmt.Sprintf("%d ok, %d down", ok, down))
+			return err
+		},
+	})
+	m.Register(jobs.Definition{
+		ID: "network.meta", Name: "Network profiles to metadata providers", Group: "Network",
+		Description: "Makes sure each metadata provider has its network profile in force (meta keeps pushed profiles; this catches a reset or a missed change).",
+		Interval:    5 * time.Minute, ScheduleSource: "built in",
+		Run: func(ctx context.Context, r *jobs.Run) error {
+			pushed, failed, err := nw.PushMeta(ctx, ms, false)
+			r.Count("pushed", int64(pushed))
+			r.Count("failed", int64(failed))
 			return err
 		},
 	})

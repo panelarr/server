@@ -60,3 +60,19 @@ SELECT chapter_id FROM bookmarks WHERE user_id = @user_id AND work_id = @work_id
 SELECT work_id, count(*) AS bookmarks FROM bookmarks
 WHERE user_id = @user_id AND work_id = ANY(@work_ids::uuid[])
 GROUP BY work_id;
+
+-- name: LibraryChapters :many
+-- The chapters of some works, with when their chosen copy was uploaded.
+SELECT chapters.id, chapters.work_id, chapters.number, chapters.available, chapters.created_at,
+       source_chapters.uploaded_at
+FROM chapters LEFT JOIN source_chapters ON source_chapters.id = chapters.preferred_variant_id
+WHERE chapters.work_id = ANY(@work_ids::uuid[]);
+
+-- name: LibraryProgress :many
+SELECT * FROM progress WHERE user_id = @user_id AND work_id = ANY(@work_ids::uuid[]);
+
+-- name: CountDownloadedByWork :many
+SELECT chapters.work_id, count(*) AS downloaded
+FROM chapter_files JOIN chapters ON chapters.id = chapter_files.chapter_id
+WHERE chapters.work_id = ANY(@work_ids::uuid[])
+GROUP BY chapters.work_id;

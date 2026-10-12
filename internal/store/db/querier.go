@@ -33,6 +33,7 @@ type Querier interface {
 	CountAttachedByWork(ctx context.Context, workIds []uuid.UUID) ([]CountAttachedByWorkRow, error)
 	CountBookmarks(ctx context.Context, arg CountBookmarksParams) ([]CountBookmarksRow, error)
 	CountChaptersByWork(ctx context.Context, arg CountChaptersByWorkParams) ([]CountChaptersByWorkRow, error)
+	CountDownloadedByWork(ctx context.Context, workIds []uuid.UUID) ([]CountDownloadedByWorkRow, error)
 	CountEnabledAdmins(ctx context.Context) (int64, error)
 	CountFilesByStorage(ctx context.Context, storageID string) (int64, error)
 	CountSourcesByPlugin(ctx context.Context) ([]CountSourcesByPluginRow, error)
@@ -113,6 +114,9 @@ type Querier interface {
 	// Returns no row when a live task with the same dedupe key exists.
 	InsertTask(ctx context.Context, arg InsertTaskParams) (Task, error)
 	LastJobRuns(ctx context.Context) ([]JobRun, error)
+	// The chapters of some works, with when their chosen copy was uploaded.
+	LibraryChapters(ctx context.Context, workIds []uuid.UUID) ([]LibraryChaptersRow, error)
+	LibraryProgress(ctx context.Context, arg LibraryProgressParams) ([]Progress, error)
 	LibraryUserIDs(ctx context.Context, workID uuid.UUID) ([]uuid.UUID, error)
 	// Which of these catalogue entries are in a user's library, as which work.
 	LibraryWorksByEntries(ctx context.Context, arg LibraryWorksByEntriesParams) ([]LibraryWorksByEntriesRow, error)

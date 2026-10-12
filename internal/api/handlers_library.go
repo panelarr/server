@@ -17,6 +17,7 @@ import (
 	"github.com/panelarr/server/internal/library"
 	"github.com/panelarr/server/internal/meta"
 	"github.com/panelarr/server/internal/plugins"
+	"github.com/panelarr/server/internal/reader"
 	"github.com/panelarr/server/internal/store/db"
 	"github.com/panelarr/server/internal/users"
 )
@@ -122,9 +123,15 @@ func (s *Server) ListLibrary(ctx context.Context, req apigen.ListLibraryRequestO
 	if err != nil {
 		return nil, err
 	}
+	stats, err := s.deps.Reader.LibraryStats(ctx, auth.FromContext(ctx).User.ID, ids)
+	if err != nil {
+		return nil, err
+	}
 	out := apigen.ListLibrary200JSONResponse{Entries: make([]apigen.LibraryEntry, len(page.Entries))}
 	for i, e := range page.Entries {
-		out.Entries[i] = apigen.LibraryEntry{Work: toWorkSummary(e.Work, e.Attached), AddedAt: e.AddedAt, NewChapters: int(newCounts[e.Work.ID]), Bookmarks: int(marks[e.Work.ID]), AutoDownload: e.AutoDownload}
+		le := apigen.LibraryEntry{Work: toWorkSummary(e.Work, e.Attached), AddedAt: e.AddedAt, NewChapters: int(newCounts[e.Work.ID]), Bookmarks: int(marks[e.Work.ID]), AutoDownload: e.AutoDownload}
+		withStats(&le, stats[e.Work.ID])
+		out.Entries[i] = le
 	}
 	if page.Next != nil {
 		out.NextPageToken = encodePageToken(page.Next.SortTitle + "\x00" + page.Next.ID.String())
@@ -351,4 +358,10 @@ func (s *Server) DetachSeries(ctx context.Context, req apigen.DetachSeriesReques
 		return nil, libraryError(ctx, err)
 	}
 	return apigen.DetachSeries200JSONResponse(s.toMatchSeries(se)), nil
+}
+
+// withStats adds the user's reading of the work to a library entry.
+func withStats(le *apigen.LibraryEntry, st reader.ReadingStats) {
+	le.Chapters, le.Unread, le.Downloaded, le.Started = st.Chapters, st.Unread, st.Downloaded, st.Started
+	le.ContinueChapterId, le.LastReadAt, le.LatestChapterAt = st.Continue, st.LastReadAt, st.LatestChapterAt
 }

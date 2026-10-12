@@ -81,6 +81,13 @@ type Host struct {
 	mu      sync.RWMutex
 	clients map[string]client.Client
 	limits  *limits.Registry
+
+	// Recovery of plugins found down (recover.go).
+	rmu        sync.Mutex
+	bg         context.Context //nolint:containedctx // the host's lifetime, for rechecks
+	recheck    []time.Duration
+	grace      []time.Duration
+	rechecking map[string]bool
 }
 
 // SetLimits makes the host keep each source's limits (from its plugin's
@@ -105,7 +112,10 @@ func NewHost(st *store.Store, box *secret.Box, dial Dialer, log *slog.Logger) *H
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Host{st: st, box: box, dial: dial, log: log, clients: map[string]client.Client{}}
+	return &Host{
+		st: st, box: box, dial: dial, log: log, clients: map[string]client.Client{},
+		recheck: slices.Clone(DefaultRecheck), grace: slices.Clone(DefaultStartupGrace), rechecking: map[string]bool{},
+	}
 }
 
 var validID = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
@@ -207,8 +217,12 @@ func (h *Host) setClient(id string, c client.Client) {
 }
 
 // Load connects to every stored plugin, hands each its configuration and
-// syncs its sources. Failures are recorded, not fatal.
+// syncs its sources. Failures are recorded, not fatal. ctx is the host's
+// lifetime: rechecks of plugins found down run until it ends.
 func (h *Host) Load(ctx context.Context) error {
+	h.rmu.Lock()
+	h.bg = ctx
+	h.rmu.Unlock()
 	rows, err := h.st.ListPlugins(ctx)
 	if err != nil {
 		return err
@@ -223,6 +237,7 @@ func (h *Host) Load(ctx context.Context) error {
 		if !p.Enabled {
 			continue
 		}
+		h.awaitReachable(ctx, p.ID)
 		if err := h.pushConfig(ctx, p); err != nil {
 			h.log.WarnContext(ctx, "plugin config", "plugin", p.ID, "err", err)
 		}
@@ -382,8 +397,17 @@ func (h *Host) Delete(ctx context.Context, id string) error {
 }
 
 // Sync refreshes a plugin's info, health and sources. A plugin that
-// doesn't answer is recorded as down; its sources stay as they were.
+// doesn't answer is recorded as down (its sources stay as they were) and
+// rechecked soon after.
 func (h *Host) Sync(ctx context.Context, id string) (Plugin, error) {
+	p, err := h.sync(ctx, id)
+	if err == nil && p.Health == "down" {
+		h.scheduleRecheck(id)
+	}
+	return p, err
+}
+
+func (h *Host) sync(ctx context.Context, id string) (Plugin, error) {
 	c, err := h.Client(ctx, id)
 	if err != nil {
 		return Plugin{}, err

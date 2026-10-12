@@ -7,6 +7,7 @@ package pluginstest
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/panelarr/source-api/sdk/plugin"
@@ -22,4 +23,35 @@ func Serve(t testing.TB, p plugin.Plugin, apiKey string) string {
 	srv.Start()
 	t.Cleanup(srv.Close)
 	return srv.URL
+}
+
+// Switchable is a test plugin service that can stop answering.
+type Switchable struct {
+	URL string
+	// Down cuts every connection without an answer, like a service that
+	// isn't listening.
+	Down atomic.Bool
+	// Requests counts requests that reached the service, answered or not.
+	Requests atomic.Int64
+}
+
+// ServeSwitchable runs p behind apiKey and returns the switchable service.
+func ServeSwitchable(t testing.TB, p plugin.Plugin, apiKey string) *Switchable {
+	t.Helper()
+	s := &Switchable{}
+	inner := plugin.NewHandler(p, apiKey)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.Requests.Add(1)
+		if s.Down.Load() {
+			panic(http.ErrAbortHandler)
+		}
+		inner.ServeHTTP(w, r)
+	}))
+	srv.Config.Protocols = new(http.Protocols)
+	srv.Config.Protocols.SetHTTP1(true)
+	srv.Config.Protocols.SetUnencryptedHTTP2(true)
+	srv.Start()
+	t.Cleanup(srv.Close)
+	s.URL = srv.URL
+	return s
 }

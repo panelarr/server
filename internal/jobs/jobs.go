@@ -404,7 +404,9 @@ func (m *Manager) Cancel(ctx context.Context, runID uuid.UUID) (db.JobRun, error
 	d := m.defs[row.JobID]
 	cur := m.running[row.JobID]
 	m.mu.Unlock()
-	if cur == nil || cur.runID != runID {
+	// A run is recorded as finished a moment before it leaves the running
+	// set: the record decides.
+	if cur == nil || cur.runID != runID || row.Status != StatusRunning {
 		return row, ErrNotRunning
 	}
 	if !d.Cancellable {

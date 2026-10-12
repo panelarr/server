@@ -226,3 +226,18 @@ func (f *singleIconFake) ListSources(ctx context.Context, r *sourcev1.ListSource
 	}
 	return res, err
 }
+
+func TestImageRoutes(t *testing.T) {
+	t.Parallel()
+	for route, want := range map[string]bool{
+		"/api/v1/sources/{source_id}/image":                      true,
+		"/api/v1/plugins/{plugin_id}/packages/{package_id}/icon": true,
+		"/api/v1/plugins/{plugin_id}/packages":                   false,
+		"/api/v1/sources/{source_id}/popular":                    false,
+		"/api/v1/chapters/{chapter_id}/pages/{index}":            false,
+	} {
+		if got := imageRoute(route); got != want {
+			t.Errorf("%s: %v, want %v", route, got, want)
+		}
+	}
+}

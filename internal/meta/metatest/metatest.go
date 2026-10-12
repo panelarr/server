@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
@@ -55,9 +56,12 @@ type Fake struct {
 	// providers whose plugin takes no profiles.
 	// pairs are suspected duplicates; judge the decision model settings
 	// (judgeKey its API key, never returned).
-	pairs    []*metav1.DuplicatePair
-	judge    *metav1.DecisionJudgeSettings
-	judgeKey string
+	pairs []*metav1.DuplicatePair
+	// search is the saved search engine settings (searchKey its key).
+	search    *metav1.SearchEngineSettings
+	searchKey string
+	judge     *metav1.DecisionJudgeSettings
+	judgeKey  string
 	// syncRuns are the sync runs started, oldest first.
 	syncRuns []*metav1.SyncRun
 	// jobs and runs are meta's own jobs (not syncs), runs newest last.
@@ -875,4 +879,70 @@ func (h *duplicatesHandler) ResetDecisionJudge(ctx context.Context, _ *connect.R
 	defer h.f.mu.Unlock()
 	h.f.judge, h.f.judgeKey = nil, ""
 	return connect.NewResponse(&metav1.ResetDecisionJudgeResponse{Settings: h.judgeShown()}), nil
+}
+
+// SearchKey is the search engine's stored API key.
+func (f *Fake) SearchKey() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.searchKey
+}
+
+// searchShown is the search engine as meta returns it; call with f.mu held.
+func (f *Fake) searchShown() (*metav1.SearchEngineSettings, *metav1.SearchEngineStatus) {
+	st := &metav1.SearchEngineSettings{Backend: "postgres", Origin: "config"}
+	if f.search != nil {
+		st = proto.Clone(f.search).(*metav1.SearchEngineSettings)
+		st.ApiKey, st.HasApiKey, st.Origin = "", f.searchKey != "", "admin"
+	}
+	status := &metav1.SearchEngineStatus{Backend: st.GetBackend(), Substring: true, Reachable: true, Ready: true, Documents: 42, Lag: durationpb.New(2 * time.Second)}
+	return st, status
+}
+
+func (h *integrationsHandler) GetSearchEngine(ctx context.Context, _ *connect.Request[metav1.GetSearchEngineRequest]) (*connect.Response[metav1.GetSearchEngineResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	st, status := h.f.searchShown()
+	return connect.NewResponse(&metav1.GetSearchEngineResponse{Settings: st, Status: status}), nil
+}
+
+func (h *integrationsHandler) PutSearchEngine(ctx context.Context, req *connect.Request[metav1.PutSearchEngineRequest]) (*connect.Response[metav1.PutSearchEngineResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	if b := req.Msg.GetSettings().GetBackend(); b != "postgres" && req.Msg.GetSettings().GetUrl() == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New(b+" needs a url"))
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	h.f.search = proto.Clone(req.Msg.GetSettings()).(*metav1.SearchEngineSettings)
+	if k := req.Msg.GetSettings().GetApiKey(); k != "" {
+		h.f.searchKey = k
+	}
+	st, status := h.f.searchShown()
+	return connect.NewResponse(&metav1.PutSearchEngineResponse{Settings: st, Status: status}), nil
+}
+
+func (h *integrationsHandler) TestSearchEngine(ctx context.Context, req *connect.Request[metav1.TestSearchEngineRequest]) (*connect.Response[metav1.TestSearchEngineResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	if strings.Contains(req.Msg.GetSettings().GetUrl(), "nowhere") {
+		return connect.NewResponse(&metav1.TestSearchEngineResponse{Error: "can't reach the engine"}), nil
+	}
+	return connect.NewResponse(&metav1.TestSearchEngineResponse{Ok: true}), nil
+}
+
+func (h *integrationsHandler) ResetSearchEngine(ctx context.Context, _ *connect.Request[metav1.ResetSearchEngineRequest]) (*connect.Response[metav1.ResetSearchEngineResponse], error) {
+	if err := requireAdmin(ctx); err != nil {
+		return nil, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	h.f.search, h.f.searchKey = nil, ""
+	st, status := h.f.searchShown()
+	return connect.NewResponse(&metav1.ResetSearchEngineResponse{Settings: st, Status: status}), nil
 }

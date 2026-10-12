@@ -1962,6 +1962,82 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /system/meta/search-engine:
+    get:
+      operationId: getMetaSearchEngine
+      tags: [meta]
+      summary: The metadata service's search engine and the state of its index
+      description: The engine's API key is never returned (`has_api_key`). Rebuild the index with the `search-rebuild` job.
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The settings in force and the engine's state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaSearchEngine"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: putMetaSearchEngine
+      tags: [meta]
+      summary: Save the search engine settings
+      description: They win over meta's configuration until reset. An empty API key keeps the stored one.
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchEngineSettings"
+      responses:
+        "200":
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaSearchEngine"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/search-engine/test:
+    post:
+      operationId: testMetaSearchEngine
+      tags: [meta]
+      summary: Check search engine settings without saving them
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchEngineSettings"
+      responses:
+        "200":
+          description: How it went.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchEngineTest"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /system/meta/search-engine/reset:
+    post:
+      operationId: resetMetaSearchEngine
+      tags: [meta]
+      summary: Forget the saved settings; meta's configuration applies again
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The settings in force now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaSearchEngine"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /system/meta/jobs:
     get:
       operationId: listMetaJobs
@@ -6177,6 +6253,108 @@ components:
           type: string
         verdict:
           $ref: "#/components/schemas/DuplicateVerdict"
+    SearchEngineSettings:
+      type: object
+      required: [backend]
+      properties:
+        backend:
+          type: string
+          enum: [postgres, typesense, meilisearch]
+        url:
+          type: string
+          maxLength: 2000
+          description: The engine's URL; meta talks to it, browsers never do.
+        api_key:
+          type: string
+          maxLength: 2000
+          description: Never returned; empty keeps the stored one.
+        index_prefix:
+          type: string
+          maxLength: 100
+        browse:
+          type: string
+          enum: [facets, engine, postgres]
+          description: Who serves browsing without search text.
+    MetaSearchEngine:
+      type: object
+      required: [settings, status]
+      properties:
+        settings:
+          type: object
+          required: [backend, has_api_key, origin]
+          properties:
+            backend:
+              type: string
+            url:
+              type: string
+            has_api_key:
+              type: boolean
+            index_prefix:
+              type: string
+            browse:
+              type: string
+            origin:
+              type: string
+              description: Where the settings come from, "config" or "admin".
+        status:
+          $ref: "#/components/schemas/SearchEngineStatus"
+    SearchEngineStatus:
+      type: object
+      required: [backend, typo_tolerance, substring, facets, ready, reachable, degraded, documents, pending, applied]
+      properties:
+        backend:
+          type: string
+          description: The backend answering searches now.
+        typo_tolerance:
+          type: boolean
+        substring:
+          type: boolean
+        facets:
+          type: boolean
+        ready:
+          type: boolean
+          description: The index is built and searches use it.
+        reachable:
+          type: boolean
+        error:
+          type: string
+        error_at:
+          type: string
+          format: date-time
+        degraded:
+          type: boolean
+          description: Recent queries failed and the database answered them.
+        index:
+          type: string
+        documents:
+          type: integer
+          format: int64
+        built_at:
+          type: string
+          format: date-time
+        pending:
+          type: integer
+          format: int64
+          description: Entry changes waiting for the engine.
+        lag_seconds:
+          type: number
+          description: The age of the oldest pending change.
+        applied:
+          type: integer
+          format: int64
+        indexer_error:
+          type: string
+        indexer_error_at:
+          type: string
+          format: date-time
+    SearchEngineTest:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        error:
+          type: string
     SeriesMatchRef:
       type: object
       description: How a work already knows a series.

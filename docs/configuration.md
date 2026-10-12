@@ -52,6 +52,7 @@ The metadata service's own admin is available inside Panelarr's, through the ser
 - **Jobs** (`/api/v1/system/meta/jobs`): meta's background jobs in the same shape as the server's own (provider syncs, duplicate finding, the search index rebuild, …), with their runs; run now and cancel. Their schedules are set in meta's configuration and shown read-only. Runs send no events: poll a running one.
 - **Providers** (`/api/v1/system/meta/providers`): each provider with its plugin, health, sync schedules (from meta's configuration, read-only), record count and last sync runs; sync runs in full with their counts and notices (`/sync-runs`); meta's own health per component (`/health`); and fresh data for one entry from its providers (`POST /entries/{id}/refresh`).
 - **Duplicates review** (`/api/v1/system/meta/duplicates`): pairs of entries meta suspects are one work, with the signals and the decision model's verdict; confirm (merges the two for good), dismiss (different works) or reopen a dismissal. The decision model's settings (`/duplicate-judge`) can be read, saved, tested and reset; its API key is never shown.
+- **Search engine** (`/api/v1/system/meta/search-engine`): the backend meta searches with (its database, or a search engine by URL), with the state of its index (ready, documents, pending changes, errors); settings can be saved (winning over meta's configuration), tested and reset, and the engine's API key is never shown. The index is rebuilt with the `search-rebuild` job.
 
 ## Source plugins
 

@@ -185,3 +185,38 @@ func TestMetaDuplicatesReview(t *testing.T) {
 	}
 	user.expectProblem(http.MethodGet, "/api/v1/system/meta/duplicates", nil, 403, "forbidden")
 }
+
+func TestMetaSearchEngine(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	admin, _ := h.setupAdmin()
+	fake := connectedMeta(t, admin)
+
+	se := call[apigen.MetaSearchEngine](admin, http.MethodGet, "/api/v1/system/meta/search-engine", nil, 200)
+	if se.Settings.Backend != "postgres" || se.Settings.Origin != "config" || !se.Status.Ready || se.Status.Documents != 42 || se.Status.LagSeconds == nil {
+		t.Fatalf("search engine %+v", se)
+	}
+	body := map[string]any{"backend": "typesense", "url": "http://typesense:8108", "api_key": "ts-secret", "browse": "facets"}
+	if tr := call[apigen.SearchEngineTest](admin, http.MethodPost, "/api/v1/system/meta/search-engine/test", body, 200); !tr.Ok {
+		t.Fatalf("test %+v", tr)
+	}
+	if tr := call[apigen.SearchEngineTest](admin, http.MethodPost, "/api/v1/system/meta/search-engine/test", map[string]any{"backend": "typesense", "url": "http://nowhere:1"}, 200); tr.Ok || tr.Error == nil {
+		t.Fatalf("failed test %+v", tr)
+	}
+	se = call[apigen.MetaSearchEngine](admin, http.MethodPut, "/api/v1/system/meta/search-engine", body, 200)
+	if se.Settings.Backend != "typesense" || !se.Settings.HasApiKey || se.Settings.Origin != "admin" || fake.SearchKey() != "ts-secret" {
+		t.Fatalf("saved %+v", se)
+	}
+	call[apigen.MetaSearchEngine](admin, http.MethodPut, "/api/v1/system/meta/search-engine", map[string]any{"backend": "typesense", "url": "http://typesense:8108"}, 200)
+	if fake.SearchKey() != "ts-secret" {
+		t.Fatal("an empty key replaced the stored one")
+	}
+	if strings.Contains(string(admin.do(http.MethodGet, "/api/v1/system/meta/search-engine", nil).body), "ts-secret") {
+		t.Fatal("the key is shown")
+	}
+	admin.expectProblem(http.MethodPut, "/api/v1/system/meta/search-engine", map[string]any{"backend": "meilisearch"}, 400, CodeInvalidRequest)
+	admin.expectProblem(http.MethodPut, "/api/v1/system/meta/search-engine", map[string]any{"backend": "elastic"}, 400, CodeInvalidRequest)
+	if r := call[apigen.MetaSearchEngine](admin, http.MethodPost, "/api/v1/system/meta/search-engine/reset", nil, 200); r.Settings.Origin != "config" || r.Settings.HasApiKey {
+		t.Fatalf("reset %+v", r)
+	}
+}

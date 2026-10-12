@@ -31,7 +31,7 @@ Solvers, proxies and network profiles live in Panelarr as options; admins assign
 - [x] **S1. Solvers and proxies:** admin CRUD under `/network/solvers` and `/network/proxies`, checks before and after saving (a solver's state; a proxy's connection or a request through it), proxy passwords encrypted and never returned.
 - [x] **S2. Profiles and assignments:** profiles built from them (shared or custom to one target), assignments at global, plugin, extension, source, meta and provider level, and the effective profile per source and provider.
 - [x] **S3. Push to source plugins:** effective profiles pushed to plugins that declare the network profile service (solver only with the solver service), on change, for new sources and after a plugin restart; push state per source; the server's own source limits follow the profile.
-- [ ] **S4. Per-source settings:** a source's own settings through the API.
+- [x] **S4. Per-source settings:** a source's own settings through the API.
 - [ ] **S5. Metadata providers:** profiles pushed to meta per provider.
 
 ## Working assumptions

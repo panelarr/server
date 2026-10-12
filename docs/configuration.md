@@ -69,6 +69,8 @@ They are options: nothing is assigned by default, so plugins keep their own sett
 
 The server **pushes** each source's profile to its plugin, with the proxy's password and the solver inline, and only to plugins that declare they take network profiles (the solver only to those that take solvers too). A plugin whose source falls back to "the plugin's own settings" is told so. Changes are pushed within seconds (a `network.push` task); each plugin sync pushes what changed or failed, and everything is pushed again after a plugin restarts (its `instance_id` changes, it comes back from down, or the server starts). The plugin page shows each source's push state, and `GET /api/v1/sources/{id}/network` asks the plugin what it actually applies. The server's own per-source limits follow the profile's rate limit and concurrency where it sets them, else the plugin's declared limits.
 
+A source's **own settings** (e.g. an extension's preferences), for sources with the `settings` capability, are read and changed through `GET`/`PATCH /api/v1/sources/{id}/settings` (admins), in the schema the plugin gives. The plugin keeps them; secret fields are never shown and keep their value when left empty.
+
 ## Background work
 
 Two kinds of background work show in the admin:

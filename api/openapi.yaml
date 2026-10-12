@@ -1590,6 +1590,50 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /sources/{source_id}/settings:
+    parameters:
+      - $ref: "#/components/parameters/SourceId"
+    get:
+      operationId: getSourceSettings
+      tags: [sources]
+      summary: A source's own settings and their schema
+      description: |
+        Read from its plugin (e.g. an extension's preferences). Only for
+        sources with the `settings` capability, else `422`, code
+        `unsupported`. Secret fields (`writeOnly` in the schema) come back
+        empty. Works on a source turned off too.
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceSettings"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: setSourceSettings
+      tags: [sources]
+      summary: Change some of a source's settings
+      description: Keys left out keep their value, and so does a secret left empty. The plugin checks the values (`400` with its reason).
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetSourceSettingsRequest"
+      responses:
+        "200":
+          description: All the settings after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceSettings"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /sources/{source_id}/network:
     parameters:
       - $ref: "#/components/parameters/SourceId"
@@ -5212,6 +5256,24 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SourceNetwork"
+    SourceSettings:
+      type: object
+      required: [schema, values]
+      properties:
+        schema:
+          type: object
+          additionalProperties: true
+          description: The source's JSON Schema for its settings. Render the form from it.
+        values:
+          type: object
+          additionalProperties: true
+    SetSourceSettingsRequest:
+      type: object
+      required: [values]
+      properties:
+        values:
+          type: object
+          additionalProperties: true
     SeriesMatchRef:
       type: object
       description: How a work already knows a series.

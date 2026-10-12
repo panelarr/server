@@ -5,10 +5,12 @@ package plugins
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 
 	"github.com/jackc/pgx/v5"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	sourcev1 "github.com/panelarr/source-api/gen/panelarr/source/v1"
 	"github.com/panelarr/source-api/sdk/client"
@@ -388,4 +390,98 @@ func (h *Host) Pages(ctx context.Context, v Viewer, id, chapterKey string) ([]*s
 		return nil, err
 	}
 	return res.GetPages(), nil
+}
+
+// SourceSettings is a source's own settings: its JSON Schema and values,
+// with secret (writeOnly) values blanked.
+type SourceSettings struct {
+	Schema map[string]any
+	Values map[string]any
+}
+
+// settingsViewer is who edits a source's settings: admins, also on a
+// source turned off.
+var settingsViewer = Viewer{Admin: true, Testing: true}
+
+// writeOnly lists the schema's secret top-level properties.
+func writeOnly(schema map[string]any) map[string]bool {
+	out := map[string]bool{}
+	props, _ := schema["properties"].(map[string]any)
+	for k, v := range props {
+		if p, ok := v.(map[string]any); ok && p["writeOnly"] == true {
+			out[k] = true
+		}
+	}
+	return out
+}
+
+func shown(schema, values map[string]any) map[string]any {
+	secret := writeOnly(schema)
+	out := make(map[string]any, len(values))
+	for k, v := range values {
+		if secret[k] {
+			v = ""
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// Settings returns a source's settings, read from its plugin.
+func (h *Host) Settings(ctx context.Context, id string) (SourceSettings, error) {
+	s, c, err := h.call(ctx, settingsViewer, id, "settings")
+	if err != nil {
+		return SourceSettings{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	sch, err := c.GetSettingsSchema(ctx, &sourcev1.GetSettingsSchemaRequest{SourceId: s.SourceID})
+	if err != nil {
+		return SourceSettings{}, err
+	}
+	vals, err := c.GetSettings(ctx, &sourcev1.GetSettingsRequest{SourceId: s.SourceID})
+	if err != nil {
+		return SourceSettings{}, err
+	}
+	schema := sch.GetSchema().AsMap()
+	return SourceSettings{Schema: schema, Values: shown(schema, vals.GetValues().AsMap())}, nil
+}
+
+// SetSettings changes some of a source's settings (keys left out keep
+// their value; a secret left empty too) and returns them all.
+func (h *Host) SetSettings(ctx context.Context, id string, values map[string]any) (SourceSettings, error) {
+	s, c, err := h.call(ctx, settingsViewer, id, "settings")
+	if err != nil {
+		return SourceSettings{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	sch, err := c.GetSettingsSchema(ctx, &sourcev1.GetSettingsSchemaRequest{SourceId: s.SourceID})
+	if err != nil {
+		return SourceSettings{}, err
+	}
+	schema := sch.GetSchema().AsMap()
+	secret := writeOnly(schema)
+	changes := make(map[string]any, len(values))
+	for k, v := range values {
+		if secret[k] && v == "" {
+			continue
+		}
+		changes[k] = v
+	}
+	st, err := structpb.NewStruct(changes)
+	if err != nil {
+		return SourceSettings{}, fmt.Errorf("%w: %w", ErrBadConfig, err)
+	}
+	res, err := c.SetSettings(ctx, &sourcev1.SetSettingsRequest{SourceId: s.SourceID, Values: st})
+	if err != nil {
+		return SourceSettings{}, err
+	}
+	keys := make([]string, 0, len(changes))
+	for k := range changes {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	h.log.InfoContext(ctx, "source settings changed", "component", "audit", "source", id, "keys", keys)
+	return SourceSettings{Schema: schema, Values: shown(schema, res.GetValues().AsMap())}, nil
 }

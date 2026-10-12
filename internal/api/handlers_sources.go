@@ -319,3 +319,28 @@ func (s *Server) imageError(ctx context.Context, err error, icon bool, kind, sub
 	}
 	return NewProblem(http.StatusBadGateway, "icon_failed", "the icon couldn't be fetched")
 }
+
+// GetSourceSettings returns a source's own settings.
+func (s *Server) GetSourceSettings(ctx context.Context, req apigen.GetSourceSettingsRequestObject) (apigen.GetSourceSettingsResponseObject, error) {
+	st, err := s.deps.Plugins.Settings(ctx, req.SourceId)
+	if err != nil {
+		return nil, pluginError(ctx, err)
+	}
+	return apigen.GetSourceSettings200JSONResponse{Schema: st.Schema, Values: nonNilMap(st.Values)}, nil
+}
+
+// SetSourceSettings changes some of a source's settings.
+func (s *Server) SetSourceSettings(ctx context.Context, req apigen.SetSourceSettingsRequestObject) (apigen.SetSourceSettingsResponseObject, error) {
+	st, err := s.deps.Plugins.SetSettings(ctx, req.SourceId, req.Body.Values)
+	if err != nil {
+		return nil, pluginError(ctx, err)
+	}
+	return apigen.SetSourceSettings200JSONResponse{Schema: st.Schema, Values: nonNilMap(st.Values)}, nil
+}
+
+func nonNilMap(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	return m
+}

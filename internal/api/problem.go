@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -66,11 +67,22 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p *Problem) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
+// StatusClientClosedRequest answers a request whose client went away
+// before it finished (as nginx's 499); the client never sees it, but the
+// request log does.
+const StatusClientClosedRequest = 499
+
 // writeError turns any handler error into a problem response. Problems are
 // sent as they are; anything else is logged and answered with a bare 500,
-// so internal details never reach the client.
+// so internal details never reach the client. A request whose client went
+// away (a closed tab) isn't an error: 499, logged at debug level.
 func writeError(log *slog.Logger) func(w http.ResponseWriter, r *http.Request, err error) {
 	return func(w http.ResponseWriter, r *http.Request, err error) {
+		if errors.Is(r.Context().Err(), context.Canceled) {
+			log.DebugContext(r.Context(), "request canceled by the client", "err", err, "method", r.Method, "path", r.URL.Path, "request_id", RequestID(r.Context()))
+			writeProblem(w, r, NewProblem(StatusClientClosedRequest, "client_closed_request", "the client went away"))
+			return
+		}
 		var p *Problem
 		if errors.As(err, &p) {
 			writeProblem(w, r, p)

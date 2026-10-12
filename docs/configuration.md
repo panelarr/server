@@ -27,7 +27,7 @@ The server serves the Panelarr web app at its root, built into the binary (`make
 
 ## Logs
 
-Every line carries `time`, `level`, `msg`, `service` (`server`) and, where it applies, `component` and `request_id`. Passwords, API keys, session tokens, cookies and query strings are never logged.
+Every line carries `time`, `level`, `msg`, `service` (`server`) and, where it applies, `component` and `request_id`. Passwords, API keys, session tokens, cookies and query strings are never logged. Each request is logged once (`request`): server errors (5xx) at error level, except a plugin, site or service behind the server failing on an image route, which its handler reports. A request whose client went away before it finished (a closed tab) is logged as status 499 at info level, not as an error.
 
 ## Health
 

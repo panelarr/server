@@ -606,6 +606,7 @@ func (f *Fake) job(id string) *metav1.Job {
 			continue
 		}
 		out := proto.Clone(j).(*metav1.Job)
+		out.DisabledReason = f.disabled[id]
 		for i := len(f.runs) - 1; i >= 0; i-- {
 			if r := f.runs[i].GetSummary(); r.GetJobId() == id {
 				out.LastRun = r

@@ -77,6 +77,9 @@ func TestMetaJobs(t *testing.T) {
 
 	// A job that can't run now.
 	fake.DisableJob("search-rebuild", "the search backend is postgres")
+	if j := call[apigen.Job](admin, http.MethodGet, "/api/v1/system/meta/jobs/search-rebuild", nil, 200); j.DisabledReason == nil || *j.DisabledReason != "the search backend is postgres" {
+		t.Fatalf("disabled job %+v", j)
+	}
 	if p := admin.expectProblem(http.MethodPost, "/api/v1/system/meta/jobs/search-rebuild/run", nil, 409, "job_disabled"); p.Detail == nil || !strings.Contains(*p.Detail, "postgres") {
 		t.Fatalf("disabled %+v", p)
 	}

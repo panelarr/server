@@ -168,6 +168,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	}
 	host := plugins.NewHost(st, box, plugins.RemoteDialer, logging.Component(log, "plugins"))
 	host.SetLimits(lim)
+	host.SetHub(hub)
 	// Connecting to plugins can take a while; the API serves meanwhile.
 	go func() {
 		if err := host.Load(ctx); err != nil {

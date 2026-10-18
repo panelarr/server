@@ -30,6 +30,8 @@ type Metrics struct {
 	TasksFinished *prometheus.CounterVec
 	TaskDuration  *prometheus.HistogramVec
 	TasksRunning  *prometheus.GaugeVec
+
+	ImageRetries *prometheus.CounterVec
 }
 
 // New registers the server's metrics, plus the Go runtime and process ones,
@@ -65,7 +67,10 @@ func New() *Metrics {
 	m.TasksRunning = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "panelarr_tasks_running", Help: "Tasks running now by kind.",
 	}, []string{"kind"})
-	r.MustRegister(m.HTTPRequests, m.HTTPDuration, m.JobRuns, m.JobDuration, m.JobRunning, m.TasksFinished, m.TaskDuration, m.TasksRunning)
+	m.ImageRetries = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "panelarr_image_retries_total", Help: "Page images that failed, by what retrying did: recovered, exhausted (failed after retries) or not_retried (an error that won't pass).",
+	}, []string{"outcome"})
+	r.MustRegister(m.HTTPRequests, m.HTTPDuration, m.JobRuns, m.JobDuration, m.JobRunning, m.TasksFinished, m.TaskDuration, m.TasksRunning, m.ImageRetries)
 	return m
 }
 
@@ -105,6 +110,14 @@ func (m *Metrics) TaskEnded(kind, outcome string, d time.Duration) {
 	m.TasksRunning.WithLabelValues(kind).Dec()
 	m.TasksFinished.WithLabelValues(kind, outcome).Inc()
 	m.TaskDuration.WithLabelValues(kind).Observe(d.Seconds())
+}
+
+// ImageRetry records how a failed page image ended.
+func (m *Metrics) ImageRetry(outcome string) {
+	if m == nil {
+		return
+	}
+	m.ImageRetries.WithLabelValues(outcome).Inc()
 }
 
 // HTTP records one request. route is the matched pattern (e.g.

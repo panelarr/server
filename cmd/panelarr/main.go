@@ -170,6 +170,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	host := plugins.NewHost(st, box, plugins.RemoteDialer, logging.Component(log, "plugins"))
 	host.SetLimits(lim)
 	host.SetHub(hub)
+	host.SetMetrics(m)
 	q := queue.New(st, hub, lim, m, logging.Component(log, "queue"))
 	lib := library.NewService(st, metaSvc, host, q, lim, hub, logging.Component(log, "library"))
 	chs := chapters.NewService(st, host, q, lim, hub, logging.Component(log, "chapters"))

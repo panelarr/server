@@ -17,7 +17,7 @@ Users with the `may_download` grant (and admins) download chapters of a work: ch
 
 - pages stored uncompressed as `0001.jpg`, `0002.png`, …;
 - `ComicInfo.xml` with series, number, volume, title, writer, artist, summary, genres, language, link, reading direction (`YesAndRightToLeft` for manga), age rating and Panelarr's IDs in `Notes`;
-- built in a temporary file (`<PANELARR_DATA>/.tmp`), checksummed (SHA-256), then stored atomically: a failed page fails the download and leaves nothing behind; the task retries with growing waits.
+- built in a temporary file (`<PANELARR_DATA>/.tmp`), checksummed (SHA-256), then stored atomically: a page image that fails is first tried again like the reader's (see [the reader](reader.md)); a page that still fails fails the download and leaves nothing behind, and the task retries with growing waits (after the source's retry-after when it asked for one).
 
 Files are named by the template in the instance setting `downloads.naming_template` (default `{work} [{work_id}]/{volume} {chapter} - {title} [{group}].cbz`; placeholders `{work}`, `{work_id}`, `{volume}`, `{chapter}`, `{title}`, `{group}`, `{lang}`). Names are made safe for SMB/NTFS shares; a name taken by another chapter gets the chapter's ID added.
 

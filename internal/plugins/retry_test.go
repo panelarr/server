@@ -67,7 +67,7 @@ func TestPageImageRetries(t *testing.T) {
 	if _, err := h.Register(ctx, plugins.NewPlugin{URL: pluginstest.Serve(t, fake, key), APIKey: key}); err != nil {
 		t.Fatal(err)
 	}
-	h.SetImageRetries(10*time.Millisecond, 30*time.Millisecond)
+	h.SetDefaultImageRetries(10*time.Millisecond, 30*time.Millisecond)
 	waits := 0
 	wait := func(context.Context) error { waits++; return nil }
 	fetch := func() (time.Duration, error) {
@@ -123,13 +123,39 @@ func TestPageImageRetries(t *testing.T) {
 		t.Fatalf("pacing: %v, %d calls", err, fake.count())
 	}
 
+	// A package's setting applies to its sources; a source's own wins.
+	if _, err := h.SetPackageImageRetries(ctx, "fake", "example.comics", nil); err != nil {
+		t.Fatal(err)
+	}
+	fake.set(plugin.ErrSourceDown("down"), plugin.ErrSourceDown("down"))
+	if _, err := fetch(); err == nil || fake.count() != 1 {
+		t.Fatalf("package off: %v, %d calls", err, fake.count())
+	}
+	if _, err := h.SetSourceImageRetries(ctx, "fake:1001", []time.Duration{time.Millisecond, time.Millisecond}); err != nil {
+		t.Fatal(err)
+	}
+	fake.set(plugin.ErrSourceDown("down"), plugin.ErrSourceDown("down"))
+	if _, err := fetch(); err != nil || fake.count() != 3 {
+		t.Fatalf("source override: %v, %d calls", err, fake.count())
+	}
+	if err := h.ClearSourceImageRetries(ctx, "fake:1001"); err != nil {
+		t.Fatal(err)
+	}
+	fake.set(plugin.ErrSourceDown("down"))
+	if _, err := fetch(); err == nil || fake.count() != 1 {
+		t.Fatalf("back to the package: %v, %d calls", err, fake.count())
+	}
+	if err := h.ClearPackageImageRetries(ctx, "fake", "example.comics"); err != nil {
+		t.Fatal(err)
+	}
+
 	// No retries when they're off; a request that goes away stops waiting.
-	h.SetImageRetries()
+	h.SetDefaultImageRetries()
 	fake.set(plugin.ErrSourceDown("down"))
 	if _, err := fetch(); err == nil || fake.count() != 1 {
 		t.Fatalf("off: %v, %d calls", err, fake.count())
 	}
-	h.SetImageRetries(time.Minute)
+	h.SetDefaultImageRetries(time.Minute)
 	fake.set(plugin.ErrSourceDown("down"))
 	cctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()

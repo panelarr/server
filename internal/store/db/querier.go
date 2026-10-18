@@ -50,6 +50,7 @@ type Querier interface {
 	DeleteBookmarks(ctx context.Context, arg DeleteBookmarksParams) error
 	DeleteChapterFile(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
+	DeleteImageRetrySetting(ctx context.Context, arg DeleteImageRetrySettingParams) (int64, error)
 	DeleteInvite(ctx context.Context, id uuid.UUID) (int64, error)
 	DeletePlugin(ctx context.Context, id string) (int64, error)
 	DeleteProfile(ctx context.Context, id string) (int64, error)
@@ -81,6 +82,7 @@ type Querier interface {
 	GetChapter(ctx context.Context, id uuid.UUID) (Chapter, error)
 	GetChapterFile(ctx context.Context, chapterID uuid.UUID) (ChapterFile, error)
 	GetDefaultStorage(ctx context.Context) (Storage, error)
+	GetImageRetrySetting(ctx context.Context, arg GetImageRetrySettingParams) (ImageRetrySetting, error)
 	GetJobRun(ctx context.Context, id uuid.UUID) (JobRun, error)
 	GetLibraryEntry(ctx context.Context, arg GetLibraryEntryParams) (LibraryEntry, error)
 	GetLiveTaskByDedupeKey(ctx context.Context, dedupeKey string) (Task, error)
@@ -111,6 +113,8 @@ type Querier interface {
 	// Asking again for queued work brings it forward (e.g. a refresh while a
 	// retry waits out its back-off).
 	HurryTask(ctx context.Context, arg HurryTaskParams) (Task, error)
+	// A source's own setting and its package's.
+	ImageRetrySettingsFor(ctx context.Context, arg ImageRetrySettingsForParams) ([]ImageRetrySetting, error)
 	InsertChapter(ctx context.Context, arg InsertChapterParams) (Chapter, error)
 	InsertChapterFile(ctx context.Context, arg InsertChapterFileParams) (ChapterFile, error)
 	InsertProfile(ctx context.Context, arg InsertProfileParams) (NetworkProfile, error)
@@ -167,6 +171,7 @@ type Querier interface {
 	NewChaptersForUser(ctx context.Context, arg NewChaptersForUserParams) ([]NewChaptersForUserRow, error)
 	PruneFinishedTasks(ctx context.Context, before *time.Time) (int64, error)
 	PruneJobRuns(ctx context.Context, arg PruneJobRunsParams) (int64, error)
+	PutImageRetrySetting(ctx context.Context, arg PutImageRetrySettingParams) (ImageRetrySetting, error)
 	PutPreferences(ctx context.Context, arg PutPreferencesParams) (UserPreference, error)
 	PutReaderSettings(ctx context.Context, arg PutReaderSettingsParams) (ReaderSetting, error)
 	PutSetting(ctx context.Context, arg PutSettingParams) error

@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/panelarr/source-api/sdk/client"
 	"github.com/panelarr/source-api/sdk/plugin"
 
 	"github.com/panelarr/server/internal/metrics"
+	"github.com/panelarr/server/internal/store/db"
 )
 
 // Some sites fail a page image now and then. Page images (the reader's and
@@ -30,23 +32,271 @@ var DefaultImageRetries = []time.Duration{time.Second, 3 * time.Second}
 // reader's user is waiting; downloads try again later as a task).
 const MaxImageRetryAfter = 30 * time.Second
 
-// SetImageRetries changes the default waits before each extra attempt at a
-// page image (none: no retries).
-func (h *Host) SetImageRetries(delays ...time.Duration) {
+// SetDefaultImageRetries changes the default waits before each extra
+// attempt at a page image (none: no retries), for sources without a
+// setting of their own or their package's.
+func (h *Host) SetDefaultImageRetries(delays ...time.Duration) {
 	h.imu.Lock()
 	defer h.imu.Unlock()
 	h.imageRetries = slices.Clone(delays)
+	h.retryCache = nil
 }
 
 // SetMetrics makes the host count page image retries.
 func (h *Host) SetMetrics(m *metrics.Metrics) { h.metrics = m }
 
-// imageRetriesFor returns the waits before each extra attempt at a source's
-// page images.
-func (h *Host) imageRetriesFor(_ context.Context, _ string) []time.Duration {
+// Levels a source's image retries come from.
+const (
+	RetryLevelSource  = "source"
+	RetryLevelPackage = "package"
+	RetryLevelDefault = "default"
+)
+
+// Image retry setting limits.
+const (
+	MaxImageRetries     = 5
+	MaxImageRetryDelay  = 30 * time.Second
+	imageRetryCacheLife = time.Minute
+)
+
+// ErrBadImageRetries is a setting out of bounds.
+var ErrBadImageRetries = errors.New("at most 5 waits, each from 0 to 30000 ms")
+
+// ImageRetrySetting is the setting at one level.
+type ImageRetrySetting struct {
+	Delays    []time.Duration
+	UpdatedAt time.Time
+}
+
+// ImageRetries is what a package or source uses for its page images.
+type ImageRetries struct {
+	// TargetKind is "package" or "source"; TargetID "plugin:package" or
+	// the source's ID.
+	TargetKind, TargetID string
+	// Own is the setting at this level; nil when there is none (it
+	// inherits).
+	Own *ImageRetrySetting
+	// Effective is what applies; Level where it comes from, and FromID
+	// the target there (empty for the default).
+	Effective []time.Duration
+	Level     string
+	FromID    string
+}
+
+type cachedRetries struct {
+	delays []time.Duration
+	at     time.Time
+}
+
+func delaysOf(ms []int32) []time.Duration {
+	out := make([]time.Duration, len(ms))
+	for i, d := range ms {
+		out[i] = time.Duration(d) * time.Millisecond
+	}
+	return out
+}
+
+func settingOf(r db.ImageRetrySetting) *ImageRetrySetting {
+	return &ImageRetrySetting{Delays: delaysOf(r.DelaysMs), UpdatedAt: r.UpdatedAt}
+}
+
+func (h *Host) defaultRetries() []time.Duration {
 	h.imu.RLock()
 	defer h.imu.RUnlock()
-	return h.imageRetries
+	return slices.Clone(h.imageRetries)
+}
+
+// PackageKey is a package's target ID, "plugin:package".
+func PackageKey(pluginID, pkg string) string { return pluginID + ":" + pkg }
+
+// sourceRetries resolves a source's image retries: its own setting, then
+// its package's, then the default.
+func (h *Host) sourceRetries(ctx context.Context, sourceID string) (ImageRetries, error) {
+	row, err := h.st.GetSource(ctx, sourceID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ImageRetries{}, ErrNotFound
+	}
+	if err != nil {
+		return ImageRetries{}, err
+	}
+	out := ImageRetries{TargetKind: RetryLevelSource, TargetID: sourceID, Effective: h.defaultRetries(), Level: RetryLevelDefault}
+	pkgKey := ""
+	if row.Source.PackageID != "" {
+		pkgKey = PackageKey(row.Source.PluginID, row.Source.PackageID)
+	}
+	rows, err := h.st.ImageRetrySettingsFor(ctx, db.ImageRetrySettingsForParams{SourceID: sourceID, PackageKey: pkgKey})
+	if err != nil {
+		return ImageRetries{}, err
+	}
+	for _, r := range rows {
+		if r.TargetKind == RetryLevelPackage && out.Level == RetryLevelDefault {
+			out.Effective, out.Level, out.FromID = delaysOf(r.DelaysMs), RetryLevelPackage, r.TargetID
+		}
+	}
+	for _, r := range rows {
+		if r.TargetKind == RetryLevelSource {
+			out.Own = settingOf(r)
+			out.Effective, out.Level, out.FromID = out.Own.Delays, RetryLevelSource, r.TargetID
+		}
+	}
+	return out, nil
+}
+
+// imageRetriesFor returns the waits before each extra attempt at a source's
+// page images, kept for a minute (and dropped on every change).
+func (h *Host) imageRetriesFor(ctx context.Context, sourceID string) []time.Duration {
+	h.imu.RLock()
+	c, ok := h.retryCache[sourceID]
+	h.imu.RUnlock()
+	if ok && time.Since(c.at) < imageRetryCacheLife {
+		return c.delays
+	}
+	r, err := h.sourceRetries(ctx, sourceID)
+	if err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			h.log.WarnContext(ctx, "image retry setting", "source", sourceID, "err", err)
+		}
+		return h.defaultRetries()
+	}
+	h.imu.Lock()
+	if h.retryCache == nil {
+		h.retryCache = map[string]cachedRetries{}
+	}
+	h.retryCache[sourceID] = cachedRetries{delays: r.Effective, at: time.Now()}
+	h.imu.Unlock()
+	return r.Effective
+}
+
+func (h *Host) retriesChanged() {
+	h.imu.Lock()
+	defer h.imu.Unlock()
+	h.retryCache = nil
+}
+
+// SourceImageRetries returns what a source uses for its page images.
+func (h *Host) SourceImageRetries(ctx context.Context, sourceID string) (ImageRetries, error) {
+	return h.sourceRetries(ctx, sourceID)
+}
+
+// checkPackage returns the target ID of a plugin's package.
+func (h *Host) checkPackage(ctx context.Context, pluginID, pkg string) (string, error) {
+	if !plugin.PackageIDPattern.MatchString(pkg) {
+		return "", ErrNotFound
+	}
+	if _, err := h.st.GetPlugin(ctx, pluginID); errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	} else if err != nil {
+		return "", err
+	}
+	return PackageKey(pluginID, pkg), nil
+}
+
+// PackageImageRetries returns what a package's sources use for their page
+// images (unless one has its own setting).
+func (h *Host) PackageImageRetries(ctx context.Context, pluginID, pkg string) (ImageRetries, error) {
+	key, err := h.checkPackage(ctx, pluginID, pkg)
+	if err != nil {
+		return ImageRetries{}, err
+	}
+	out := ImageRetries{TargetKind: RetryLevelPackage, TargetID: key, Effective: h.defaultRetries(), Level: RetryLevelDefault}
+	r, err := h.st.GetImageRetrySetting(ctx, db.GetImageRetrySettingParams{TargetKind: RetryLevelPackage, TargetID: key})
+	switch {
+	case err == nil:
+		out.Own = settingOf(r)
+		out.Effective, out.Level, out.FromID = out.Own.Delays, RetryLevelPackage, key
+	case !errors.Is(err, pgx.ErrNoRows):
+		return ImageRetries{}, err
+	}
+	return out, nil
+}
+
+func checkDelays(delays []time.Duration) ([]int32, error) {
+	if len(delays) > MaxImageRetries {
+		return nil, ErrBadImageRetries
+	}
+	ms := make([]int32, len(delays))
+	for i, d := range delays {
+		if d < 0 || d > MaxImageRetryDelay {
+			return nil, ErrBadImageRetries
+		}
+		ms[i] = int32(d.Milliseconds()) //nolint:gosec // bounded above
+	}
+	return ms, nil
+}
+
+func (h *Host) putRetries(ctx context.Context, kind, id, pluginID string, delays []time.Duration) error {
+	ms, err := checkDelays(delays)
+	if err != nil {
+		return err
+	}
+	if _, err := h.st.PutImageRetrySetting(ctx, db.PutImageRetrySettingParams{TargetKind: kind, TargetID: id, DelaysMs: ms, PluginID: pluginID}); err != nil {
+		return err
+	}
+	h.retriesChanged()
+	h.log.InfoContext(ctx, "image retries set", "component", "audit", "target_kind", kind, "target", id, "attempts", len(delays))
+	return nil
+}
+
+func (h *Host) clearRetries(ctx context.Context, kind, id string) error {
+	n, err := h.st.DeleteImageRetrySetting(ctx, db.DeleteImageRetrySettingParams{TargetKind: kind, TargetID: id})
+	if err != nil {
+		return err
+	}
+	h.retriesChanged()
+	if n > 0 {
+		h.log.InfoContext(ctx, "image retries cleared", "component", "audit", "target_kind", kind, "target", id)
+	}
+	return nil
+}
+
+// SetSourceImageRetries sets a source's own waits before each extra
+// attempt at its page images (empty: no retries for it).
+func (h *Host) SetSourceImageRetries(ctx context.Context, sourceID string, delays []time.Duration) (ImageRetries, error) {
+	row, err := h.st.GetSource(ctx, sourceID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ImageRetries{}, ErrNotFound
+	}
+	if err != nil {
+		return ImageRetries{}, err
+	}
+	if err := h.putRetries(ctx, RetryLevelSource, sourceID, row.Source.PluginID, delays); err != nil {
+		return ImageRetries{}, err
+	}
+	return h.sourceRetries(ctx, sourceID)
+}
+
+// ClearSourceImageRetries removes a source's own setting: it inherits its
+// package's or the default.
+func (h *Host) ClearSourceImageRetries(ctx context.Context, sourceID string) error {
+	if _, err := h.st.GetSource(ctx, sourceID); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return h.clearRetries(ctx, RetryLevelSource, sourceID)
+}
+
+// SetPackageImageRetries sets the waits for a package's sources (empty: no
+// retries for them).
+func (h *Host) SetPackageImageRetries(ctx context.Context, pluginID, pkg string, delays []time.Duration) (ImageRetries, error) {
+	key, err := h.checkPackage(ctx, pluginID, pkg)
+	if err != nil {
+		return ImageRetries{}, err
+	}
+	if err := h.putRetries(ctx, RetryLevelPackage, key, pluginID, delays); err != nil {
+		return ImageRetries{}, err
+	}
+	return h.PackageImageRetries(ctx, pluginID, pkg)
+}
+
+// ClearPackageImageRetries removes a package's setting: its sources use the
+// default (or their own).
+func (h *Host) ClearPackageImageRetries(ctx context.Context, pluginID, pkg string) error {
+	key, err := h.checkPackage(ctx, pluginID, pkg)
+	if err != nil {
+		return err
+	}
+	return h.clearRetries(ctx, RetryLevelPackage, key)
 }
 
 // retryable says whether a failed image fetch may pass if tried again, and

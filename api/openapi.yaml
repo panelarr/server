@@ -1143,6 +1143,65 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /plugins/{plugin_id}/packages/{package_id}/image-retries:
+    parameters:
+      - $ref: "#/components/parameters/PluginId"
+      - $ref: "#/components/parameters/PackageId"
+    get:
+      operationId: getPackageImageRetries
+      tags: [plugins]
+      summary: How a package's sources retry failed page images
+      description: |
+        The package's own setting (`own`, absent when it has none) and what
+        applies (`effective`, with `level` saying where it comes from). Its
+        sources use it unless one has its own. A package needn't be
+        installed to be set.
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The package's image retries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageRetries"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: setPackageImageRetries
+      tags: [plugins]
+      summary: Set how a package's sources retry failed page images
+      description: |
+        `delays_ms` are the waits before each extra attempt. `[]` turns
+        retries off for the package's sources, which is not the same as no
+        setting (`DELETE`, the default applies).
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageRetriesInput"
+      responses:
+        "200":
+          description: Set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageRetries"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: clearPackageImageRetries
+      tags: [plugins]
+      summary: Remove a package's image retry setting
+      description: Its sources use the default again (or their own setting). Nothing set is fine too.
+      x-panelarr-access: admin
+      responses:
+        "204":
+          description: Removed.
+        default:
+          $ref: "#/components/responses/Problem"
+
   /network/solvers:
     get:
       operationId: listSolvers
@@ -2199,6 +2258,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SourceSettings"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /sources/{source_id}/image-retries:
+    parameters:
+      - $ref: "#/components/parameters/SourceId"
+    get:
+      operationId: getSourceImageRetries
+      tags: [sources]
+      summary: How a source retries failed page images
+      description: |
+        The source's own setting (`own`, absent when it has none) and what
+        applies (`effective`): its own, else its package's (`level:
+        package`, `from_target_id` naming it), else the default.
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The source's image retries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageRetries"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: setSourceImageRetries
+      tags: [sources]
+      summary: Set how a source retries failed page images
+      description: |
+        Overrides its package's setting. `[]` turns retries off for the
+        source, which is not the same as no setting (`DELETE`, it inherits).
+      x-panelarr-access: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageRetriesInput"
+      responses:
+        "200":
+          description: Set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageRetries"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: clearSourceImageRetries
+      tags: [sources]
+      summary: Remove a source's own image retry setting
+      description: It inherits its package's setting or the default again. Nothing set is fine too.
+      x-panelarr-access: admin
+      responses:
+        "204":
+          description: Removed.
         default:
           $ref: "#/components/responses/Problem"
 
@@ -6202,6 +6317,64 @@ components:
         plugin_default:
           type: boolean
           description: Use the plugin's own settings here (instead of profile_id).
+    ImageRetriesInput:
+      type: object
+      required: [delays_ms]
+      properties:
+        delays_ms:
+          type: array
+          description: The waits before each extra attempt at a failed page image, in milliseconds; `[]` means no retries at this level.
+          maxItems: 5
+          items:
+            type: integer
+            minimum: 0
+            maximum: 30000
+    ImageRetryDelays:
+      type: object
+      required: [delays_ms, attempts]
+      properties:
+        delays_ms:
+          type: array
+          items:
+            type: integer
+        attempts:
+          type: integer
+          description: Extra attempts after the first (the length of `delays_ms`).
+    ImageRetries:
+      type: object
+      required: [target_kind, target_id, effective, level]
+      description: |
+        How failed page images are retried at one level. `own` absent means
+        nothing is set here (it inherits); `own.delays_ms: []` means retries
+        are off here. A source uses its own setting, else its package's, else
+        the default (2 more attempts, after 1 s and then 3 s).
+      properties:
+        target_kind:
+          type: string
+          enum: [package, source]
+        target_id:
+          type: string
+          description: '"plugin:package" for a package, the source''s ID for a source.'
+        own:
+          type: object
+          required: [delays_ms, updated_at]
+          properties:
+            delays_ms:
+              type: array
+              items:
+                type: integer
+            updated_at:
+              type: string
+              format: date-time
+        effective:
+          $ref: "#/components/schemas/ImageRetryDelays"
+        level:
+          type: string
+          enum: [source, package, default]
+          description: Where `effective` comes from.
+        from_target_id:
+          type: string
+          description: The target `effective` comes from ("plugin:package" or the source's ID); absent for the default.
     NetworkAssignment:
       type: object
       required: [target_kind, target_id, plugin_default, updated_at]

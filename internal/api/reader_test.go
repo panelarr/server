@@ -340,3 +340,77 @@ func TestLibraryReadingStats(t *testing.T) {
 		t.Fatalf("all read %+v", e)
 	}
 }
+
+func TestHistory(t *testing.T) {
+	t.Parallel()
+	f := newLibraryFixture(t, func(fk *plugintest.Fake) plugin.Plugin {
+		fk.Sources[0].Series[1].Series.Authors = []string{"Somebody Else"} // so "Salt and Iron" matches e2
+		return fk
+	})
+	user := f.user
+	lantern := call[apigen.LibraryEntry](user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 201).Work.Id
+	salt := call[apigen.LibraryEntry](user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e2"}, 201).Work.Id
+	waitWorkMatched(t, user, lantern.String())
+	waitWorkMatched(t, user, salt.String())
+	lc := waitChapters(t, user, lantern.String(), func(cs []apigen.UnifiedChapter) bool { return len(cs) >= 3 })
+	sc := waitChapters(t, user, salt.String(), func(cs []apigen.UnifiedChapter) bool { return len(cs) >= 1 })
+	read := func(ch apigen.UnifiedChapter, page int) {
+		call[apigen.ChapterProgress](user, http.MethodPut, "/api/v1/chapters/"+ch.Id.String()+"/progress", map[string]int{"page": page, "pages": 4}, 200)
+	}
+	history := func(query string) []apigen.HistoryItem {
+		return call[apigen.HistoryPage](user, http.MethodGet, "/api/v1/me/history"+query, nil, 200).Items
+	}
+
+	read(lc[0], 3) // finished
+	read(lc[1], 1)
+	read(sc[0], 2)
+
+	// Every chapter read, newest first; or one entry per series.
+	if h := history(""); len(h) != 3 || h[0].WorkId != salt || h[1].ChapterId != lc[1].Id {
+		t.Fatalf("chapters %+v", h)
+	}
+	h := history("?per=series")
+	if len(h) != 2 || h[0].WorkId != salt || h[1].WorkId != lantern || h[1].ChapterId != lc[1].Id || h[1].Page != 1 ||
+		h[1].ContinueChapterId == nil || *h[1].ContinueChapterId != lc[1].Id || h[1].ChapterDisplayTitle == nil || h[1].WorkCoverUrl == nil {
+		t.Fatalf("series %+v", h)
+	}
+	if h := history("?per=series&q=lantern"); len(h) != 1 || h[0].WorkId != lantern {
+		t.Fatalf("search %+v", h)
+	}
+	if h := history("?work_id=" + lantern.String()); len(h) != 2 {
+		t.Fatalf("one series %+v", h)
+	}
+
+	// Out of view without touching read marks; reading again brings it back.
+	call[struct{}](user, http.MethodDelete, "/api/v1/me/history/"+lantern.String(), nil, 204)
+	if h := history("?per=series"); len(h) != 1 || h[0].WorkId != salt {
+		t.Fatalf("after removing %+v", h)
+	}
+	if wp := call[apigen.WorkProgress](user, http.MethodGet, "/api/v1/works/"+lantern.String()+"/progress", nil, 200); len(wp.Chapters) != 2 {
+		t.Fatalf("read marks changed %+v", wp)
+	}
+	read(lc[2], 1)
+	if h := history("?per=series"); len(h) != 2 || h[0].WorkId != lantern || h[0].ChapterId != lc[2].Id {
+		t.Fatalf("read again %+v", h)
+	}
+	if h := history("?work_id=" + lantern.String()); len(h) != 1 {
+		t.Fatalf("older entries stay hidden %+v", h)
+	}
+
+	// Another user's history is theirs alone.
+	other, _ := f.h.createUser(f.admin, "other", nil)
+	if h := call[apigen.HistoryPage](other, http.MethodGet, "/api/v1/me/history", nil, 200); len(h.Items) != 0 {
+		t.Fatalf("someone else's history %+v", h)
+	}
+
+	// Clear all.
+	call[struct{}](user, http.MethodDelete, "/api/v1/me/history", nil, 204)
+	if h := history(""); len(h) != 0 {
+		t.Fatalf("after clearing %+v", h)
+	}
+	read(sc[0], 3)
+	if h := history("?per=series"); len(h) != 1 || h[0].WorkId != salt {
+		t.Fatalf("after clearing, reading %+v", h)
+	}
+	user.expectProblem(http.MethodDelete, "/api/v1/me/history/00000000-0000-0000-0000-000000000001", nil, 404, CodeNotFound)
+}

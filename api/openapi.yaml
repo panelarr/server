@@ -3588,10 +3588,34 @@ paths:
       operationId: getMyHistory
       tags: [reader]
       summary: Chapters you read, newest first
+      description: |
+        Yours only. Each entry has when you read it (`updated_at`), so a
+        client can group by day. `per=series` gives one entry per series
+        (the latest chapter read) with where to resume; the default lists
+        every chapter read. Entries taken out of view (`DELETE`) don't
+        show; read marks are never changed here.
       x-panelarr-access: user
       parameters:
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/PageToken"
+        - name: per
+          in: query
+          description: "`series` for one entry per series; `chapter` (the default) for every chapter read."
+          schema:
+            type: string
+            enum: [chapter, series]
+        - name: work_id
+          in: query
+          description: Only this series (e.g. every chapter read of it).
+          schema:
+            type: string
+            format: uuid
+        - name: q
+          in: query
+          description: Only series whose title has this.
+          schema:
+            type: string
+            maxLength: 200
       responses:
         "200":
           description: A page of history.
@@ -3599,6 +3623,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HistoryPage"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: clearMyHistory
+      tags: [reader]
+      summary: Clear your history
+      description: Everything read up to now leaves your history; read marks stay. What you read next shows again.
+      x-panelarr-access: user
+      responses:
+        "204":
+          description: Cleared.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/history/{work_id}:
+    delete:
+      operationId: removeFromMyHistory
+      tags: [reader]
+      summary: Take a series out of your history
+      description: Its entries up to now leave your history; read marks stay. Reading it again brings it back.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/WorkId"
+      responses:
+        "204":
+          description: Removed.
         default:
           $ref: "#/components/responses/Problem"
 
@@ -4452,6 +4502,11 @@ components:
           type: number
         chapter_title:
           type: string
+        chapter_display_title:
+          type: string
+          description: The chapter's own name without number, volume or release noise (empty when there's nothing else).
+        chapter_volume:
+          type: string
         page:
           type: integer
         pages:
@@ -4461,6 +4516,10 @@ components:
         updated_at:
           type: string
           format: date-time
+        continue_chapter_id:
+          type: string
+          format: uuid
+          description: Where "Resume" opens for the series (as GET /works/{work_id}/progress says); absent when everything is read.
     HistoryPage:
       type: object
       required: [items, next_page_token]

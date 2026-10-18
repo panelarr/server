@@ -14,11 +14,13 @@ import (
 	"log/slog"
 	"mime"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/panelarr/server/internal/chapters"
 	"github.com/panelarr/server/internal/downloads"
@@ -510,6 +512,26 @@ func continueAt(order []readingChapter, rows []db.Progress) *uuid.UUID {
 	return nil
 }
 
+// HistoryQuery narrows a user's history: one entry per series (the latest
+// chapter read), one series, or series whose title has Title.
+type HistoryQuery struct {
+	PerSeries bool
+	WorkID    uuid.UUID
+	Title     string
+}
+
+// HideHistory takes a series out of a user's history up to now (its
+// read marks stay); reading it again brings it back.
+func (s *Service) HideHistory(ctx context.Context, userID, workID uuid.UUID) error {
+	return s.st.HideHistory(ctx, db.HideHistoryParams{UserID: userID, WorkID: workID})
+}
+
+// ClearHistory takes everything a user read up to now out of their
+// history (read marks stay).
+func (s *Service) ClearHistory(ctx context.Context, userID uuid.UUID) error {
+	return s.st.ClearHistory(ctx, userID)
+}
+
 // HistoryItem is a chapter a user read.
 type HistoryItem struct {
 	Progress     db.Progress
@@ -520,8 +542,14 @@ type HistoryItem struct {
 
 // History returns a user's recently read chapters, newest first, before a
 // cursor.
-func (s *Service) History(ctx context.Context, userID uuid.UUID, before *db.Progress, limit int) ([]HistoryItem, error) {
-	p := db.HistoryParams{UserID: userID, Lim: int32(limit)} //nolint:gosec // bounded
+func (s *Service) History(ctx context.Context, userID uuid.UUID, q HistoryQuery, before *db.Progress, limit int) ([]HistoryItem, error) {
+	p := db.HistoryParams{UserID: userID, Lim: int32(limit), PerSeries: q.PerSeries} //nolint:gosec // bounded
+	if t := strings.TrimSpace(q.Title); t != "" {
+		p.Q = pgtype.Text{String: t, Valid: true}
+	}
+	if q.WorkID != uuid.Nil {
+		p.WorkID = uuid.NullUUID{UUID: q.WorkID, Valid: true}
+	}
 	if before != nil {
 		p.Before = &before.UpdatedAt
 		p.BeforeChapter = uuid.NullUUID{UUID: before.ChapterID, Valid: true}

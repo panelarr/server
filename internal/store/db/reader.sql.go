@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const addBookmarks = `-- name: AddBookmarks :exec
@@ -26,6 +27,16 @@ type AddBookmarksParams struct {
 
 func (q *Queries) AddBookmarks(ctx context.Context, arg AddBookmarksParams) error {
 	_, err := q.db.Exec(ctx, addBookmarks, arg.UserID, arg.ChapterIds, arg.WorkID)
+	return err
+}
+
+const clearHistory = `-- name: ClearHistory :exec
+INSERT INTO history_cleared (user_id, before) VALUES ($1, now())
+ON CONFLICT (user_id) DO UPDATE SET before = now()
+`
+
+func (q *Queries) ClearHistory(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearHistory, userID)
 	return err
 }
 
@@ -177,12 +188,41 @@ func (q *Queries) GetProgress(ctx context.Context, arg GetProgressParams) (Progr
 	return i, err
 }
 
+const hideHistory = `-- name: HideHistory :exec
+INSERT INTO history_hidden (user_id, work_id, before) VALUES ($1, $2, now())
+ON CONFLICT (user_id, work_id) DO UPDATE SET before = now()
+`
+
+type HideHistoryParams struct {
+	UserID uuid.UUID
+	WorkID uuid.UUID
+}
+
+func (q *Queries) HideHistory(ctx context.Context, arg HideHistoryParams) error {
+	_, err := q.db.Exec(ctx, hideHistory, arg.UserID, arg.WorkID)
+	return err
+}
+
 const history = `-- name: History :many
+WITH visible AS (
+    SELECT progress.user_id, progress.chapter_id, progress.work_id, progress.page, progress.pages, progress.completed, progress.updated_at FROM progress
+    LEFT JOIN history_hidden ON history_hidden.user_id = progress.user_id AND history_hidden.work_id = progress.work_id
+    LEFT JOIN history_cleared ON history_cleared.user_id = progress.user_id
+    WHERE progress.user_id = $5
+      AND (history_hidden.before IS NULL OR progress.updated_at > history_hidden.before)
+      AND (history_cleared.before IS NULL OR progress.updated_at > history_cleared.before)
+      AND ($6::uuid IS NULL OR progress.work_id = $6::uuid)
+), entries AS (
+    SELECT user_id, chapter_id, work_id, page, pages, completed, updated_at FROM visible WHERE NOT $7::boolean
+    UNION ALL
+    (SELECT DISTINCT ON (work_id) user_id, chapter_id, work_id, page, pages, completed, updated_at FROM visible WHERE $7::boolean
+     ORDER BY work_id, updated_at DESC, chapter_id DESC)
+)
 SELECT progress.user_id, progress.chapter_id, progress.work_id, progress.page, progress.pages, progress.completed, progress.updated_at, chapters.id, chapters.work_id, chapters.number, chapters.extra_key, chapters.volume, chapters.title, chapters.preferred_variant_id, chapters.pinned_variant_id, chapters.reason, chapters.available, chapters.created_at, chapters.updated_at, works.title AS work_title, works.cover_url AS work_cover_url
-FROM progress
+FROM entries AS progress
 JOIN chapters ON chapters.id = progress.chapter_id
 JOIN works ON works.id = progress.work_id
-WHERE progress.user_id = $1
+WHERE ($1::text IS NULL OR works.title ILIKE '%' || $1::text || '%')
   AND ($2::timestamptz IS NULL
        OR (progress.updated_at, progress.chapter_id) < ($2::timestamptz, $3::uuid))
 ORDER BY progress.updated_at DESC, progress.chapter_id DESC
@@ -190,10 +230,13 @@ LIMIT $4
 `
 
 type HistoryParams struct {
-	UserID        uuid.UUID
+	Q             pgtype.Text
 	Before        *time.Time
 	BeforeChapter uuid.NullUUID
 	Lim           int32
+	UserID        uuid.UUID
+	WorkID        uuid.NullUUID
+	PerSeries     bool
 }
 
 type HistoryRow struct {
@@ -203,12 +246,18 @@ type HistoryRow struct {
 	WorkCoverUrl string
 }
 
+// A user's reading, newest first, without what they took out of view;
+// one entry per chapter, or per series (the latest chapter) with
+// per_series; narrowed to a series or by its title.
 func (q *Queries) History(ctx context.Context, arg HistoryParams) ([]HistoryRow, error) {
 	rows, err := q.db.Query(ctx, history,
-		arg.UserID,
+		arg.Q,
 		arg.Before,
 		arg.BeforeChapter,
 		arg.Lim,
+		arg.UserID,
+		arg.WorkID,
+		arg.PerSeries,
 	)
 	if err != nil {
 		return nil, err

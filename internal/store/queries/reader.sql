@@ -16,15 +16,40 @@ SELECT * FROM progress WHERE user_id = @user_id AND work_id = @work_id;
 DELETE FROM progress WHERE user_id = @user_id AND chapter_id = ANY(@chapter_ids::uuid[]);
 
 -- name: History :many
+-- A user's reading, newest first, without what they took out of view;
+-- one entry per chapter, or per series (the latest chapter) with
+-- per_series; narrowed to a series or by its title.
+WITH visible AS (
+    SELECT progress.* FROM progress
+    LEFT JOIN history_hidden ON history_hidden.user_id = progress.user_id AND history_hidden.work_id = progress.work_id
+    LEFT JOIN history_cleared ON history_cleared.user_id = progress.user_id
+    WHERE progress.user_id = @user_id
+      AND (history_hidden.before IS NULL OR progress.updated_at > history_hidden.before)
+      AND (history_cleared.before IS NULL OR progress.updated_at > history_cleared.before)
+      AND (sqlc.narg(work_id)::uuid IS NULL OR progress.work_id = sqlc.narg(work_id)::uuid)
+), entries AS (
+    SELECT * FROM visible WHERE NOT @per_series::boolean
+    UNION ALL
+    (SELECT DISTINCT ON (work_id) * FROM visible WHERE @per_series::boolean
+     ORDER BY work_id, updated_at DESC, chapter_id DESC)
+)
 SELECT sqlc.embed(progress), sqlc.embed(chapters), works.title AS work_title, works.cover_url AS work_cover_url
-FROM progress
+FROM entries AS progress
 JOIN chapters ON chapters.id = progress.chapter_id
 JOIN works ON works.id = progress.work_id
-WHERE progress.user_id = @user_id
+WHERE (sqlc.narg(q)::text IS NULL OR works.title ILIKE '%' || sqlc.narg(q)::text || '%')
   AND (sqlc.narg(before)::timestamptz IS NULL
        OR (progress.updated_at, progress.chapter_id) < (sqlc.narg(before)::timestamptz, sqlc.narg(before_chapter)::uuid))
 ORDER BY progress.updated_at DESC, progress.chapter_id DESC
 LIMIT @lim;
+
+-- name: HideHistory :exec
+INSERT INTO history_hidden (user_id, work_id, before) VALUES (@user_id, @work_id, now())
+ON CONFLICT (user_id, work_id) DO UPDATE SET before = now();
+
+-- name: ClearHistory :exec
+INSERT INTO history_cleared (user_id, before) VALUES (@user_id, now())
+ON CONFLICT (user_id) DO UPDATE SET before = now();
 
 -- name: ListReaderSettings :many
 SELECT * FROM reader_settings WHERE user_id = @user_id AND scope = ANY(@scopes::text[]);

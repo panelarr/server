@@ -114,6 +114,26 @@ type Pages struct {
 	Progress *db.Progress
 }
 
+// Locate returns a chapter v may see and its work: what a reader that
+// couldn't load the chapter offers to go back to.
+func (s *Service) Locate(ctx context.Context, v library.Viewer, chapterID uuid.UUID) (db.Work, db.Chapter, error) {
+	ch, err := s.st.GetChapter(ctx, chapterID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.Work{}, db.Chapter{}, ErrNotFound
+	}
+	if err != nil {
+		return db.Work{}, db.Chapter{}, err
+	}
+	w, err := s.library.Get(ctx, v, ch.WorkID)
+	if errors.Is(err, library.ErrNotFound) {
+		return db.Work{}, db.Chapter{}, ErrNotFound
+	}
+	if err != nil {
+		return db.Work{}, db.Chapter{}, err
+	}
+	return w.Work, ch, nil
+}
+
 // chapterFor finds a chapter v may read and the copy to read: variantID
 // when given, else the chosen copy, else (when that is on a source v may
 // not use) the first copy v may use.

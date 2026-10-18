@@ -36,6 +36,11 @@ type Problem struct {
 	CurrentRunID *uuid.UUID
 	// CurrentRun is a plugin job's running run (its own ID).
 	CurrentRun string
+	// WorkID, WorkTitle and ChapterLabel say which chapter a reader
+	// couldn't load (only when the caller may see it).
+	WorkID       *uuid.UUID
+	WorkTitle    string
+	ChapterLabel string
 }
 
 func (p *Problem) Error() string { return p.Code + ": " + p.Detail }
@@ -65,6 +70,7 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p *Problem) {
 	}
 	body.CurrentRunId = p.CurrentRunID
 	body.CurrentRun = nonEmpty(p.CurrentRun)
+	body.WorkId, body.WorkTitle, body.ChapterLabel = p.WorkID, nonEmpty(p.WorkTitle), nonEmpty(p.ChapterLabel)
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(p.Status)
 	_ = json.NewEncoder(w).Encode(body)

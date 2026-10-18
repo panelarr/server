@@ -3437,6 +3437,10 @@ paths:
         the previous and next chapters in reading order and your progress.
         When the chosen copy is on a source you may not use, another copy
         is used; `404` with code `no_copy` when none is left.
+        When the pages can't be loaded (e.g. `source_failed`, `no_copy`)
+        but you may see the chapter, the problem carries `work_id`,
+        `work_title` and `chapter_label`, so the reader can offer to go
+        back to the series.
       x-panelarr-access: user
       parameters:
         - $ref: "#/components/parameters/ChapterId"
@@ -7479,6 +7483,16 @@ components:
         current_run:
           type: string
           description: With code `already_running` from a plugin's jobs, the run that is going on (the plugin's own ID).
+        work_id:
+          type: string
+          format: uuid
+          description: From `GET /chapters/{chapter_id}/pages`, the work of the chapter that couldn't be loaded, so the reader can go back to the series. Only when you may see the work.
+        work_title:
+          type: string
+          description: With `work_id`, the work's title.
+        chapter_label:
+          type: string
+          description: "With `work_id`, the chapter's name for showing (English), e.g. `Vol. 2 Chapter 15: Rain`, `Chapter 3` or an extra's own name."
         errors:
           type: array
           description: Per-field validation errors.

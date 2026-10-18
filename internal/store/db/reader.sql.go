@@ -218,7 +218,7 @@ WITH visible AS (
     (SELECT DISTINCT ON (work_id) user_id, chapter_id, work_id, page, pages, completed, updated_at FROM visible WHERE $7::boolean
      ORDER BY work_id, updated_at DESC, chapter_id DESC)
 )
-SELECT progress.user_id, progress.chapter_id, progress.work_id, progress.page, progress.pages, progress.completed, progress.updated_at, chapters.id, chapters.work_id, chapters.number, chapters.extra_key, chapters.volume, chapters.title, chapters.preferred_variant_id, chapters.pinned_variant_id, chapters.reason, chapters.available, chapters.created_at, chapters.updated_at, works.title AS work_title, works.cover_url AS work_cover_url
+SELECT progress.user_id, progress.chapter_id, progress.work_id, progress.page, progress.pages, progress.completed, progress.updated_at, chapters.id, chapters.work_id, chapters.number, chapters.extra_key, chapters.volume, chapters.title, chapters.preferred_variant_id, chapters.pinned_variant_id, chapters.reason, chapters.available, chapters.created_at, chapters.updated_at, chapters.appeared_at, works.title AS work_title, works.cover_url AS work_cover_url
 FROM entries AS progress
 JOIN chapters ON chapters.id = progress.chapter_id
 JOIN works ON works.id = progress.work_id
@@ -286,6 +286,7 @@ func (q *Queries) History(ctx context.Context, arg HistoryParams) ([]HistoryRow,
 			&i.Chapter.Available,
 			&i.Chapter.CreatedAt,
 			&i.Chapter.UpdatedAt,
+			&i.Chapter.AppearedAt,
 			&i.WorkTitle,
 			&i.WorkCoverUrl,
 		); err != nil {

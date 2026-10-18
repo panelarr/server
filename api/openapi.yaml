@@ -3652,6 +3652,72 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /me/updates:
+    get:
+      operationId: getMyUpdates
+      tags: [library]
+      summary: Chapters that appeared in your library, newest first
+      description: |
+        Yours only. A chapter is listed when a check of a series found it
+        after the series' first listing (`appeared_at`, not the source's
+        upload date) and after you added the work. A work's first chapters,
+        and those a newly attached source brings, aren't listed. Works you
+        may no longer see are left out. Group by day or series client-side.
+      x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/PageToken"
+      responses:
+        "200":
+          description: A page of updates.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdatesPage"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/updates/status:
+    get:
+      operationId: getMyUpdatesStatus
+      tags: [library]
+      summary: How the chapter checks of your library stand
+      description: |
+        Poll it after `POST /me/updates/refresh`: `checking` drops to 0 once
+        every queued check has run.
+      x-panelarr-access: user
+      responses:
+        "200":
+          description: The checks' state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdatesStatus"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/updates/refresh:
+    post:
+      operationId: refreshMyUpdates
+      tags: [library]
+      summary: Check your library for new chapters now
+      description: |
+        Queues a chapter check of every attached series of the works in your
+        library you may see, ahead of scheduled ones. Checks already queued
+        are brought forward, not doubled. `queued` counts series. Follow it
+        with `GET /me/updates/status`. Admins check everyone's library by
+        running the `updates.check` job.
+      x-panelarr-access: user
+      responses:
+        "202":
+          description: Checks queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefreshQueued"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /me/reader-settings:
     get:
       operationId: getReaderSettings
@@ -4530,6 +4596,75 @@ components:
             $ref: "#/components/schemas/HistoryItem"
         next_page_token:
           type: string
+    UpdateItem:
+      type: object
+      required: [chapter_id, work_id, work_title, chapter_title, chapter_display_title, appeared_at, new, read, download_state]
+      properties:
+        chapter_id:
+          type: string
+          format: uuid
+        work_id:
+          type: string
+          format: uuid
+        work_title:
+          type: string
+        work_cover_url:
+          type: string
+        chapter_number:
+          type: number
+          description: Absent for extras.
+        chapter_volume:
+          type: string
+        chapter_title:
+          type: string
+        chapter_display_title:
+          type: string
+          description: The chapter's own name without number, volume or release noise (empty when there's nothing else).
+        appeared_at:
+          type: string
+          format: date-time
+          description: When a check first found the chapter.
+        new:
+          type: boolean
+          description: Found after you last opened the work's chapters (as the library's new count).
+        read:
+          type: boolean
+        page:
+          type: integer
+          description: Where you are in it; absent when you haven't opened it.
+        pages:
+          type: integer
+        download_state:
+          type: string
+          enum: [none, queued, downloading, downloaded]
+    UpdatesPage:
+      type: object
+      required: [items, next_page_token]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/UpdateItem"
+        next_page_token:
+          type: string
+    UpdatesStatus:
+      type: object
+      required: [checking, failing]
+      properties:
+        last_checked_at:
+          type: string
+          format: date-time
+          description: The latest check of any series in your library; absent when none was checked yet.
+        checking:
+          type: integer
+          description: Checks of your library's series running or due now.
+        failing:
+          type: integer
+          description: Series whose last check failed.
+        next_check_at:
+          type: string
+          format: date-time
+          description: When the scheduled check of everyone's library runs next; absent when it isn't scheduled.
     ReaderSettings:
       type: object
       required: [effective]

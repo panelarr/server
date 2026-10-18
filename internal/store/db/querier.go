@@ -123,6 +123,8 @@ type Querier interface {
 	LibraryChapters(ctx context.Context, workIds []uuid.UUID) ([]LibraryChaptersRow, error)
 	LibraryProgress(ctx context.Context, arg LibraryProgressParams) ([]Progress, error)
 	LibraryUserIDs(ctx context.Context, workID uuid.UUID) ([]uuid.UUID, error)
+	// Every work in a user's library (content filters run in Go).
+	LibraryWorks(ctx context.Context, userID uuid.UUID) ([]Work, error)
 	// Which of these catalogue entries are in a user's library, as which work.
 	LibraryWorksByEntries(ctx context.Context, arg LibraryWorksByEntriesParams) ([]LibraryWorksByEntriesRow, error)
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ApiKey, error)
@@ -198,6 +200,8 @@ type Querier interface {
 	// Back to the queue without counting the attempt (the server stopped).
 	UnclaimTask(ctx context.Context, id uuid.UUID) (Task, error)
 	UpdateChapter(ctx context.Context, arg UpdateChapterParams) error
+	// How the chapter checks of these works' attached series stand.
+	UpdateChecksOf(ctx context.Context, workIds []uuid.UUID) (UpdateChecksOfRow, error)
 	UpdatePlugin(ctx context.Context, arg UpdatePluginParams) (Plugin, error)
 	UpdateProfile(ctx context.Context, arg UpdateProfileParams) (NetworkProfile, error)
 	UpdateProxy(ctx context.Context, arg UpdateProxyParams) (NetworkProxy, error)
@@ -205,10 +209,15 @@ type Querier interface {
 	UpdateStorage(ctx context.Context, arg UpdateStorageParams) (Storage, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpdateWorkDisplay(ctx context.Context, arg UpdateWorkDisplayParams) (Work, error)
+	// Chapters that appeared in these works of a user's library since they
+	// added each, newest first, with the user's progress and the chapter's
+	// download.
+	Updates(ctx context.Context, arg UpdatesParams) ([]UpdatesRow, error)
 	UpsertAssignment(ctx context.Context, arg UpsertAssignmentParams) (NetworkAssignment, error)
 	UpsertProgress(ctx context.Context, arg UpsertProgressParams) (Progress, error)
 	UpsertPush(ctx context.Context, arg UpsertPushParams) error
 	UpsertSource(ctx context.Context, arg UpsertSourceParams) error
+	// A variant new to a series that was listed before is announced.
 	UpsertSourceChapter(ctx context.Context, arg UpsertSourceChapterParams) error
 	// Records a series found for a work. An attached or rejected series keeps
 	// its state when matching finds it again.

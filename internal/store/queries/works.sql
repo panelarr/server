@@ -109,3 +109,8 @@ LIMIT @lim;
 SELECT works.id, works.meta_entry_id FROM works
 JOIN library_entries ON library_entries.work_id = works.id
 WHERE library_entries.user_id = @user_id AND works.meta_entry_id = ANY(@entry_ids::text[]);
+
+-- name: LibraryWorks :many
+-- Every work in a user's library (content filters run in Go).
+SELECT works.* FROM library_entries JOIN works ON works.id = library_entries.work_id
+WHERE library_entries.user_id = $1;

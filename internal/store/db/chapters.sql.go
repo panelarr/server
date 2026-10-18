@@ -13,7 +13,7 @@ import (
 )
 
 const assignVariants = `-- name: AssignVariants :exec
-UPDATE source_chapters SET chapter_id = $1 WHERE id = ANY($2::uuid[])
+UPDATE source_chapters SET chapter_id = $1, announce = false WHERE id = ANY($2::uuid[])
 `
 
 type AssignVariantsParams struct {
@@ -27,7 +27,7 @@ func (q *Queries) AssignVariants(ctx context.Context, arg AssignVariantsParams) 
 }
 
 const attachedSeriesOfFollowedWorks = `-- name: AttachedSeriesOfFollowedWorks :many
-SELECT DISTINCT source_series.id, source_series.work_id, source_series.source_id, source_series.key, source_series.title, source_series.url, source_series.cover_ref, source_series.state, source_series.origin, source_series.score, source_series.evidence, source_series.priority, source_series.created_at, source_series.updated_at, source_series.checked_at, source_series.check_error FROM source_series
+SELECT DISTINCT source_series.id, source_series.work_id, source_series.source_id, source_series.key, source_series.title, source_series.url, source_series.cover_ref, source_series.state, source_series.origin, source_series.score, source_series.evidence, source_series.priority, source_series.created_at, source_series.updated_at, source_series.checked_at, source_series.check_error, source_series.listed_at FROM source_series
 JOIN library_entries ON library_entries.work_id = source_series.work_id
 WHERE source_series.state = 'attached'
 `
@@ -60,6 +60,7 @@ func (q *Queries) AttachedSeriesOfFollowedWorks(ctx context.Context) ([]SourceSe
 			&i.UpdatedAt,
 			&i.CheckedAt,
 			&i.CheckError,
+			&i.ListedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -72,7 +73,7 @@ func (q *Queries) AttachedSeriesOfFollowedWorks(ctx context.Context) ([]SourceSe
 }
 
 const chapterVariants = `-- name: ChapterVariants :many
-SELECT source_chapters.id, source_chapters.source_series_id, source_chapters.key, source_chapters.name, source_chapters.number, source_chapters.volume, source_chapters.scanlator, source_chapters.lang, source_chapters.url, source_chapters.uploaded_at, source_chapters.position, source_chapters.present, source_chapters.chapter_id, source_chapters.first_seen_at, source_chapters.last_seen_at, source_series.source_id, source_series.priority AS series_priority,
+SELECT source_chapters.id, source_chapters.source_series_id, source_chapters.key, source_chapters.name, source_chapters.number, source_chapters.volume, source_chapters.scanlator, source_chapters.lang, source_chapters.url, source_chapters.uploaded_at, source_chapters.position, source_chapters.present, source_chapters.chapter_id, source_chapters.first_seen_at, source_chapters.last_seen_at, source_chapters.announce, source_series.source_id, source_series.priority AS series_priority,
        sources.health AS source_health, sources.name AS source_name, sources.lang AS source_lang,
        (sources.present AND sources.enabled AND plugins.enabled)::boolean AS source_usable
 FROM source_chapters
@@ -118,6 +119,7 @@ func (q *Queries) ChapterVariants(ctx context.Context, chapterID uuid.UUID) ([]C
 			&i.SourceChapter.ChapterID,
 			&i.SourceChapter.FirstSeenAt,
 			&i.SourceChapter.LastSeenAt,
+			&i.SourceChapter.Announce,
 			&i.SourceID,
 			&i.SeriesPriority,
 			&i.SourceHealth,
@@ -173,7 +175,7 @@ func (q *Queries) CountChaptersByWork(ctx context.Context, arg CountChaptersByWo
 }
 
 const getChapter = `-- name: GetChapter :one
-SELECT id, work_id, number, extra_key, volume, title, preferred_variant_id, pinned_variant_id, reason, available, created_at, updated_at FROM chapters WHERE id = $1
+SELECT id, work_id, number, extra_key, volume, title, preferred_variant_id, pinned_variant_id, reason, available, created_at, updated_at, appeared_at FROM chapters WHERE id = $1
 `
 
 func (q *Queries) GetChapter(ctx context.Context, id uuid.UUID) (Chapter, error) {
@@ -192,14 +194,16 @@ func (q *Queries) GetChapter(ctx context.Context, id uuid.UUID) (Chapter, error)
 		&i.Available,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AppearedAt,
 	)
 	return i, err
 }
 
 const insertChapter = `-- name: InsertChapter :one
-INSERT INTO chapters (work_id, number, extra_key, volume, title, preferred_variant_id, reason, available)
-VALUES ($1, $2, $3, $4, $5, $6, $7, true)
-RETURNING id, work_id, number, extra_key, volume, title, preferred_variant_id, pinned_variant_id, reason, available, created_at, updated_at
+INSERT INTO chapters (work_id, number, extra_key, volume, title, preferred_variant_id, reason, available, appeared_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, true,
+        CASE WHEN $8::boolean THEN now() END)
+RETURNING id, work_id, number, extra_key, volume, title, preferred_variant_id, pinned_variant_id, reason, available, created_at, updated_at, appeared_at
 `
 
 type InsertChapterParams struct {
@@ -210,6 +214,7 @@ type InsertChapterParams struct {
 	Title              string
 	PreferredVariantID uuid.NullUUID
 	Reason             string
+	Announce           bool
 }
 
 func (q *Queries) InsertChapter(ctx context.Context, arg InsertChapterParams) (Chapter, error) {
@@ -221,6 +226,7 @@ func (q *Queries) InsertChapter(ctx context.Context, arg InsertChapterParams) (C
 		arg.Title,
 		arg.PreferredVariantID,
 		arg.Reason,
+		arg.Announce,
 	)
 	var i Chapter
 	err := row.Scan(
@@ -236,12 +242,13 @@ func (q *Queries) InsertChapter(ctx context.Context, arg InsertChapterParams) (C
 		&i.Available,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AppearedAt,
 	)
 	return i, err
 }
 
 const listChapters = `-- name: ListChapters :many
-SELECT id, work_id, number, extra_key, volume, title, preferred_variant_id, pinned_variant_id, reason, available, created_at, updated_at FROM chapters WHERE work_id = $1
+SELECT id, work_id, number, extra_key, volume, title, preferred_variant_id, pinned_variant_id, reason, available, created_at, updated_at, appeared_at FROM chapters WHERE work_id = $1
 `
 
 func (q *Queries) ListChapters(ctx context.Context, workID uuid.UUID) ([]Chapter, error) {
@@ -266,6 +273,7 @@ func (q *Queries) ListChapters(ctx context.Context, workID uuid.UUID) ([]Chapter
 			&i.Available,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AppearedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -278,7 +286,7 @@ func (q *Queries) ListChapters(ctx context.Context, workID uuid.UUID) ([]Chapter
 }
 
 const listSourceChaptersBySeries = `-- name: ListSourceChaptersBySeries :many
-SELECT id, source_series_id, key, name, number, volume, scanlator, lang, url, uploaded_at, position, present, chapter_id, first_seen_at, last_seen_at FROM source_chapters WHERE source_series_id = $1 ORDER BY position, id
+SELECT id, source_series_id, key, name, number, volume, scanlator, lang, url, uploaded_at, position, present, chapter_id, first_seen_at, last_seen_at, announce FROM source_chapters WHERE source_series_id = $1 ORDER BY position, id
 `
 
 func (q *Queries) ListSourceChaptersBySeries(ctx context.Context, sourceSeriesID uuid.UUID) ([]SourceChapter, error) {
@@ -306,6 +314,7 @@ func (q *Queries) ListSourceChaptersBySeries(ctx context.Context, sourceSeriesID
 			&i.ChapterID,
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
+			&i.Announce,
 		); err != nil {
 			return nil, err
 		}
@@ -412,7 +421,9 @@ func (q *Queries) SetChapterPin(ctx context.Context, arg SetChapterPinParams) er
 }
 
 const setSeriesChecked = `-- name: SetSeriesChecked :exec
-UPDATE source_series SET checked_at = now(), check_error = $1 WHERE id = $2
+UPDATE source_series SET checked_at = now(), check_error = $1,
+    listed_at = CASE WHEN $1 = '' THEN now() ELSE listed_at END
+WHERE id = $2
 `
 
 type SetSeriesCheckedParams struct {
@@ -453,8 +464,8 @@ func (q *Queries) UpdateChapter(ctx context.Context, arg UpdateChapterParams) er
 }
 
 const upsertSourceChapter = `-- name: UpsertSourceChapter :exec
-INSERT INTO source_chapters (source_series_id, key, name, number, volume, scanlator, lang, url, uploaded_at, position)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO source_chapters (source_series_id, key, name, number, volume, scanlator, lang, url, uploaded_at, position, announce)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (source_series_id, key) DO UPDATE SET
     name = EXCLUDED.name, number = EXCLUDED.number, volume = EXCLUDED.volume, scanlator = EXCLUDED.scanlator,
     lang = EXCLUDED.lang, url = EXCLUDED.url, uploaded_at = EXCLUDED.uploaded_at, position = EXCLUDED.position,
@@ -472,8 +483,10 @@ type UpsertSourceChapterParams struct {
 	Url            string
 	UploadedAt     *time.Time
 	Position       int32
+	Announce       bool
 }
 
+// A variant new to a series that was listed before is announced.
 func (q *Queries) UpsertSourceChapter(ctx context.Context, arg UpsertSourceChapterParams) error {
 	_, err := q.db.Exec(ctx, upsertSourceChapter,
 		arg.SourceSeriesID,
@@ -486,12 +499,13 @@ func (q *Queries) UpsertSourceChapter(ctx context.Context, arg UpsertSourceChapt
 		arg.Url,
 		arg.UploadedAt,
 		arg.Position,
+		arg.Announce,
 	)
 	return err
 }
 
 const workVariants = `-- name: WorkVariants :many
-SELECT source_chapters.id, source_chapters.source_series_id, source_chapters.key, source_chapters.name, source_chapters.number, source_chapters.volume, source_chapters.scanlator, source_chapters.lang, source_chapters.url, source_chapters.uploaded_at, source_chapters.position, source_chapters.present, source_chapters.chapter_id, source_chapters.first_seen_at, source_chapters.last_seen_at, source_series.source_id, source_series.priority AS series_priority,
+SELECT source_chapters.id, source_chapters.source_series_id, source_chapters.key, source_chapters.name, source_chapters.number, source_chapters.volume, source_chapters.scanlator, source_chapters.lang, source_chapters.url, source_chapters.uploaded_at, source_chapters.position, source_chapters.present, source_chapters.chapter_id, source_chapters.first_seen_at, source_chapters.last_seen_at, source_chapters.announce, source_series.source_id, source_series.priority AS series_priority,
        sources.health AS source_health, sources.name AS source_name, sources.lang AS source_lang,
        (sources.present AND sources.enabled AND plugins.enabled)::boolean AS source_usable
 FROM source_chapters
@@ -538,6 +552,7 @@ func (q *Queries) WorkVariants(ctx context.Context, workID uuid.UUID) ([]WorkVar
 			&i.SourceChapter.ChapterID,
 			&i.SourceChapter.FirstSeenAt,
 			&i.SourceChapter.LastSeenAt,
+			&i.SourceChapter.Announce,
 			&i.SourceID,
 			&i.SeriesPriority,
 			&i.SourceHealth,

@@ -32,6 +32,9 @@ type Variant struct {
 	// Unusable is a source that is turned off, no longer listed by its
 	// plugin, or whose plugin is turned off.
 	Unusable bool
+	// Announce is a variant a later check of its series found: a chapter
+	// made for it appears in the updates feed.
+	Announce bool
 }
 
 // Group is one canonical chapter: a number (or, for chapters without one,

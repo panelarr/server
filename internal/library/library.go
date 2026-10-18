@@ -300,6 +300,29 @@ func (s *Service) List(ctx context.Context, v Viewer, query string, after *Curso
 	return out, nil
 }
 
+// VisibleWorks returns the works of v's library v may still see.
+func (s *Service) VisibleWorks(ctx context.Context, v Viewer) ([]uuid.UUID, error) {
+	works, err := s.st.LibraryWorks(ctx, v.UserID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]uuid.UUID, len(works))
+	for i, w := range works {
+		ids[i] = w.ID
+	}
+	attached, err := s.attachedSources(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := ids[:0]
+	for _, w := range works {
+		if v.Visible(w, attached[w.ID]) {
+			out = append(out, w.ID)
+		}
+	}
+	return out, nil
+}
+
 // Work is a work with what a viewer sees of it.
 type Work struct {
 	db.Work

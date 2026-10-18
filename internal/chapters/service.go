@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"math/rand/v2"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -210,6 +211,8 @@ func (s *Service) handleUpdateSeries(ctx context.Context, t *queue.Task) (any, e
 			params := db.UpsertSourceChapterParams{
 				SourceSeriesID: se.ID, Key: c.GetKey(), Name: c.GetName(), Volume: c.GetVolume(),
 				Scanlator: c.GetScanlator(), Lang: c.GetLang(), Url: c.GetUrl(), Position: int32(i), //nolint:gosec // small
+				// What a series had when first listed isn't news.
+				Announce: se.ListedAt != nil,
 			}
 			if c.Number != nil {
 				n := c.GetNumber()
@@ -265,7 +268,7 @@ func variantOf(r db.WorkVariantsRow) Variant {
 	return Variant{
 		ID: c.ID, SeriesID: c.SourceSeriesID, SourceID: r.SourceID, Key: c.Key, Name: c.Name, Number: c.Number,
 		Volume: VolumeOf(c.Volume, c.Name), Scanlator: c.Scanlator, Lang: c.Lang, UploadedAt: c.UploadedAt, Position: c.Position,
-		Priority: r.SeriesPriority, Health: r.SourceHealth, Unusable: !r.SourceUsable,
+		Priority: r.SeriesPriority, Health: r.SourceHealth, Unusable: !r.SourceUsable, Announce: c.Announce,
 	}
 }
 
@@ -322,6 +325,7 @@ func (s *Service) Unify(ctx context.Context, workID uuid.UUID) (int, error) {
 				cur, err = q.InsertChapter(ctx, db.InsertChapterParams{
 					WorkID: workID, Number: g.Number, ExtraKey: g.ExtraKey, Volume: g.Volume(),
 					Title: choice.Variant.Name, PreferredVariantID: preferred, Reason: choice.Reason,
+					Announce: slices.ContainsFunc(g.Variants, func(v Variant) bool { return v.Announce }),
 				})
 				if err != nil {
 					return err

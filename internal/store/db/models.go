@@ -43,6 +43,7 @@ type Chapter struct {
 	Available          bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	AppearedAt         *time.Time
 }
 
 type ChapterFile struct {
@@ -263,6 +264,7 @@ type SourceChapter struct {
 	ChapterID      uuid.NullUUID
 	FirstSeenAt    time.Time
 	LastSeenAt     time.Time
+	Announce       bool
 }
 
 type SourceSeries struct {
@@ -282,6 +284,7 @@ type SourceSeries struct {
 	UpdatedAt  time.Time
 	CheckedAt  *time.Time
 	CheckError string
+	ListedAt   *time.Time
 }
 
 type Storage struct {

@@ -372,10 +372,9 @@ func (s *Service) Page(ctx context.Context, v library.Viewer, chapterID uuid.UUI
 		return "", nil, err
 	}
 	defer key.Release()
-	if err := key.Wait(ctx); err != nil {
-		return "", nil, err
-	}
-	ct, data, err := s.host.Image(ctx, plugins.Viewer{Grants: v.Grants, Admin: v.Admin, HideUnknown: v.HideUnknown}, vv.SourceID, pages[index].ref)
+	// Errors that may pass are tried again, each attempt paced by the
+	// budget.
+	ct, data, err := s.host.PageImage(ctx, plugins.Viewer{Grants: v.Grants, Admin: v.Admin, HideUnknown: v.HideUnknown}, vv.SourceID, pages[index].ref, key.Wait)
 	if err != nil {
 		// The page list may be stale (expired links): list again next time.
 		s.pages.drop(vv.ID)

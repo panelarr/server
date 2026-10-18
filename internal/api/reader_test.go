@@ -452,3 +452,40 @@ func TestPagesProblemNamesTheChapter(t *testing.T) {
 		}
 	}
 }
+
+// firstTryFails fails the first fetch of every first page, as a flaky site
+// does.
+type firstTryFails struct {
+	*plugintest.Fake
+	mu    sync.Mutex
+	tried map[string]bool
+}
+
+func (f *firstTryFails) FetchImage(ctx context.Context, r *sourcev1.FetchImageRequest, send plugin.ImageSendFunc) error {
+	f.mu.Lock()
+	fail := strings.HasSuffix(r.GetRef(), "/0") && !f.tried[r.GetRef()]
+	f.tried[r.GetRef()] = true
+	f.mu.Unlock()
+	if fail {
+		return plugin.ErrSourceDown("the site had a moment")
+	}
+	return f.Fake.FetchImage(ctx, r, send)
+}
+
+func TestPageImagesRetried(t *testing.T) {
+	t.Parallel()
+	f := newLibraryFixture(t, func(fk *plugintest.Fake) plugin.Plugin { return &firstTryFails{Fake: fk, tried: map[string]bool{}} })
+	user := f.user
+	id := call[apigen.LibraryEntry](user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 201).Work.Id.String()
+	waitWorkMatched(t, user, id)
+	chs := waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool { return len(cs) >= 2 })
+
+	// The reader gets the page without trying again itself.
+	pages := call[apigen.ChapterPages](user, http.MethodGet, "/api/v1/chapters/"+chs[0].Id.String()+"/pages", nil, 200)
+	if res := user.do(http.MethodGet, pages.Pages[0].Url, nil); res.status != 200 || res.header.Get("Content-Type") != "image/png" {
+		t.Fatalf("page %d %s", res.status, res.body)
+	}
+	// So does a download.
+	call[apigen.DownloadsQueued](f.admin, http.MethodPost, "/api/v1/works/"+id+"/downloads", map[string]any{"chapter_ids": []string{chs[1].Id.String()}}, 202)
+	waitDownloads(t, f.admin, 1)
+}

@@ -32,6 +32,7 @@ import (
 
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/limits"
+	"github.com/panelarr/server/internal/metrics"
 	"github.com/panelarr/server/internal/network"
 	"github.com/panelarr/server/internal/queue"
 	"github.com/panelarr/server/internal/secret"
@@ -103,6 +104,10 @@ type Host struct {
 	alsoPush  []func(context.Context) error
 	pushMu    sync.Mutex
 	instances map[string]string
+	// Page image retries (retry.go).
+	imu          sync.RWMutex
+	imageRetries []time.Duration
+	metrics      *metrics.Metrics
 }
 
 // SetHub makes the host tell admins about each plugin sync
@@ -157,6 +162,7 @@ func NewHost(st *store.Store, box *secret.Box, dial Dialer, log *slog.Logger) *H
 		st: st, box: box, dial: dial, log: log, clients: map[string]client.Client{},
 		recheck: slices.Clone(DefaultRecheck), grace: slices.Clone(DefaultStartupGrace),
 		followUp: slices.Clone(DefaultConfigFollowUp), rechecking: map[string]*chain{}, instances: map[string]string{},
+		imageRetries: slices.Clone(DefaultImageRetries),
 	}
 }
 

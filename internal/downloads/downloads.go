@@ -278,14 +278,12 @@ func (s *Service) handleDownload(ctx context.Context, t *queue.Task) (any, error
 	// Page images have their own budget (see plugins.ImageKey).
 	img := s.limits.For(plugins.ImageKey(v.SourceID))
 	for i, pg := range pages {
-		if err := img.Wait(ctx); err != nil {
-			return nil, err
-		}
 		ref := pg.GetRef()
 		if ref == "" {
 			ref = pg.GetImageUrl()
 		}
-		ct, data, err := s.host.Image(ctx, adminView, v.SourceID, ref)
+		// Errors that may pass are tried again (each attempt paced).
+		ct, data, err := s.host.PageImage(ctx, adminView, v.SourceID, ref, img.Wait)
 		if err != nil {
 			return nil, fmt.Errorf("page %d: %w", i+1, pluginError(err))
 		}

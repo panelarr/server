@@ -57,6 +57,17 @@ type ChapterFile struct {
 	CreatedAt     time.Time
 }
 
+type HistoryCleared struct {
+	UserID uuid.UUID
+	Before time.Time
+}
+
+type HistoryHidden struct {
+	UserID uuid.UUID
+	WorkID uuid.UUID
+	Before time.Time
+}
+
 type Invite struct {
 	ID        uuid.UUID
 	TokenHash []byte

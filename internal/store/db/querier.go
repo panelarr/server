@@ -30,6 +30,7 @@ type Querier interface {
 	// the caller picks the ones its limits allow and marks them running.
 	ClaimCandidates(ctx context.Context, arg ClaimCandidatesParams) ([]Task, error)
 	ClearDefaultStorage(ctx context.Context) error
+	ClearHistory(ctx context.Context, userID uuid.UUID) error
 	CountAttachedByWork(ctx context.Context, workIds []uuid.UUID) ([]CountAttachedByWorkRow, error)
 	CountBookmarks(ctx context.Context, arg CountBookmarksParams) ([]CountBookmarksRow, error)
 	CountChaptersByWork(ctx context.Context, arg CountChaptersByWorkParams) ([]CountChaptersByWorkRow, error)
@@ -102,6 +103,10 @@ type Querier interface {
 	GetUserForUpdate(ctx context.Context, id uuid.UUID) (User, error)
 	GetWork(ctx context.Context, id uuid.UUID) (Work, error)
 	GetWorkByEntry(ctx context.Context, metaEntryID string) (Work, error)
+	HideHistory(ctx context.Context, arg HideHistoryParams) error
+	// A user's reading, newest first, without what they took out of view;
+	// one entry per chapter, or per series (the latest chapter) with
+	// per_series; narrowed to a series or by its title.
 	History(ctx context.Context, arg HistoryParams) ([]HistoryRow, error)
 	// Asking again for queued work brings it forward (e.g. a refresh while a
 	// retry waits out its back-off).

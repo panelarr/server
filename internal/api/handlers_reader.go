@@ -7,11 +7,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/google/uuid"
 
 	"github.com/panelarr/server/internal/api/apigen"
+	"github.com/panelarr/server/internal/chapters"
 	"github.com/panelarr/server/internal/reader"
 	"github.com/panelarr/server/internal/store/db"
 )
@@ -165,7 +167,14 @@ func (s *Server) GetMyHistory(ctx context.Context, req apigen.GetMyHistoryReques
 		before = &db.Progress{UpdatedAt: *at, ChapterID: id}
 	}
 	limit := pageSize(req.Params.PageSize)
-	items, err := s.deps.Reader.History(ctx, s.libraryViewer(ctx).UserID, before, limit+1)
+	q := reader.HistoryQuery{
+		PerSeries: req.Params.Per != nil && *req.Params.Per == apigen.GetMyHistoryParamsPerSeries, Title: deref(req.Params.Q),
+	}
+	if req.Params.WorkId != nil {
+		q.WorkID = *req.Params.WorkId
+	}
+	userID := s.libraryViewer(ctx).UserID
+	items, err := s.deps.Reader.History(ctx, userID, q, before, limit+1)
 	if err != nil {
 		return nil, err
 	}
@@ -175,10 +184,23 @@ func (s *Server) GetMyHistory(ctx context.Context, req apigen.GetMyHistoryReques
 		last := items[len(items)-1].Progress
 		out.NextPageToken = timeCursor(last.UpdatedAt, last.ChapterID)
 	}
+	// Where to resume each series on the page.
+	works := make([]uuid.UUID, 0, len(items))
+	for _, it := range items {
+		if !slices.Contains(works, it.Progress.WorkID) {
+			works = append(works, it.Progress.WorkID)
+		}
+	}
+	stats, err := s.deps.Reader.LibraryStats(ctx, userID, works)
+	if err != nil {
+		return nil, err
+	}
 	for _, it := range items {
 		h := apigen.HistoryItem{
 			WorkId: it.Progress.WorkID, WorkTitle: it.WorkTitle, ChapterId: it.Chapter.ID, ChapterTitle: it.Chapter.Title,
+			ChapterDisplayTitle: ptr(chapters.DisplayTitle(it.Chapter.Title)), ChapterVolume: nonEmpty(it.Chapter.Volume),
 			Page: int(it.Progress.Page), Completed: it.Progress.Completed, UpdatedAt: it.Progress.UpdatedAt,
+			ContinueChapterId: stats[it.Progress.WorkID].Continue,
 		}
 		if it.WorkCoverURL != "" {
 			h.WorkCoverUrl = ptr(BasePath + "/works/" + it.Progress.WorkID.String() + "/cover")
@@ -192,6 +214,27 @@ func (s *Server) GetMyHistory(ctx context.Context, req apigen.GetMyHistoryReques
 		out.Items = append(out.Items, h)
 	}
 	return out, nil
+}
+
+// ClearMyHistory takes everything the caller read up to now out of their
+// history.
+func (s *Server) ClearMyHistory(ctx context.Context, _ apigen.ClearMyHistoryRequestObject) (apigen.ClearMyHistoryResponseObject, error) {
+	if err := s.deps.Reader.ClearHistory(ctx, s.libraryViewer(ctx).UserID); err != nil {
+		return nil, err
+	}
+	return apigen.ClearMyHistory204Response{}, nil
+}
+
+// RemoveFromMyHistory takes a series out of the caller's history.
+func (s *Server) RemoveFromMyHistory(ctx context.Context, req apigen.RemoveFromMyHistoryRequestObject) (apigen.RemoveFromMyHistoryResponseObject, error) {
+	v := s.libraryViewer(ctx)
+	if _, err := s.deps.Library.Get(ctx, v, req.WorkId); err != nil {
+		return nil, libraryError(ctx, err)
+	}
+	if err := s.deps.Reader.HideHistory(ctx, v.UserID, req.WorkId); err != nil {
+		return nil, err
+	}
+	return apigen.RemoveFromMyHistory204Response{}, nil
 }
 
 // GetReaderSettings returns the caller's reader settings for a place.

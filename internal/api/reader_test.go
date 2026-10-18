@@ -414,3 +414,41 @@ func TestHistory(t *testing.T) {
 	}
 	user.expectProblem(http.MethodDelete, "/api/v1/me/history/00000000-0000-0000-0000-000000000001", nil, 404, CodeNotFound)
 }
+
+// brokenPages is a source whose page lists fail.
+type brokenPages struct{ *plugintest.Fake }
+
+func (brokenPages) ListPages(context.Context, *sourcev1.ListPagesRequest) (*sourcev1.ListPagesResponse, error) {
+	return nil, plugin.Errorf(plugin.CodeInternal, "the site broke")
+}
+
+func TestPagesProblemNamesTheChapter(t *testing.T) {
+	t.Parallel()
+	f := newLibraryFixture(t, func(fk *plugintest.Fake) plugin.Plugin { return brokenPages{fk} })
+	user := f.user
+	id := call[apigen.LibraryEntry](user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 201).Work.Id
+	waitWorkMatched(t, user, id.String())
+	chs := waitChapters(t, user, id.String(), func(cs []apigen.UnifiedChapter) bool { return len(cs) >= 1 })
+
+	// The reader can go back to the series.
+	res := user.do(http.MethodGet, "/api/v1/chapters/"+chs[0].Id.String()+"/pages", nil)
+	p := res.problem(t)
+	if res.status < 500 || p.WorkId == nil || *p.WorkId != id || p.WorkTitle == nil || *p.WorkTitle != "The Lantern Keeper" ||
+		p.ChapterLabel == nil || *p.ChapterLabel != "Chapter 1" {
+		t.Fatalf("%d %s", res.status, res.body)
+	}
+
+	// Nothing about chapters the caller may not see.
+	limited, _ := f.h.createUser(f.admin, "limited", map[string]any{"all_sources": false, "allowed_sources": []string{}})
+	for _, c := range []struct {
+		who  *client
+		path string
+	}{
+		{limited, "/api/v1/chapters/" + chs[0].Id.String() + "/pages"},
+		{user, "/api/v1/chapters/00000000-0000-0000-0000-000000000001/pages"},
+	} {
+		if p := c.who.expectProblem(http.MethodGet, c.path, nil, 404, CodeNotFound); p.WorkId != nil || p.ChapterLabel != nil {
+			t.Fatalf("%s names the chapter %+v", c.path, p)
+		}
+	}
+}

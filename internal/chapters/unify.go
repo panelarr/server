@@ -92,6 +92,26 @@ func VolumeOf(volume, name string) string {
 // volume or scanlator noise; empty when the name has nothing else.
 func DisplayTitle(name string) string { return Parse(name).Title }
 
+// Label names a chapter for showing on its own: "Vol. 2 Chapter 15: Rain",
+// "Chapter 3", or an extra's own name.
+func Label(number *float64, volume, name string) string {
+	title := DisplayTitle(name)
+	if number == nil {
+		if title == "" {
+			return strings.TrimSpace(name)
+		}
+		return title
+	}
+	out := "Chapter " + strconv.FormatFloat(*number, 'f', -1, 64)
+	if volume != "" {
+		out = "Vol. " + volume + " " + out
+	}
+	if title != "" {
+		out += ": " + title
+	}
+	return out
+}
+
 // GroupVariants groups variants into canonical chapters by number; each
 // variant without a number is a chapter of its own. Groups come in number
 // order, extras last.

@@ -52,11 +52,26 @@ func pageURL(chapterID uuid.UUID, index int, variantID *uuid.UUID) string {
 	return u
 }
 
+// withChapter adds to a reader's problem which chapter it couldn't load
+// and its work, when the caller may see them.
+func (s *Server) withChapter(ctx context.Context, chapterID uuid.UUID, err error) error {
+	var p *Problem
+	if !errors.As(err, &p) || ctx.Err() != nil {
+		return err
+	}
+	w, ch, lerr := s.deps.Reader.Locate(ctx, s.libraryViewer(ctx), chapterID)
+	if lerr != nil {
+		return err
+	}
+	p.WorkID, p.WorkTitle, p.ChapterLabel = &w.ID, w.Title, chapters.Label(ch.Number, ch.Volume, ch.Title)
+	return p
+}
+
 // GetChapterPages returns a chapter's pages for the reader.
 func (s *Server) GetChapterPages(ctx context.Context, req apigen.GetChapterPagesRequestObject) (apigen.GetChapterPagesResponseObject, error) {
 	p, err := s.deps.Reader.Pages(ctx, s.libraryViewer(ctx), req.ChapterId, req.Params.VariantId)
 	if err != nil {
-		return nil, readerError(ctx, err)
+		return nil, s.withChapter(ctx, req.ChapterId, readerError(ctx, err))
 	}
 	visible := map[string]bool{p.Variant.SourceID: true}
 	marks, err := s.bookmarked(ctx, s.libraryViewer(ctx).UserID, p.WorkID)

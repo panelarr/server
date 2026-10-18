@@ -104,3 +104,23 @@ func TestNumberAndVolumeOf(t *testing.T) {
 		}
 	}
 }
+
+func TestLabel(t *testing.T) {
+	t.Parallel()
+	f := func(v float64) *float64 { return &v }
+	for _, tc := range []struct {
+		number       *float64
+		volume, name string
+		want         string
+	}{
+		{f(15), "2", "Vol.02 Ch.015 [GroupName] Rain", "Vol. 2 Chapter 15: Rain"},
+		{f(3), "", "Ch. 3", "Chapter 3"},
+		{f(12.5), "", "Chapter 12.5", "Chapter 12.5"},
+		{nil, "", "Side Story 2: Summer", "Side Story 2: Summer"},
+		{nil, "", " … ", "…"},
+	} {
+		if got := Label(tc.number, tc.volume, tc.name); got != tc.want {
+			t.Errorf("Label(%v, %q, %q) = %q, want %q", numOf(tc.number), tc.volume, tc.name, got, tc.want)
+		}
+	}
+}

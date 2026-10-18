@@ -1,6 +1,7 @@
 -- name: UpsertSourceChapter :exec
-INSERT INTO source_chapters (source_series_id, key, name, number, volume, scanlator, lang, url, uploaded_at, position)
-VALUES (@source_series_id, @key, @name, @number, @volume, @scanlator, @lang, @url, @uploaded_at, @position)
+-- A variant new to a series that was listed before is announced.
+INSERT INTO source_chapters (source_series_id, key, name, number, volume, scanlator, lang, url, uploaded_at, position, announce)
+VALUES (@source_series_id, @key, @name, @number, @volume, @scanlator, @lang, @url, @uploaded_at, @position, @announce)
 ON CONFLICT (source_series_id, key) DO UPDATE SET
     name = EXCLUDED.name, number = EXCLUDED.number, volume = EXCLUDED.volume, scanlator = EXCLUDED.scanlator,
     lang = EXCLUDED.lang, url = EXCLUDED.url, uploaded_at = EXCLUDED.uploaded_at, position = EXCLUDED.position,
@@ -11,7 +12,9 @@ UPDATE source_chapters SET present = false
 WHERE source_series_id = @source_series_id AND present AND NOT (key = ANY(@listed::text[]));
 
 -- name: SetSeriesChecked :exec
-UPDATE source_series SET checked_at = now(), check_error = @check_error WHERE id = @id;
+UPDATE source_series SET checked_at = now(), check_error = @check_error,
+    listed_at = CASE WHEN @check_error = '' THEN now() ELSE listed_at END
+WHERE id = @id;
 
 -- name: ListSourceChaptersBySeries :many
 SELECT * FROM source_chapters WHERE source_series_id = $1 ORDER BY position, id;
@@ -43,8 +46,9 @@ SELECT * FROM chapters WHERE work_id = $1;
 SELECT * FROM chapters WHERE id = $1;
 
 -- name: InsertChapter :one
-INSERT INTO chapters (work_id, number, extra_key, volume, title, preferred_variant_id, reason, available)
-VALUES (@work_id, @number, @extra_key, @volume, @title, @preferred_variant_id, @reason, true)
+INSERT INTO chapters (work_id, number, extra_key, volume, title, preferred_variant_id, reason, available, appeared_at)
+VALUES (@work_id, @number, @extra_key, @volume, @title, @preferred_variant_id, @reason, true,
+        CASE WHEN @announce::boolean THEN now() END)
 RETURNING *;
 
 -- name: UpdateChapter :exec
@@ -56,7 +60,7 @@ WHERE id = @id;
 UPDATE chapters SET pinned_variant_id = @pinned_variant_id, updated_at = now() WHERE id = @id;
 
 -- name: AssignVariants :exec
-UPDATE source_chapters SET chapter_id = @chapter_id WHERE id = ANY(@ids::uuid[]);
+UPDATE source_chapters SET chapter_id = @chapter_id, announce = false WHERE id = ANY(@ids::uuid[]);
 
 -- name: ChapterVariants :many
 SELECT sqlc.embed(source_chapters), source_series.source_id, source_series.priority AS series_priority,

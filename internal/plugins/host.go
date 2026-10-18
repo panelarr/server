@@ -107,6 +107,7 @@ type Host struct {
 	// Page image retries (retry.go).
 	imu          sync.RWMutex
 	imageRetries []time.Duration
+	retryCache   map[string]cachedRetries
 	metrics      *metrics.Metrics
 }
 

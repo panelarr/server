@@ -66,3 +66,20 @@ UPDATE sources SET enabled = @enabled, updated_at = now() WHERE id = @id;
 
 -- name: CountSourcesByPlugin :many
 SELECT plugin_id, count(*) FILTER (WHERE present) AS listed FROM sources GROUP BY plugin_id;
+
+-- name: GetImageRetrySetting :one
+SELECT * FROM image_retry_settings WHERE target_kind = @target_kind AND target_id = @target_id;
+
+-- name: PutImageRetrySetting :one
+INSERT INTO image_retry_settings (target_kind, target_id, delays_ms, plugin_id)
+VALUES (@target_kind, @target_id, @delays_ms, @plugin_id)
+ON CONFLICT (target_kind, target_id) DO UPDATE SET delays_ms = EXCLUDED.delays_ms, updated_at = now()
+RETURNING *;
+
+-- name: DeleteImageRetrySetting :execrows
+DELETE FROM image_retry_settings WHERE target_kind = @target_kind AND target_id = @target_id;
+
+-- name: ImageRetrySettingsFor :many
+-- A source's own setting and its package's.
+SELECT * FROM image_retry_settings
+WHERE (target_kind = 'source' AND target_id = @source_id) OR (target_kind = 'package' AND target_id = @package_key);

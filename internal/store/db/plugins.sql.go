@@ -80,6 +80,23 @@ func (q *Queries) CreatePlugin(ctx context.Context, arg CreatePluginParams) (Plu
 	return i, err
 }
 
+const deleteImageRetrySetting = `-- name: DeleteImageRetrySetting :execrows
+DELETE FROM image_retry_settings WHERE target_kind = $1 AND target_id = $2
+`
+
+type DeleteImageRetrySettingParams struct {
+	TargetKind string
+	TargetID   string
+}
+
+func (q *Queries) DeleteImageRetrySetting(ctx context.Context, arg DeleteImageRetrySettingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteImageRetrySetting, arg.TargetKind, arg.TargetID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deletePlugin = `-- name: DeletePlugin :execrows
 DELETE FROM plugins WHERE id = $1
 `
@@ -90,6 +107,28 @@ func (q *Queries) DeletePlugin(ctx context.Context, id string) (int64, error) {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const getImageRetrySetting = `-- name: GetImageRetrySetting :one
+SELECT target_kind, target_id, delays_ms, plugin_id, updated_at FROM image_retry_settings WHERE target_kind = $1 AND target_id = $2
+`
+
+type GetImageRetrySettingParams struct {
+	TargetKind string
+	TargetID   string
+}
+
+func (q *Queries) GetImageRetrySetting(ctx context.Context, arg GetImageRetrySettingParams) (ImageRetrySetting, error) {
+	row := q.db.QueryRow(ctx, getImageRetrySetting, arg.TargetKind, arg.TargetID)
+	var i ImageRetrySetting
+	err := row.Scan(
+		&i.TargetKind,
+		&i.TargetID,
+		&i.DelaysMs,
+		&i.PluginID,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getPlugin = `-- name: GetPlugin :one
@@ -154,6 +193,43 @@ func (q *Queries) GetSource(ctx context.Context, id string) (GetSourceRow, error
 		&i.PluginEnabled,
 	)
 	return i, err
+}
+
+const imageRetrySettingsFor = `-- name: ImageRetrySettingsFor :many
+SELECT target_kind, target_id, delays_ms, plugin_id, updated_at FROM image_retry_settings
+WHERE (target_kind = 'source' AND target_id = $1) OR (target_kind = 'package' AND target_id = $2)
+`
+
+type ImageRetrySettingsForParams struct {
+	SourceID   string
+	PackageKey string
+}
+
+// A source's own setting and its package's.
+func (q *Queries) ImageRetrySettingsFor(ctx context.Context, arg ImageRetrySettingsForParams) ([]ImageRetrySetting, error) {
+	rows, err := q.db.Query(ctx, imageRetrySettingsFor, arg.SourceID, arg.PackageKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ImageRetrySetting{}
+	for rows.Next() {
+		var i ImageRetrySetting
+		if err := rows.Scan(
+			&i.TargetKind,
+			&i.TargetID,
+			&i.DelaysMs,
+			&i.PluginID,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPlugins = `-- name: ListPlugins :many
@@ -259,6 +335,38 @@ type MarkSourcesAbsentParams struct {
 func (q *Queries) MarkSourcesAbsent(ctx context.Context, arg MarkSourcesAbsentParams) error {
 	_, err := q.db.Exec(ctx, markSourcesAbsent, arg.PluginID, arg.Listed)
 	return err
+}
+
+const putImageRetrySetting = `-- name: PutImageRetrySetting :one
+INSERT INTO image_retry_settings (target_kind, target_id, delays_ms, plugin_id)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (target_kind, target_id) DO UPDATE SET delays_ms = EXCLUDED.delays_ms, updated_at = now()
+RETURNING target_kind, target_id, delays_ms, plugin_id, updated_at
+`
+
+type PutImageRetrySettingParams struct {
+	TargetKind string
+	TargetID   string
+	DelaysMs   []int32
+	PluginID   string
+}
+
+func (q *Queries) PutImageRetrySetting(ctx context.Context, arg PutImageRetrySettingParams) (ImageRetrySetting, error) {
+	row := q.db.QueryRow(ctx, putImageRetrySetting,
+		arg.TargetKind,
+		arg.TargetID,
+		arg.DelaysMs,
+		arg.PluginID,
+	)
+	var i ImageRetrySetting
+	err := row.Scan(
+		&i.TargetKind,
+		&i.TargetID,
+		&i.DelaysMs,
+		&i.PluginID,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const setPluginConfig = `-- name: SetPluginConfig :exec

@@ -69,6 +69,14 @@ type HistoryHidden struct {
 	Before time.Time
 }
 
+type ImageRetrySetting struct {
+	TargetKind string
+	TargetID   string
+	DelaysMs   []int32
+	PluginID   string
+	UpdatedAt  time.Time
+}
+
 type Invite struct {
 	ID        uuid.UUID
 	TokenHash []byte

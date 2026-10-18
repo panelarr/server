@@ -33,6 +33,7 @@ Solvers, proxies and network profiles live in Panelarr as options; admins assign
 - [x] **S3. Push to source plugins:** effective profiles pushed to plugins that declare the network profile service (solver only with the solver service), on change, for new sources and after a plugin restart; push state per source; the server's own source limits follow the profile.
 - [x] **S4. Per-source settings:** a source's own settings through the API.
 - [x] **S5. Metadata providers:** profiles pushed to meta per provider.
+- [x] **S6. Page image retries:** failed page images (reader and downloads) tried again for errors that may pass, never for not found, a rejected key or a challenge, within the source's image limits and its retry-after (up to 30 s); 2 more attempts after 1 s and 3 s by default, set per extension with a per-source override (`…/image-retries`, effective value and its level).
 
 ## Connected services' admin
 

@@ -49,7 +49,7 @@ Everything an admin does in mihon-source's or meta's own admin can be done from 
 Each user keeps named views of their own library (filters, sort, display). The server stores them; the web app still filters the whole library in the browser.
 
 - [x] **S1. Recently updated:** library entries carry `last_updated_at`, when a later check last found one of the work's available chapters (the updates feed's "appeared"), for a "Recently updated" sort and an "updated within" filter.
-- [ ] **S2. Views storage and API:** `/me/library-views` (list, create, read, change, delete, order) with a validated definition, one default and an order per user, limits, and a `library_views.changed` event to the owner.
+- [x] **S2. Views storage and API:** `/me/library-views` (list, create, read, change, delete, order) with a validated definition, one default and an order per user, limits, and a `library_views.changed` event to the owner.
 
 ## Working assumptions
 

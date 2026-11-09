@@ -113,6 +113,17 @@ type LibraryEntry struct {
 	AutoDownload bool
 }
 
+type LibraryView struct {
+	ID         uuid.UUID
+	UserID     uuid.UUID
+	Name       string
+	Position   int32
+	IsDefault  bool
+	Definition []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
 type NetworkAssignment struct {
 	TargetKind string
 	TargetID   string

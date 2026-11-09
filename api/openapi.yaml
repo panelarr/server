@@ -3098,6 +3098,7 @@ paths:
         | `library.changed` | the user | `WorkEvent` |
         | `progress.synced` | the user (all devices) | `WorkEvent` (`chapter_id`, `page`, `completed` when one chapter changed) |
         | `bookmarks.changed` | the user (all devices) | `WorkEvent` |
+        | `library_views.changed` | the user (all devices) | `LibraryViewsEvent` |
       x-panelarr-access: user
       responses:
         "200":
@@ -3939,6 +3940,132 @@ paths:
       responses:
         "204":
           description: Saved.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/library-views:
+    get:
+      operationId: listMyLibraryViews
+      tags: [library]
+      summary: Your saved library views
+      description: |
+        Named views of your library, each with filters, a sort and display
+        settings (a `LibraryViewDefinition`), in your order. Exactly one is
+        your default once you have any. The server only stores views;
+        clients apply them to the library. Other devices hear
+        `library_views.changed` when they change.
+      x-panelarr-access: user
+      responses:
+        "200":
+          description: Your views in order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryViewList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createMyLibraryView
+      tags: [library]
+      summary: Save a library view
+      description: |
+        Adds the view at the end of your order. Your first view is the
+        default; `default: true` makes a later one the default. Names are
+        trimmed and unique per user, ignoring case (`409`, code
+        `name_taken`); you keep at most 50 views (`409`, code `view_limit`).
+        A definition is at most 4 KiB.
+      x-panelarr-access: user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLibraryViewRequest"
+      responses:
+        "201":
+          description: The new view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryView"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/library-views/order:
+    put:
+      operationId: orderMyLibraryViews
+      tags: [library]
+      summary: Reorder your library views
+      description: The IDs of all your views, each once, in the new order; anything else answers `409`, code `order_mismatch`.
+      x-panelarr-access: user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderLibraryViewsRequest"
+      responses:
+        "200":
+          description: Your views in the new order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryViewList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/library-views/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      operationId: getMyLibraryView
+      tags: [library]
+      summary: One of your library views
+      description: Another user's view answers `404`, like a missing one.
+      x-panelarr-access: user
+      responses:
+        "200":
+          description: The view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryView"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateMyLibraryView
+      tags: [library]
+      summary: Change a library view
+      description: |
+        Only the fields sent change; `definition` is replaced as a whole.
+        `default: true` makes the view your default (the old default stops
+        being one). `default: false` on your default view answers `409`,
+        code `default_required`: make another view the default instead.
+      x-panelarr-access: user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLibraryViewRequest"
+      responses:
+        "200":
+          description: The view now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryView"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteMyLibraryView
+      tags: [library]
+      summary: Delete a library view
+      description: Deleting your default view makes the first remaining view the default. Your only view can't be deleted (`409`, code `last_view`).
+      x-panelarr-access: user
+      responses:
+        "204":
+          description: Deleted.
         default:
           $ref: "#/components/responses/Problem"
 
@@ -5038,6 +5165,155 @@ components:
             When Panelarr last found a new chapter of it in a later check (the newest
             of its available chapters that appeared after the work was first listed);
             absent when none ever did.
+    LibraryView:
+      type: object
+      description: A saved view of your library.
+      required: [id, name, position, default, definition, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        position:
+          type: integer
+          description: Its place in your order, from 0.
+        default:
+          type: boolean
+          description: The view your library opens with; exactly one of your views is.
+        definition:
+          $ref: "#/components/schemas/LibraryViewDefinition"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    LibraryViewList:
+      type: object
+      required: [views]
+      properties:
+        views:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibraryView"
+    LibraryViewDefinition:
+      type: object
+      description: |
+        What a view shows and how. Every field is optional: an absent filter
+        lets everything through, and clients fill in their own defaults for
+        the sort and display. Unknown keys and values are refused, so a new
+        filter or sort needs a server that knows it. At most 4 KiB.
+      additionalProperties: false
+      properties:
+        filters:
+          $ref: "#/components/schemas/LibraryViewFilters"
+        types:
+          type: array
+          description: Only works of these types (`work.type`); empty or absent means any.
+          maxItems: 20
+          items:
+            type: string
+            minLength: 1
+            maxLength: 40
+        statuses:
+          type: array
+          description: Only works with these publication statuses (`work.status`); empty or absent means any.
+          maxItems: 20
+          items:
+            type: string
+            minLength: 1
+            maxLength: 40
+        updated_within_days:
+          type: integer
+          minimum: 1
+          maximum: 365
+          description: Only works with a new chapter found within this many days (`last_updated_at`).
+        sort:
+          type: string
+          enum: [title, added, read, latest, updated, unread, total]
+          description: |
+            `title`; `added` (to your library); `read` (`last_read_at`);
+            `latest` (`latest_chapter_at`); `updated` (`last_updated_at`);
+            `unread`; `total` (chapters).
+        reverse:
+          type: boolean
+        display:
+          $ref: "#/components/schemas/LibraryViewDisplay"
+    LibraryViewFilters:
+      type: object
+      description: Each filter keeps (`include`) or drops (`exclude`) the works it matches; absent means either.
+      additionalProperties: false
+      properties:
+        unread:
+          $ref: "#/components/schemas/LibraryViewFilterMode"
+        started:
+          $ref: "#/components/schemas/LibraryViewFilterMode"
+        downloaded:
+          $ref: "#/components/schemas/LibraryViewFilterMode"
+        bookmarked:
+          $ref: "#/components/schemas/LibraryViewFilterMode"
+        new:
+          $ref: "#/components/schemas/LibraryViewFilterMode"
+    LibraryViewFilterMode:
+      type: string
+      enum: [include, exclude]
+    LibraryViewDisplay:
+      type: object
+      additionalProperties: false
+      properties:
+        layout:
+          type: string
+          enum: [compact, comfortable, list]
+        unread_badges:
+          type: boolean
+        download_badges:
+          type: boolean
+        continue_button:
+          type: boolean
+    CreateLibraryViewRequest:
+      type: object
+      required: [name, definition]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+        definition:
+          $ref: "#/components/schemas/LibraryViewDefinition"
+        default:
+          type: boolean
+          description: Make it your default view.
+    UpdateLibraryViewRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+        definition:
+          $ref: "#/components/schemas/LibraryViewDefinition"
+        default:
+          type: boolean
+          description: "`true` makes it your default view; `false` is refused on the default (`default_required`)."
+    OrderLibraryViewsRequest:
+      type: object
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            format: uuid
+    LibraryViewsEvent:
+      type: object
+      description: Data of `library_views.changed`; refetch your views.
+      properties:
+        view_id:
+          type: string
+          format: uuid
+          description: The view that changed, when one did (absent after reordering).
     LibraryPage:
       type: object
       required: [entries, next_page_token]

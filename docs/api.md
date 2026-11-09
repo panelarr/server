@@ -50,3 +50,5 @@ Endpoints and fields are only added within v1, with one deliberate exception:
 ## Validation
 
 Requests are checked against the spec before they reach a handler: wrong types, missing fields, unknown enum values, lengths and patterns answer `400 invalid_request` with one `errors` entry per field.
+
+Text can't contain the NUL character (U+0000): PostgreSQL can't store it. A NUL in a path or query parameter, or in any string or key of a JSON body (`\u0000`), answers `400 invalid_request` naming the field (e.g. `definition.types.0`), for every operation, before the spec check.

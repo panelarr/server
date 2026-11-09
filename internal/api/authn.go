@@ -147,7 +147,8 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 }
 
 // authorize enforces an operation's policy from the spec, then validates
-// the request against the spec. It runs on the API subrouter and finds the
+// the request against the spec, refusing text with NUL characters the
+// database can't store. It runs on the API subrouter and finds the
 // route itself, so it decides before the generated code parses parameters
 // or the body: an unauthorised caller learns nothing about them.
 func (s *Server) authorize(routes chi.Routes) func(http.Handler) http.Handler {
@@ -163,6 +164,10 @@ func (s *Server) authorize(routes chi.Routes) func(http.Handler) http.Handler {
 				return
 			}
 			if prob := s.checkAccess(r, pol); prob != nil {
+				writeProblem(w, r, prob)
+				return
+			}
+			if prob := rejectNUL(r, rc); prob != nil {
 				writeProblem(w, r, prob)
 				return
 			}

@@ -684,8 +684,9 @@ type ReadingStats struct {
 	// Started: the user read some of it.
 	Started bool
 	// LastReadAt is when the user last read in it; LatestChapterAt when
-	// its newest chapter came out (or was first seen).
-	LastReadAt, LatestChapterAt *time.Time
+	// its newest chapter came out (or was first seen); LastUpdatedAt when
+	// a later check last found a chapter of it (nil when none ever was).
+	LastReadAt, LatestChapterAt, LastUpdatedAt *time.Time
 	// Continue is the chapter "Continue" opens.
 	Continue *uuid.UUID
 }
@@ -752,6 +753,10 @@ func (s *Service) LibraryStats(ctx context.Context, userID uuid.UUID, workIDs []
 		}
 		if st.LatestChapterAt == nil || at.After(*st.LatestChapterAt) {
 			st.LatestChapterAt = &at
+		}
+		if c.AppearedAt != nil && (st.LastUpdatedAt == nil || c.AppearedAt.After(*st.LastUpdatedAt)) {
+			appeared := *c.AppearedAt
+			st.LastUpdatedAt = &appeared
 		}
 		out[c.WorkID] = st
 	}

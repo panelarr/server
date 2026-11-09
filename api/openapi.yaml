@@ -5031,6 +5031,13 @@ components:
           type: string
           format: date-time
           description: When its newest chapter came out (or was first seen, when the source gives no date).
+        last_updated_at:
+          type: string
+          format: date-time
+          description: >-
+            When Panelarr last found a new chapter of it in a later check (the newest
+            of its available chapters that appeared after the work was first listed);
+            absent when none ever did.
     LibraryPage:
       type: object
       required: [entries, next_page_token]

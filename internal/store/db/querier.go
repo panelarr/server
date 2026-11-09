@@ -123,7 +123,8 @@ type Querier interface {
 	// Returns no row when a live task with the same dedupe key exists.
 	InsertTask(ctx context.Context, arg InsertTaskParams) (Task, error)
 	LastJobRuns(ctx context.Context) ([]JobRun, error)
-	// The chapters of some works, with when their chosen copy was uploaded.
+	// The chapters of some works, with when their chosen copy was uploaded
+	// and when a later check found them.
 	LibraryChapters(ctx context.Context, workIds []uuid.UUID) ([]LibraryChaptersRow, error)
 	LibraryProgress(ctx context.Context, arg LibraryProgressParams) ([]Progress, error)
 	LibraryUserIDs(ctx context.Context, workID uuid.UUID) ([]uuid.UUID, error)

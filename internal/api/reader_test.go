@@ -341,6 +341,50 @@ func TestLibraryReadingStats(t *testing.T) {
 	}
 }
 
+// last_updated_at is when a later check last found an available chapter.
+func TestLibraryLastUpdated(t *testing.T) {
+	t.Parallel()
+	f := newLibraryFixture(t)
+	user := f.user
+	id := call[apigen.LibraryEntry](user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 201).Work.Id.String()
+	waitWorkMatched(t, user, id)
+	chs := waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool { return len(cs) == 3 })
+	lastUpdated := func() *time.Time {
+		t.Helper()
+		lib := call[apigen.LibraryPage](user, http.MethodGet, "/api/v1/library", nil, 200)
+		if len(lib.Entries) != 1 {
+			t.Fatalf("library %+v", lib)
+		}
+		return lib.Entries[0].LastUpdatedAt
+	}
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.h.st.Pool.Exec(context.Background(), sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Only what it had when first listed: never updated.
+	if at := lastUpdated(); at != nil {
+		t.Fatalf("first listing %v", at)
+	}
+
+	// Two chapters a later check found: the newest of them.
+	earlier := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	later := earlier.Add(48 * time.Hour)
+	exec("UPDATE chapters SET appeared_at = $2 WHERE id = $1", chs[1].Id, earlier)
+	exec("UPDATE chapters SET appeared_at = $2 WHERE id = $1", chs[2].Id, later)
+	if at := lastUpdated(); at == nil || !at.Equal(later) {
+		t.Fatalf("after updates %v, want %v", at, later)
+	}
+
+	// The later one is no longer available: the one before counts.
+	exec("UPDATE chapters SET available = false WHERE id = $1", chs[2].Id)
+	if at := lastUpdated(); at == nil || !at.Equal(earlier) {
+		t.Fatalf("later one unavailable %v, want %v", at, earlier)
+	}
+}
+
 func TestHistory(t *testing.T) {
 	t.Parallel()
 	f := newLibraryFixture(t, func(fk *plugintest.Fake) plugin.Plugin {

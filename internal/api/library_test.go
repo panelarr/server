@@ -3,13 +3,16 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
 	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
 	metadatav1 "github.com/panelarr/meta/gen/panelarr/metadata/v1"
+	sourcev1 "github.com/panelarr/source-api/gen/panelarr/source/v1"
 	"github.com/panelarr/source-api/sdk/plugin"
 	"github.com/panelarr/source-api/sdk/plugintest"
 
@@ -162,7 +165,7 @@ func TestLibraryFlow(t *testing.T) {
 		t.Fatalf("priority %+v", pr)
 	}
 	byURL := call[apigen.MatchSeries](admin, http.MethodPost, "/api/v1/works/"+entry.Work.Id.String()+"/series", map[string]string{"url": "https://example-comics.example/series/2"}, 201)
-	if byURL.Origin != apigen.MatchSeriesOriginUrl || byURL.SourceId != "fake:1001" {
+	if byURL.Origin != apigen.MatchSeriesOriginUrl || byURL.SourceId != "fake:1001" || byURL.Evidence.BestEffort == nil || *byURL.Evidence.BestEffort {
 		t.Fatalf("by url %+v", byURL)
 	}
 	admin.expectProblem(http.MethodPost, "/api/v1/works/"+entry.Work.Id.String()+"/series", map[string]string{"url": "https://nowhere.example/x"}, 404, "url_unknown")
@@ -208,4 +211,48 @@ func TestAddFromSourceAPI(t *testing.T) {
 	noAdd, _ := f.h.createUser(f.admin, "viewer", map[string]any{"may_add": false})
 	noAdd.expectProblem(http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 403, "grant_required")
 	noAdd.expectProblem(http.MethodPost, "/api/v1/library/from-source", map[string]string{"source_id": "fake:1001", "key": "/series/1"}, 403, "grant_required")
+}
+
+// searchingResolver stands for a plugin whose sources can't resolve URLs
+// natively but that finds the series by searching the site for the URL and
+// says it only guessed (best effort).
+type searchingResolver struct{ *plugintest.Fake }
+
+func (r searchingResolver) ResolveUrl(_ context.Context, req *sourcev1.ResolveUrlRequest) (*sourcev1.ResolveUrlResponse, error) { //nolint:revive // named after the RPC
+	if req.GetUrl() != "https://example-comics.example/?q=salt" {
+		return nil, plugin.ErrNotFound("nothing found")
+	}
+	return &sourcev1.ResolveUrlResponse{SourceId: "1001", Series: r.Sources[0].Series[1].Series, BestEffort: true}, nil
+}
+
+func TestAttachURLBestEffort(t *testing.T) {
+	t.Parallel()
+	f := newLibraryFixture(t, func(fk *plugintest.Fake) plugin.Plugin {
+		for _, s := range fk.Sources {
+			s.Source.Capabilities = slices.DeleteFunc(s.Source.Capabilities, func(c sourcev1.SourceCapability) bool {
+				return c == sourcev1.SourceCapability_SOURCE_CAPABILITY_RESOLVE_URL
+			})
+		}
+		return searchingResolver{fk}
+	})
+	entry := call[apigen.LibraryEntry](f.user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 201)
+	id := entry.Work.Id.String()
+	waitWorkMatched(t, f.user, id)
+
+	// No source resolves URLs natively, yet the plugin is asked and its
+	// guess attached, flagged as one and scored by its title.
+	se := call[apigen.MatchSeries](f.admin, http.MethodPost, "/api/v1/works/"+id+"/series", map[string]string{"url": "https://example-comics.example/?q=salt"}, 201)
+	ev := se.Evidence
+	if se.Origin != apigen.MatchSeriesOriginUrl || se.Title != "Salt and Iron" || ev.BestEffort == nil || !*ev.BestEffort ||
+		ev.TitleScore >= 1 || se.Score != ev.TitleScore || ev.EntryTitle == nil || *ev.EntryTitle != "The Lantern Keeper" {
+		t.Fatalf("attached %+v", se)
+	}
+	// The work's sources say so too.
+	w := call[apigen.Work](f.user, http.MethodGet, "/api/v1/works/"+id, nil, 200)
+	for _, s := range w.Sources {
+		if s.Source.Id == "fake:1001" && (s.Attached == nil || s.Attached.Id != se.Id || s.Attached.Evidence.BestEffort == nil || !*s.Attached.Evidence.BestEffort) {
+			t.Fatalf("work source %+v", s)
+		}
+	}
+	f.admin.expectProblem(http.MethodPost, "/api/v1/works/"+id+"/series", map[string]string{"url": "https://nowhere.example/x"}, 404, "url_unknown")
 }

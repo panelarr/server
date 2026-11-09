@@ -4,6 +4,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -114,7 +115,9 @@ func TestUnifiedChapters(t *testing.T) {
 	}
 
 	// The German source gets chapter 4 and an extra; the English source
-	// drops chapter 1. A refresh picks it all up.
+	// drops chapter 1. A refresh picks it all up. Chapter 1 was started, so
+	// it stays, unavailable (one nobody touched would go).
+	call[apigen.ChapterProgress](user, http.MethodPut, "/api/v1/chapters/"+chapterNumbered(chs, 1).Id.String()+"/progress", map[string]int{"page": 1, "pages": 4}, 200)
 	de := f.plugin.Sources[1].Series[0]
 	four := 4.0
 	de.Chapters = append([]*plugintest.Chapter{
@@ -170,4 +173,54 @@ func TestUnifyAllReadsNamesAgain(t *testing.T) {
 	if c == nil || c.Volume == nil || *c.Volume != "2" || c.DisplayTitle != "The Last Lantern" {
 		t.Fatalf("chapter 3 %+v", c)
 	}
+}
+
+func TestReattachRemovesGhostChapters(t *testing.T) {
+	t.Parallel()
+	// The English series the matcher attaches has chapters 4–6 (the German
+	// one 1–3); the other English series have 1–3.
+	f := newLibraryFixture(t, func(fk *plugintest.Fake) plugin.Plugin {
+		for i, c := range fk.Sources[0].Series[0].Chapters {
+			n := float64(6 - i)
+			c.Chapter.Number, c.Chapter.Name = &n, fmt.Sprintf("Chapter %v", n)
+		}
+		return fk
+	})
+	user, admin := f.user, f.admin
+	entry := call[apigen.LibraryEntry](user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 201)
+	id := entry.Work.Id.String()
+	waitWorkMatched(t, user, id)
+	chs := waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool { return len(cs) == 6 })
+	c4, c5, c6 := chapterNumbered(chs, 4), chapterNumbered(chs, 5), chapterNumbered(chs, 6)
+
+	// The user started chapter 5 and bookmarked chapter 6; nobody touched 4.
+	call[apigen.ChapterProgress](user, http.MethodPut, "/api/v1/chapters/"+c5.Id.String()+"/progress", map[string]int{"page": 1, "pages": 4}, 200)
+	call[apigen.BookmarkList](user, http.MethodPost, "/api/v1/works/"+id+"/bookmarks", map[string]any{"chapter_ids": []string{c6.Id.String()}, "bookmarked": true}, 200)
+
+	// Replacing the English series with another one (chapters 1–3): chapter
+	// 4 only the old series had goes; 5 and 6 stay, unavailable.
+	call[apigen.MatchSeries](admin, http.MethodPost, "/api/v1/works/"+id+"/series", map[string]string{"source_id": "fake:1001", "key": "/series/2"}, 201)
+	chs = waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool {
+		c1 := chapterNumbered(cs, 1) // once the new series' chapters are in
+		return chapterNumbered(cs, 4) == nil && len(cs) == 5 && c1 != nil && c1.Variants == 2
+	})
+	for _, c := range []*apigen.UnifiedChapter{c5, c6} {
+		got := chapterNumbered(chs, *c.Number)
+		if got == nil || got.Id != c.Id || got.Available {
+			t.Fatalf("chapter %v: %+v", *c.Number, got)
+		}
+	}
+	for n := float32(1); n <= 3; n++ {
+		if c := chapterNumbered(chs, n); c == nil || !c.Available || c.Variants != 2 {
+			t.Fatalf("chapter %v: %+v", n, c)
+		}
+	}
+	user.expectProblem(http.MethodGet, "/api/v1/works/"+id+"/chapters/"+c4.Id.String(), nil, 404, CodeNotFound)
+
+	// Attaching the old series again brings its chapters back.
+	call[apigen.MatchSeries](admin, http.MethodPost, "/api/v1/works/"+id+"/series", map[string]string{"source_id": "fake:1001", "key": "/series/1"}, 201)
+	waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool {
+		back4, back5 := chapterNumbered(cs, 4), chapterNumbered(cs, 5)
+		return back4 != nil && back4.Available && back5 != nil && back5.Available && back5.Id == c5.Id
+	})
 }

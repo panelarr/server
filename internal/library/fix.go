@@ -116,31 +116,43 @@ func (s *Service) AttachRef(ctx context.Context, v Viewer, workID uuid.UUID, ref
 	if se.GetKey() == "" {
 		se.Key = ref.Key
 	}
-	return s.attachSeries(ctx, v, workID, ref.SourceID, se.GetKey(), se.GetTitle(), se.GetUrl(), se.GetCoverUrl(), origin)
+	return s.attachSeries(ctx, v, workID, ref.SourceID, se, origin, Evidence{MatchedTitle: se.GetTitle(), TitleScore: 1})
 }
 
-// AttachURL attaches the series a pasted URL points to.
+// AttachURL attaches the series a pasted URL points to. When the plugin
+// only guessed it (best effort, e.g. the only result of searching the site
+// for the URL), the evidence says so and scores the guess by how well its
+// title matches the work's instead of claiming a certain match.
 func (s *Service) AttachURL(ctx context.Context, v Viewer, workID uuid.UUID, rawURL string) (db.SourceSeries, error) {
-	if _, err := s.Get(ctx, v, workID); err != nil {
+	w, err := s.Get(ctx, v, workID)
+	if err != nil {
 		return db.SourceSeries{}, err
 	}
 	r, err := s.host.ResolveURL(ctx, v.plugins(), rawURL)
 	if err != nil {
 		return db.SourceSeries{}, err
 	}
-	se := r.Series
-	return s.attachSeries(ctx, v, workID, r.Source.ID, se.GetKey(), se.GetTitle(), se.GetUrl(), se.GetCoverUrl(), OriginURL)
+	ev := Evidence{MatchedTitle: r.Series.GetTitle(), TitleScore: 1}
+	if r.BestEffort {
+		names := append([]string{r.Series.GetTitle()}, r.Series.GetAltTitles()...)
+		score, matched, _ := textmatch.Best(names, []string{w.Title})
+		ev = Evidence{EntryTitle: w.Title, MatchedTitle: matched, Query: rawURL, TitleScore: round(score), BestEffort: true}
+		s.log.InfoContext(ctx, "url resolved by best effort", "work", workID, "source", r.Source.ID, "title_score", ev.TitleScore)
+	}
+	return s.attachSeries(ctx, v, workID, r.Source.ID, r.Series, OriginURL, ev)
 }
 
-func (s *Service) attachSeries(ctx context.Context, v Viewer, workID uuid.UUID, sourceID, key, title, url, cover, origin string) (db.SourceSeries, error) {
+// attachSeries makes se the work's attached series on the source; ev says
+// why, and its title score is the series' score.
+func (s *Service) attachSeries(ctx context.Context, v Viewer, workID uuid.UUID, sourceID string, se *sourcev1.Series, origin string, ev Evidence) (db.SourceSeries, error) {
 	var out db.SourceSeries
 	err := s.st.InTx(ctx, func(q *db.Queries, _ pgx.Tx) error {
 		if err := q.DemoteAttached(ctx, db.DemoteAttachedParams{WorkID: workID, SourceID: sourceID}); err != nil {
 			return err
 		}
 		row, err := q.UpsertSourceSeries(ctx, db.UpsertSourceSeriesParams{
-			WorkID: workID, SourceID: sourceID, Key: key, Title: title, Url: url, CoverRef: cover,
-			State: StateAttached, Origin: origin, Score: 1, Evidence: Evidence{MatchedTitle: title, TitleScore: 1}.json(),
+			WorkID: workID, SourceID: sourceID, Key: se.GetKey(), Title: se.GetTitle(), Url: se.GetUrl(), CoverRef: se.GetCoverUrl(),
+			State: StateAttached, Origin: origin, Score: float32(ev.TitleScore), Evidence: ev.json(),
 		})
 		if err != nil {
 			return err
@@ -189,7 +201,7 @@ func (s *Service) AddFromSource(ctx context.Context, v Viewer, ref SourceRef) (F
 		return FromSource{}, err
 	}
 	names := append([]string{se.GetTitle()}, se.GetAltTitles()...)
-	people := append(slices.Clone(se.GetAuthors()), se.GetArtists()...)
+	people := textmatch.RealNames(append(slices.Clone(se.GetAuthors()), se.GetArtists()...))
 	seen := map[string]*EntryCandidate{}
 	var order []string
 	for i, q := range names {
@@ -216,7 +228,7 @@ func (s *Service) AddFromSource(ctx context.Context, v Viewer, ref SourceRef) (F
 		if i < 5 { // full titles and people for the first few
 			if e, err := s.meta.GetEntry(ctx, id, "", v.meta()); err == nil {
 				titles = entryTitles(e, "")
-				if ep := entryPeople(e); len(ep) > 0 && len(people) > 0 {
+				if ep := textmatch.RealNames(entryPeople(e)); len(ep) > 0 && len(people) > 0 {
 					m := textmatch.PeopleOverlap(ep, people)
 					c.AuthorsMatch = &m
 				}

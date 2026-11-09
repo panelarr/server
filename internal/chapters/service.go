@@ -346,8 +346,28 @@ func (s *Service) Unify(ctx context.Context, workID uuid.UUID) (int, error) {
 				return err
 			}
 		}
+		// Chapters no attached series lists any more (e.g. those only a
+		// replaced series had) go, unless a user's progress, bookmark,
+		// downloaded file, pin or pending download points at them: those
+		// stay, marked unavailable.
+		var gone []uuid.UUID
 		for _, c := range existing {
-			if kept[c.ID] || !c.Available {
+			if !kept[c.ID] {
+				gone = append(gone, c.ID)
+			}
+		}
+		deleted := map[uuid.UUID]bool{}
+		if len(gone) > 0 {
+			ids, err := q.DeleteUnreferencedChapters(ctx, db.DeleteUnreferencedChaptersParams{WorkID: workID, Ids: gone})
+			if err != nil {
+				return err
+			}
+			for _, id := range ids {
+				deleted[id] = true
+			}
+		}
+		for _, c := range existing {
+			if kept[c.ID] || deleted[c.ID] || !c.Available {
 				continue
 			}
 			if err := q.UpdateChapter(ctx, db.UpdateChapterParams{ID: c.ID, Volume: c.Volume, Title: c.Title, Available: false}); err != nil {

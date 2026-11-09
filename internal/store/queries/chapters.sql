@@ -56,6 +56,23 @@ UPDATE chapters SET volume = @volume, title = @title, preferred_variant_id = @pr
     reason = @reason, available = @available, updated_at = now()
 WHERE id = @id;
 
+-- name: DeleteUnreferencedChapters :many
+-- Of these chapters of a work (ones no attached series lists any more),
+-- deletes those nothing else points at: no reading progress or bookmark of
+-- any user, no downloaded file, no pinned variant and no download waiting
+-- or running. Their stale variants (of series no longer attached) are
+-- unlinked by the foreign key. Re-attaching the series rebuilds them.
+DELETE FROM chapters
+WHERE chapters.work_id = @work_id AND chapters.id = ANY(@ids::uuid[])
+  AND chapters.pinned_variant_id IS NULL
+  AND NOT EXISTS (SELECT 1 FROM progress WHERE progress.chapter_id = chapters.id)
+  AND NOT EXISTS (SELECT 1 FROM bookmarks WHERE bookmarks.chapter_id = chapters.id)
+  AND NOT EXISTS (SELECT 1 FROM chapter_files WHERE chapter_files.chapter_id = chapters.id)
+  AND NOT EXISTS (
+      SELECT 1 FROM tasks
+      WHERE tasks.dedupe_key = 'download:' || chapters.id::text AND tasks.state IN ('queued', 'running'))
+RETURNING chapters.id;
+
 -- name: SetChapterPin :exec
 UPDATE chapters SET pinned_variant_id = @pinned_variant_id, updated_at = now() WHERE id = @id;
 

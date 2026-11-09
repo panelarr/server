@@ -65,6 +65,12 @@ type Querier interface {
 	DeleteSetting(ctx context.Context, key string) error
 	DeleteSolver(ctx context.Context, id string) (int64, error)
 	DeleteStorage(ctx context.Context, id string) (int64, error)
+	// Of these chapters of a work (ones no attached series lists any more),
+	// deletes those nothing else points at: no reading progress or bookmark of
+	// any user, no downloaded file, no pinned variant and no download waiting
+	// or running. Their stale variants (of series no longer attached) are
+	// unlinked by the foreign key. Re-attaching the series rebuilds them.
+	DeleteUnreferencedChapters(ctx context.Context, arg DeleteUnreferencedChaptersParams) ([]uuid.UUID, error)
 	DeleteUser(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteUserAPIKey(ctx context.Context, arg DeleteUserAPIKeyParams) (int64, error)
 	DeleteUserSession(ctx context.Context, arg DeleteUserSessionParams) (int64, error)

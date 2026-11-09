@@ -9,7 +9,7 @@ Sites name the same series differently (an English title, a romanized one, a tra
 1. It searches with the work's main title, then with its other titles: first those in the source's language, then romanized ones, then English, then the rest (at most 5 searches per source).
 2. It stops at the first search that turns up results whose title is close enough (similarity at least 0.6) to any of the work's titles.
 3. For the best few results it fetches the full details: the authors and artists, and how many chapters there are.
-4. A result is attached automatically when its title matches one of the work's titles exactly (after normalizing case, width, accents and punctuation) **and** it shares an author or artist with the work, and it is the only such result. Everything else is kept as a **candidate** with its evidence (the title that matched, the search, the similarity, whether the people match, the chapter count).
+4. A result is attached automatically when its title matches one of the work's titles exactly (after normalizing case, width, accents and punctuation) **and** it shares an author or artist with the work, and it is the only such result. Placeholder names that sites write for an unknown person ("Unknown", "N/A", "Updating", "Various", "Anonymous" and the like) are nobody: they never count as a shared person, and a result credited only to placeholders has unknown people rather than different ones. Everything else is kept as a **candidate** with its evidence (the title that matched, the search, the similarity, whether the people match, the chapter count).
 
 Each source then shows one of: matched, candidates, no match, or failed (with the reason, e.g. the site being down; the task retries).
 
@@ -17,10 +17,16 @@ Each source then shows one of: matched, candidates, no match, or failed (with th
 
 Users with the `may_manage_matches` grant (and admins) can:
 
-- attach a candidate, or another series by source and key, or by pasting its URL (a plugin that recognises the URL resolves it);
+- attach a candidate, or another series by source and key, or by pasting its URL (see below);
 - detach a series: it is remembered as rejected and never attached automatically again;
 - set a series' priority (used when the same chapter is on several sources);
 - run matching again (optionally including sources that already have a series; attached series stay).
+
+Attaching another series on a source replaces the one attached there (it becomes a candidate). The work's chapters are rebuilt: chapters only the old series had go, except those someone's progress or bookmark, a downloaded file or a pin points at (see [Chapters](#chapters)).
+
+### Attaching by URL
+
+A pasted URL is offered to every enabled plugin that has a source the user may use: first the plugins with a source that resolves URLs natively (the `resolve_url` capability), then the others, which may still find the series another way, for example by searching the site for the URL. A plugin that doesn't implement URL resolution, fails or doesn't know the URL is skipped; when none knows it the answer is `url_unknown`. A plugin may say it only guessed the series (**best effort**, e.g. the only result of a search): a certain answer from another plugin wins over a guess. A guess is attached with `evidence.best_effort` set, its `title_score` (and the series' score) comparing the series' titles with the work's title, the URL as the evidence's query, and is logged; clients should ask the user to check it. A certain answer is attached with a title score of 1, like any series picked by hand.
 
 ## Adding from a source
 
@@ -47,7 +53,7 @@ Each chapter shows one chosen copy and why:
 5. `priority`: the series' priority for the work;
 6. `newest_upload`, then `first_listed`.
 
-`only_source` means just one source has it. A chapter no source lists any more stays (progress and files may point at it) but shows as unavailable.
+`only_source` means just one source has it. A chapter no attached series lists any more (the source dropped it, or only a replaced or detached series had it) is deleted when nothing points at it. It stays, shown as unavailable, while any user's reading progress or bookmark, a downloaded file, a pinned copy or a waiting or running download points at it; it becomes available again (same chapter) when a source lists it again. A deleted chapter comes back as a new chapter when a series that lists it is attached again.
 
 ### When a source goes away
 

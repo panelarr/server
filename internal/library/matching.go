@@ -246,7 +246,7 @@ func (s *Service) handleMatchSource(ctx context.Context, t *queue.Task) (any, er
 	}
 	cfg := s.matchSettings(ctx)
 	titles := entryTitles(e, src.Lang)
-	people := entryPeople(e)
+	people := textmatch.RealNames(entryPeople(e))
 	key := s.limits.For("source:" + src.ID)
 
 	var (
@@ -341,8 +341,8 @@ func (s *Service) handleMatchSource(ctx context.Context, t *queue.Task) (any, er
 		}
 		srcPeople := append(slices.Clone(full.GetAuthors()), full.GetArtists()...)
 		c.evidence.SourceAuthors = srcPeople
-		if len(srcPeople) > 0 && len(people) > 0 {
-			overlap := textmatch.PeopleOverlap(people, srcPeople)
+		if real := textmatch.RealNames(srcPeople); len(real) > 0 && len(people) > 0 {
+			overlap := textmatch.PeopleOverlap(people, real)
 			c.evidence.AuthorsMatch = &overlap
 		}
 		if err := key.Wait(ctx); err != nil {

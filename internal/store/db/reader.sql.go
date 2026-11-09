@@ -491,19 +491,24 @@ INSERT INTO progress (user_id, chapter_id, work_id, page, pages, completed)
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (user_id, chapter_id) DO UPDATE SET
     page = EXCLUDED.page, pages = COALESCE(EXCLUDED.pages, progress.pages),
-    completed = EXCLUDED.completed, updated_at = now()
+    completed = CASE WHEN $7::boolean THEN EXCLUDED.completed
+                     ELSE progress.completed OR EXCLUDED.completed END,
+    updated_at = now()
 RETURNING user_id, chapter_id, work_id, page, pages, completed, updated_at
 `
 
 type UpsertProgressParams struct {
-	UserID    uuid.UUID
-	ChapterID uuid.UUID
-	WorkID    uuid.UUID
-	Page      int32
-	Pages     *int32
-	Completed bool
+	UserID       uuid.UUID
+	ChapterID    uuid.UUID
+	WorkID       uuid.UUID
+	Page         int32
+	Pages        *int32
+	Completed    bool
+	SetCompleted bool
 }
 
+// A chapter once read stays read when it is opened again: only an explicit
+// completed (set_completed) can clear it.
 func (q *Queries) UpsertProgress(ctx context.Context, arg UpsertProgressParams) (Progress, error) {
 	row := q.db.QueryRow(ctx, upsertProgress,
 		arg.UserID,
@@ -512,6 +517,7 @@ func (q *Queries) UpsertProgress(ctx context.Context, arg UpsertProgressParams) 
 		arg.Page,
 		arg.Pages,
 		arg.Completed,
+		arg.SetCompleted,
 	)
 	var i Progress
 	err := row.Scan(

@@ -7,11 +7,14 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
 	sourcev1 "github.com/panelarr/source-api/gen/panelarr/source/v1"
 	"github.com/panelarr/source-api/sdk/client"
+
+	"github.com/panelarr/server/internal/store/db"
 )
 
 // fakeClock is a clock whose sleeps only move its time forward.
@@ -102,5 +105,49 @@ func TestAwaitReachableStopsWithTheServer(t *testing.T) {
 	c := &lateClient{clock: clock, up: clock.t.Add(time.Hour)}
 	if err := h.awaitReachable(ctx, "gone", c); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err %v", err)
+	}
+}
+
+// While Load waits out the startup window for a plugin that doesn't answer,
+// the plugins after it already have their clients: they are usable instead
+// of "not found" until the first one gives up.
+func TestLoadMakesEveryClientAvailableBeforeWaiting(t *testing.T) {
+	t.Parallel()
+	clock := &fakeClock{t: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+	h := startingHost(clock)
+	h.clients = map[string]client.Client{}
+	down := &lateClient{clock: clock, up: clock.t.Add(time.Hour)}
+	up := &lateClient{clock: clock, up: clock.t}
+	h.dial = func(url, _ string) client.Client {
+		if url == "http://down" {
+			return down
+		}
+		return up
+	}
+	var waits, without int
+	h.sleep = func(ctx context.Context, d time.Duration) bool {
+		waits++
+		if h.loaded("b") != up {
+			without++
+		}
+		return clock.sleep(ctx, d)
+	}
+	rows := []db.Plugin{
+		{ID: "a", Url: "http://down", Enabled: true},
+		{ID: "b", Url: "http://up", Enabled: true},
+	}
+	var started []string
+	h.load(context.Background(), rows, func(ctx context.Context, p db.Plugin, c client.Client) {
+		started = append(started, p.ID)
+		_ = h.awaitReachable(ctx, p.ID, c)
+	})
+	if waits == 0 {
+		t.Fatal("never waited for the plugin that is down")
+	}
+	if without > 0 {
+		t.Fatalf("b had no client during %d of %d waits for a", without, waits)
+	}
+	if !slices.Equal(started, []string{"a", "b"}) {
+		t.Fatalf("started %v", started)
 	}
 }

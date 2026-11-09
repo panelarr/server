@@ -282,6 +282,20 @@ func (h *Host) Load(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	h.load(ctx, rows, h.start)
+	return nil
+}
+
+// load dials every plugin and makes its client available first, then starts
+// the enabled ones one at a time. Starting one can take the whole startup
+// window when it doesn't answer, and the plugins after it must not be
+// missing their clients ("plugin not found") for that long.
+func (h *Host) load(ctx context.Context, rows []db.Plugin, start func(context.Context, db.Plugin, client.Client)) {
+	type dialed struct {
+		p db.Plugin
+		c client.Client
+	}
+	var enabled []dialed
 	for _, p := range rows {
 		key, err := h.open(p.ApiKey)
 		if err != nil {
@@ -290,18 +304,25 @@ func (h *Host) Load(ctx context.Context) error {
 		}
 		c := h.dial(p.Url, key)
 		h.setClient(p.ID, c)
-		if !p.Enabled {
-			continue
-		}
-		_ = h.awaitReachable(ctx, p.ID, c) // still not answering: the sync records it down
-		if err := h.pushConfig(ctx, p); err != nil {
-			h.log.WarnContext(ctx, "plugin config", "plugin", p.ID, "err", err)
-		}
-		if _, err := h.Sync(ctx, p.ID); err != nil {
-			h.log.WarnContext(ctx, "plugin sync", "plugin", p.ID, "err", err)
+		if p.Enabled {
+			enabled = append(enabled, dialed{p, c})
 		}
 	}
-	return nil
+	for _, d := range enabled {
+		start(ctx, d.p, d.c)
+	}
+}
+
+// start waits for a plugin to answer, hands it its configuration and syncs
+// its sources.
+func (h *Host) start(ctx context.Context, p db.Plugin, c client.Client) {
+	_ = h.awaitReachable(ctx, p.ID, c) // still not answering: the sync records it down
+	if err := h.pushConfig(ctx, p); err != nil {
+		h.log.WarnContext(ctx, "plugin config", "plugin", p.ID, "err", err)
+	}
+	if _, err := h.Sync(ctx, p.ID); err != nil {
+		h.log.WarnContext(ctx, "plugin sync", "plugin", p.ID, "err", err)
+	}
 }
 
 // Client returns the client of an enabled plugin.
@@ -316,13 +337,17 @@ func (h *Host) Client(ctx context.Context, id string) (client.Client, error) {
 	if !p.Enabled {
 		return nil, ErrDisabled
 	}
-	h.mu.RLock()
-	c := h.clients[id]
-	h.mu.RUnlock()
-	if c == nil {
-		return nil, ErrNotFound
+	if c := h.loaded(id); c != nil {
+		return c, nil
 	}
-	return c, nil
+	return nil, ErrNotFound
+}
+
+// loaded is the client dialed for a plugin, nil if none.
+func (h *Host) loaded(id string) client.Client {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.clients[id]
 }
 
 func (h *Host) decode(p db.Plugin, counts map[string]int64) Plugin {

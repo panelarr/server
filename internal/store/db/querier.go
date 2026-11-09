@@ -31,17 +31,20 @@ type Querier interface {
 	ClaimCandidates(ctx context.Context, arg ClaimCandidatesParams) ([]Task, error)
 	ClearDefaultStorage(ctx context.Context) error
 	ClearHistory(ctx context.Context, userID uuid.UUID) error
+	ClearLibraryViewDefault(ctx context.Context, arg ClearLibraryViewDefaultParams) error
 	CountAttachedByWork(ctx context.Context, workIds []uuid.UUID) ([]CountAttachedByWorkRow, error)
 	CountBookmarks(ctx context.Context, arg CountBookmarksParams) ([]CountBookmarksRow, error)
 	CountChaptersByWork(ctx context.Context, arg CountChaptersByWorkParams) ([]CountChaptersByWorkRow, error)
 	CountDownloadedByWork(ctx context.Context, workIds []uuid.UUID) ([]CountDownloadedByWorkRow, error)
 	CountEnabledAdmins(ctx context.Context) (int64, error)
 	CountFilesByStorage(ctx context.Context, storageID string) (int64, error)
+	CountLibraryViews(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountSourcesByPlugin(ctx context.Context) ([]CountSourcesByPluginRow, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
 	CreateInvite(ctx context.Context, arg CreateInviteParams) (Invite, error)
 	CreateJobRun(ctx context.Context, arg CreateJobRunParams) (JobRun, error)
+	CreateLibraryView(ctx context.Context, arg CreateLibraryViewParams) (LibraryView, error)
 	CreatePlugin(ctx context.Context, arg CreatePluginParams) (Plugin, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateStorage(ctx context.Context, arg CreateStorageParams) (Storage, error)
@@ -52,6 +55,7 @@ type Querier interface {
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	DeleteImageRetrySetting(ctx context.Context, arg DeleteImageRetrySettingParams) (int64, error)
 	DeleteInvite(ctx context.Context, id uuid.UUID) (int64, error)
+	DeleteLibraryView(ctx context.Context, arg DeleteLibraryViewParams) (LibraryView, error)
 	DeletePlugin(ctx context.Context, id string) (int64, error)
 	DeleteProfile(ctx context.Context, id string) (int64, error)
 	DeleteProgress(ctx context.Context, arg DeleteProgressParams) error
@@ -85,6 +89,7 @@ type Querier interface {
 	GetImageRetrySetting(ctx context.Context, arg GetImageRetrySettingParams) (ImageRetrySetting, error)
 	GetJobRun(ctx context.Context, id uuid.UUID) (JobRun, error)
 	GetLibraryEntry(ctx context.Context, arg GetLibraryEntryParams) (LibraryEntry, error)
+	GetLibraryView(ctx context.Context, arg GetLibraryViewParams) (LibraryView, error)
 	GetLiveTaskByDedupeKey(ctx context.Context, dedupeKey string) (Task, error)
 	GetOpenInviteByTokenHash(ctx context.Context, tokenHash []byte) (Invite, error)
 	GetOpenInviteByTokenHashForUpdate(ctx context.Context, tokenHash []byte) (Invite, error)
@@ -123,7 +128,8 @@ type Querier interface {
 	// Returns no row when a live task with the same dedupe key exists.
 	InsertTask(ctx context.Context, arg InsertTaskParams) (Task, error)
 	LastJobRuns(ctx context.Context) ([]JobRun, error)
-	// The chapters of some works, with when their chosen copy was uploaded.
+	// The chapters of some works, with when their chosen copy was uploaded
+	// and when a later check found them.
 	LibraryChapters(ctx context.Context, workIds []uuid.UUID) ([]LibraryChaptersRow, error)
 	LibraryProgress(ctx context.Context, arg LibraryProgressParams) ([]Progress, error)
 	LibraryUserIDs(ctx context.Context, workID uuid.UUID) ([]uuid.UUID, error)
@@ -142,6 +148,7 @@ type Querier interface {
 	// A user's library by title, after a (sort_title, id) cursor. Content
 	// filters run in Go (they depend on the user's grants).
 	ListLibrary(ctx context.Context, arg ListLibraryParams) ([]ListLibraryRow, error)
+	ListLibraryViews(ctx context.Context, userID uuid.UUID) ([]LibraryView, error)
 	ListOpenInvites(ctx context.Context) ([]Invite, error)
 	ListPlugins(ctx context.Context) ([]Plugin, error)
 	ListProfiles(ctx context.Context) ([]NetworkProfile, error)
@@ -161,6 +168,9 @@ type Querier interface {
 	// Serialises changes that check "is there another admin?" or "is this the
 	// first account?" within one transaction.
 	LockAccounts(ctx context.Context) error
+	// Serialises changes to one user's views, so the limit, the single
+	// default and the order hold under concurrent requests.
+	LockLibraryViews(ctx context.Context, userID uuid.UUID) error
 	LockWork(ctx context.Context, id uuid.UUID) error
 	MarkInviteUsed(ctx context.Context, arg MarkInviteUsedParams) error
 	MarkLibrarySeen(ctx context.Context, arg MarkLibrarySeenParams) (int64, error)
@@ -169,6 +179,7 @@ type Querier interface {
 	MoveChapterFile(ctx context.Context, arg MoveChapterFileParams) error
 	// Chapters found after each library entry was last seen.
 	NewChaptersForUser(ctx context.Context, arg NewChaptersForUserParams) ([]NewChaptersForUserRow, error)
+	OrderLibraryViews(ctx context.Context, arg OrderLibraryViewsParams) error
 	PruneFinishedTasks(ctx context.Context, before *time.Time) (int64, error)
 	PruneJobRuns(ctx context.Context, arg PruneJobRunsParams) (int64, error)
 	PutImageRetrySetting(ctx context.Context, arg PutImageRetrySettingParams) (ImageRetrySetting, error)
@@ -186,6 +197,7 @@ type Querier interface {
 	SetChapterPin(ctx context.Context, arg SetChapterPinParams) error
 	SetDefaultStorage(ctx context.Context, id string) (int64, error)
 	SetJobRunProgress(ctx context.Context, arg SetJobRunProgressParams) error
+	SetLibraryViewDefault(ctx context.Context, arg SetLibraryViewDefaultParams) error
 	SetPluginConfig(ctx context.Context, arg SetPluginConfigParams) error
 	SetPluginState(ctx context.Context, arg SetPluginStateParams) (Plugin, error)
 	SetSeriesChecked(ctx context.Context, arg SetSeriesCheckedParams) error
@@ -197,6 +209,8 @@ type Querier interface {
 	// installed packages still provide in a language turned off.
 	SetUnavailableReasons(ctx context.Context, arg SetUnavailableReasonsParams) error
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
+	// Closes the gap a deleted view left in the order.
+	ShiftLibraryViewsUp(ctx context.Context, arg ShiftLibraryViewsUpParams) error
 	StartTask(ctx context.Context, arg StartTaskParams) (Task, error)
 	TaskStats(ctx context.Context) ([]TaskStatsRow, error)
 	TouchAPIKey(ctx context.Context, id uuid.UUID) error
@@ -207,6 +221,7 @@ type Querier interface {
 	UpdateChapter(ctx context.Context, arg UpdateChapterParams) error
 	// How the chapter checks of these works' attached series stand.
 	UpdateChecksOf(ctx context.Context, workIds []uuid.UUID) (UpdateChecksOfRow, error)
+	UpdateLibraryView(ctx context.Context, arg UpdateLibraryViewParams) (LibraryView, error)
 	UpdatePlugin(ctx context.Context, arg UpdatePluginParams) (Plugin, error)
 	UpdateProfile(ctx context.Context, arg UpdateProfileParams) (NetworkProfile, error)
 	UpdateProxy(ctx context.Context, arg UpdateProxyParams) (NetworkProxy, error)

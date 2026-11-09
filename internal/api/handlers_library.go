@@ -364,4 +364,5 @@ func (s *Server) DetachSeries(ctx context.Context, req apigen.DetachSeriesReques
 func withStats(le *apigen.LibraryEntry, st reader.ReadingStats) {
 	le.Chapters, le.Unread, le.Downloaded, le.Started = st.Chapters, st.Unread, st.Downloaded, st.Started
 	le.ContinueChapterId, le.LastReadAt, le.LatestChapterAt = st.Continue, st.LastReadAt, st.LatestChapterAt
+	le.LastUpdatedAt = st.LastUpdatedAt
 }

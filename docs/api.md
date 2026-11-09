@@ -30,6 +30,17 @@ Sources are an admin concern. Listing sources (`GET /sources`) and browsing one 
 
 Users with `may_manage_matches` search one of a work's sources by hand with `POST /works/{work_id}/sources/{source_id}/search`: the same request and results as the source search, each result marked with `match` when the work already knows it. The source must be usable and within the caller's source grants. Regular users see sources only where they belong to a work: `GET /works/{work_id}` lists the work's sources with their language and health, and `GET /works/{work_id}/series/{series_id}/chapters` lists one source's chapters of it. A user's source grants (`all_sources`, `allowed_sources`) decide which sources may serve their works. Two source endpoints stay open to users: `GET /sources/{source_id}/image`, which only serves links the server signed (a work's series covers, and sources' icons), and `POST /library/from-source`, which still checks the caller's grants and `may_add`.
 
+## Saved library views
+
+Each user keeps named views of their own library under `/me/library-views`: a name, and a `LibraryViewDefinition` with tri-state filters (`include` or `exclude` for `unread`, `started`, `downloaded`, `bookmarked` and `new`), work types and statuses, `updated_within_days`, a sort, `reverse` and display settings. The server only stores and validates views; clients apply them to the library (`GET /library` is unchanged). Unknown keys and values are refused, so a new filter or sort needs a server that knows it.
+
+- `GET /me/library-views` lists the caller's views in their order; `POST` adds one at the end (`201`); `GET`, `PATCH` and `DELETE /me/library-views/{id}` read, change and delete one; `PUT /me/library-views/order` takes all of the caller's view IDs in the new order.
+- Every user with views has exactly one default. The first view is the default; `default: true` on create or change moves the mark. Deleting the default passes it to the first remaining view.
+- Limits: 50 views, names of 1 to 60 characters (trimmed) unique per user ignoring case, definitions of at most 4 KiB, at most 20 types and 20 statuses of up to 40 characters each, `updated_within_days` from 1 to 365.
+- Error codes (all `409` except validation): `name_taken`, `view_limit`, `default_required` (`default: false` on the default view), `last_view` (deleting the only view), `order_mismatch` (the order doesn't list each view exactly once). Invalid names and definitions answer `400 invalid_request`.
+- Views are private: another user's view answers `404` on every call, like a missing one, and there is no admin API for them. Deleting a user deletes their views.
+- Changes publish `library_views.changed` on the owner's event streams only; other devices refetch the list.
+
 ## Changes within v1
 
 Endpoints and fields are only added within v1, with one deliberate exception:

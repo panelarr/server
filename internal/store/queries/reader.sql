@@ -91,9 +91,10 @@ WHERE user_id = @user_id AND work_id = ANY(@work_ids::uuid[])
 GROUP BY work_id;
 
 -- name: LibraryChapters :many
--- The chapters of some works, with when their chosen copy was uploaded.
+-- The chapters of some works, with when their chosen copy was uploaded
+-- and when a later check found them.
 SELECT chapters.id, chapters.work_id, chapters.number, chapters.available, chapters.created_at,
-       source_chapters.uploaded_at
+       chapters.appeared_at, source_chapters.uploaded_at
 FROM chapters LEFT JOIN source_chapters ON source_chapters.id = chapters.preferred_variant_id
 WHERE chapters.work_id = ANY(@work_ids::uuid[]);
 

@@ -44,6 +44,13 @@ Everything an admin does in mihon-source's or meta's own admin can be done from 
 - [x] **S3. Plugin jobs:** the shared jobs view for plugins with the `jobs` capability (`PluginJob*`, the server's job shapes with the plugin's own run IDs); run now on behalf of the admin, cancel.
 - [x] **S4. Package origins and details:** origins (stores) with their state and refresh now, package details (signing fingerprint, API version, checksum, origin) and reload, the per-source health check switch (`health_checks` capability).
 
+## Saved library views
+
+Each user keeps named views of their own library (filters, sort, display). The server stores them; the web app still filters the whole library in the browser.
+
+- [x] **S1. Recently updated:** library entries carry `last_updated_at`, when a later check last found one of the work's available chapters (the updates feed's "appeared"), for a "Recently updated" sort and an "updated within" filter.
+- [x] **S2. Views storage and API:** `/me/library-views` (list, create, read, change, delete, order) with a validated definition, one default and an order per user, limits, and a `library_views.changed` event to the owner.
+
 ## Working assumptions
 
 Settled for now, cheap to change:

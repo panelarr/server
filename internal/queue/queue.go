@@ -248,30 +248,40 @@ func (q *Queue) EnqueueWith(ctx context.Context, dbq *db.Queries, n NewTask) (db
 		runAfter = time.Now()
 	}
 	createdBy := uuid.NullUUID{UUID: n.CreatedBy, Valid: n.CreatedBy != uuid.Nil}
-	t, err := dbq.InsertTask(ctx, db.InsertTaskParams{
-		Kind: n.Kind, Payload: payload, DedupeKey: n.DedupeKey, LimitKey: n.LimitKey, Priority: n.Priority,
-		MaxAttempts: int32(k.MaxAttempts), RunAfter: runAfter, CreatedBy: createdBy, //nolint:gosec // small
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		// The same work is queued or running: asking again brings a queued
-		// one forward.
-		hurried, herr := dbq.HurryTask(ctx, db.HurryTaskParams{DedupeKey: n.DedupeKey, RunAfter: runAfter, Priority: n.Priority})
-		if herr == nil {
-			q.poke()
-			return hurried, false, nil
+	for {
+		t, err := dbq.InsertTask(ctx, db.InsertTaskParams{
+			Kind: n.Kind, Payload: payload, DedupeKey: n.DedupeKey, LimitKey: n.LimitKey, Priority: n.Priority,
+			MaxAttempts: int32(k.MaxAttempts), RunAfter: runAfter, CreatedBy: createdBy, //nolint:gosec // small
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The same work is queued or running: asking again brings a
+			// queued one forward.
+			hurried, herr := dbq.HurryTask(ctx, db.HurryTaskParams{DedupeKey: n.DedupeKey, RunAfter: runAfter, Priority: n.Priority})
+			if herr == nil {
+				q.poke()
+				return hurried, false, nil
+			}
+			if !errors.Is(herr, pgx.ErrNoRows) {
+				return db.Task{}, false, herr
+			}
+			live, err := dbq.GetLiveTaskByDedupeKey(ctx, n.DedupeKey)
+			if errors.Is(err, pgx.ErrNoRows) {
+				// The live task ended since the insert: nothing would do
+				// the work asked for now, so insert again.
+				if err := ctx.Err(); err != nil {
+					return db.Task{}, false, err
+				}
+				continue
+			}
+			return live, false, err
 		}
-		if !errors.Is(herr, pgx.ErrNoRows) {
-			return db.Task{}, false, herr
+		if err != nil {
+			return db.Task{}, false, err
 		}
-		live, err := dbq.GetLiveTaskByDedupeKey(ctx, n.DedupeKey)
-		return live, false, err
+		q.publish("task.queued", t, nil)
+		q.poke()
+		return t, true, nil
 	}
-	if err != nil {
-		return db.Task{}, false, err
-	}
-	q.publish("task.queued", t, nil)
-	q.poke()
-	return t, true, nil
 }
 
 // Run claims and runs tasks until ctx ends, then waits for running tasks

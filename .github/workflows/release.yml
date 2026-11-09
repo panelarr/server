@@ -31,11 +31,28 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
+          path: server
           fetch-depth: 0
+
+      # The sibling modules go.mod's replace directives point at. The image is
+      # built from the release binaries (Dockerfile.release), so only the Go
+      # build needs them.
+      - uses: actions/checkout@v5
+        with:
+          repository: panelarr/meta
+          ref: main
+          path: meta
+
+      - uses: actions/checkout@v5
+        with:
+          repository: panelarr/source-api
+          ref: main
+          path: source-api
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -51,6 +68,7 @@ jobs:
           distribution: goreleaser
           version: "~> v2"
           args: release --clean
+          workdir: server
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # The web app release embedded into the binaries and image.

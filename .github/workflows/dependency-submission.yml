@@ -1,0 +1,55 @@
+name: Dependency submission
+
+# GitHub's dependency graph doesn't resolve Go modules on its own. This resolves the
+# module graph of every package on main and submits it, so the server's Go libraries
+# show up in the dependency graph and get Dependabot alerts. It can also be run by hand
+# to refresh the graph.
+
+on:
+  push:
+    branches: [main, ci/server-go-dependency-submission] # TEMP: test run, removed before review
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-submission-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Submit Go dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Writing to the dependency graph API needs contents: write.
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: server
+
+      # Until meta and source-api publish tagged versions, go.mod points at
+      # sibling checkouts with replace directives (the same layout as ci.yml).
+      - uses: actions/checkout@v5
+        with:
+          repository: panelarr/meta
+          ref: main
+          path: meta
+
+      - uses: actions/checkout@v5
+        with:
+          repository: panelarr/source-api
+          ref: main
+          path: source-api
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - uses: actions/go-dependency-submission@v2
+        with:
+          go-mod-path: server/go.mod
+          go-build-target: ./...

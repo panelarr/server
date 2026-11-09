@@ -91,6 +91,10 @@ type Host struct {
 	bg         context.Context //nolint:containedctx // the host's lifetime, for rechecks
 	recheck    []time.Duration
 	grace      []time.Duration
+	window     time.Duration
+	started    time.Time // when Load began: the startup window counts from here
+	now        func() time.Time
+	sleep      func(context.Context, time.Duration) bool
 	followUp   []time.Duration
 	rechecking map[string]*chain
 	hub        *events.Hub
@@ -161,7 +165,8 @@ func NewHost(st *store.Store, box *secret.Box, dial Dialer, log *slog.Logger) *H
 	}
 	return &Host{
 		st: st, box: box, dial: dial, log: log, clients: map[string]client.Client{},
-		recheck: slices.Clone(DefaultRecheck), grace: slices.Clone(DefaultStartupGrace),
+		recheck: slices.Clone(DefaultRecheck), grace: slices.Clone(DefaultStartupGrace), window: DefaultStartupWindow,
+		now: time.Now, sleep: sleepCtx,
 		followUp: slices.Clone(DefaultConfigFollowUp), rechecking: map[string]*chain{}, instances: map[string]string{},
 		imageRetries: slices.Clone(DefaultImageRetries),
 	}
@@ -271,6 +276,7 @@ func (h *Host) setClient(id string, c client.Client) {
 func (h *Host) Load(ctx context.Context) error {
 	h.rmu.Lock()
 	h.bg = ctx
+	h.started = h.now()
 	h.rmu.Unlock()
 	rows, err := h.st.ListPlugins(ctx)
 	if err != nil {
@@ -282,11 +288,12 @@ func (h *Host) Load(ctx context.Context) error {
 			h.log.ErrorContext(ctx, "plugin key", "plugin", p.ID, "err", err)
 			continue
 		}
-		h.setClient(p.ID, h.dial(p.Url, key))
+		c := h.dial(p.Url, key)
+		h.setClient(p.ID, c)
 		if !p.Enabled {
 			continue
 		}
-		h.awaitReachable(ctx, p.ID)
+		_ = h.awaitReachable(ctx, p.ID, c) // still not answering: the sync records it down
 		if err := h.pushConfig(ctx, p); err != nil {
 			h.log.WarnContext(ctx, "plugin config", "plugin", p.ID, "err", err)
 		}

@@ -7,7 +7,7 @@ name: Dependency submission
 
 on:
   push:
-    branches: [main, ci/server-go-dependency-submission] # TEMP: test run, removed before review
+    branches: [main]
   workflow_dispatch:
 
 permissions:

@@ -122,7 +122,7 @@ func (s *Service) AttachRef(ctx context.Context, v Viewer, workID uuid.UUID, ref
 // AttachURL attaches the series a pasted URL points to. When the plugin
 // only guessed it (best effort, e.g. the only result of searching the site
 // for the URL), the evidence says so and scores the guess by how well its
-// title matches the work's instead of claiming a certain match.
+// titles match the work's instead of claiming a certain match.
 func (s *Service) AttachURL(ctx context.Context, v Viewer, workID uuid.UUID, rawURL string) (db.SourceSeries, error) {
 	w, err := s.Get(ctx, v, workID)
 	if err != nil {
@@ -134,9 +134,18 @@ func (s *Service) AttachURL(ctx context.Context, v Viewer, workID uuid.UUID, raw
 	}
 	ev := Evidence{MatchedTitle: r.Series.GetTitle(), TitleScore: 1}
 	if r.BestEffort {
+		// Against all of the work's titles when the catalogue answers (a
+		// site may use the original-language one), else its main title.
+		titles := []string{w.Title}
+		if e, err := s.meta.GetEntry(ctx, w.MetaEntryID, "", v.meta()); err == nil {
+			titles = entryTitles(e, "")
+		}
 		names := append([]string{r.Series.GetTitle()}, r.Series.GetAltTitles()...)
-		score, matched, _ := textmatch.Best(names, []string{w.Title})
-		ev = Evidence{EntryTitle: w.Title, MatchedTitle: matched, Query: rawURL, TitleScore: round(score), BestEffort: true}
+		score, matched, entryTitle := textmatch.Best(names, titles)
+		if entryTitle == "" {
+			matched, entryTitle = r.Series.GetTitle(), w.Title
+		}
+		ev = Evidence{EntryTitle: entryTitle, MatchedTitle: matched, Query: rawURL, TitleScore: round(score), BestEffort: true}
 		s.log.InfoContext(ctx, "url resolved by best effort", "work", workID, "source", r.Source.ID, "title_score", ev.TitleScore)
 	}
 	return s.attachSeries(ctx, v, workID, r.Source.ID, r.Series, OriginURL, ev)

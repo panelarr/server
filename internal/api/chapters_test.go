@@ -14,6 +14,7 @@ import (
 	"github.com/panelarr/source-api/sdk/plugintest"
 
 	"github.com/panelarr/server/internal/api/apigen"
+	"github.com/panelarr/server/internal/downloads"
 	"github.com/panelarr/server/internal/store/db"
 )
 
@@ -115,9 +116,10 @@ func TestUnifiedChapters(t *testing.T) {
 	}
 
 	// The German source gets chapter 4 and an extra; the English source
-	// drops chapter 1. A refresh picks it all up. Chapter 1 was started, so
-	// it stays, unavailable (one nobody touched would go).
-	call[apigen.ChapterProgress](user, http.MethodPut, "/api/v1/chapters/"+chapterNumbered(chs, 1).Id.String()+"/progress", map[string]int{"page": 1, "pages": 4}, 200)
+	// drops chapter 1. A refresh picks it all up. Nobody touched chapter 1,
+	// but the attached series still have it (absent), so it stays,
+	// unavailable, with the same ID.
+	c1 := chapterNumbered(chs, 1)
 	de := f.plugin.Sources[1].Series[0]
 	four := 4.0
 	de.Chapters = append([]*plugintest.Chapter{
@@ -131,9 +133,12 @@ func TestUnifiedChapters(t *testing.T) {
 		t.Fatalf("queued %d", q.Queued)
 	}
 	chs = waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool {
-		c1 := chapterNumbered(cs, 1)
-		return len(cs) == 5 && chapterNumbered(cs, 4) != nil && c1 != nil && !c1.Available
+		c := chapterNumbered(cs, 1)
+		return len(cs) == 5 && chapterNumbered(cs, 4) != nil && c != nil && !c.Available
 	})
+	if chapterNumbered(chs, 1).Id != c1.Id {
+		t.Fatal("chapter 1 was rebuilt")
+	}
 	c4 := chapterNumbered(chs, 4)
 	if c4.Variants != 1 || c4.Reason != "only_source" || !c4.New || c4.Chosen.SourceId != "fake:2001" {
 		t.Fatalf("chapter 4 %+v", c4)
@@ -177,34 +182,58 @@ func TestUnifyAllReadsNamesAgain(t *testing.T) {
 
 func TestReattachRemovesGhostChapters(t *testing.T) {
 	t.Parallel()
-	// The English series the matcher attaches has chapters 4–6 (the German
+	// The English series the matcher attaches has chapters 4–9 (the German
 	// one 1–3); the other English series have 1–3.
 	f := newLibraryFixture(t, func(fk *plugintest.Fake) plugin.Plugin {
-		for i, c := range fk.Sources[0].Series[0].Chapters {
-			n := float64(6 - i)
-			c.Chapter.Number, c.Chapter.Name = &n, fmt.Sprintf("Chapter %v", n)
+		se := fk.Sources[0].Series[0]
+		for range 3 {
+			se.Chapters = append(se.Chapters, &plugintest.Chapter{Pages: 4, Chapter: &sourcev1.Chapter{}})
+		}
+		for i, c := range se.Chapters {
+			n := float64(9 - i)
+			c.Chapter.Key, c.Chapter.Number, c.Chapter.Name = fmt.Sprintf("/series/1/%v", n), &n, fmt.Sprintf("Chapter %v", n)
 		}
 		return fk
 	})
 	user, admin := f.user, f.admin
+	ctx := context.Background()
 	entry := call[apigen.LibraryEntry](user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 201)
 	id := entry.Work.Id.String()
 	waitWorkMatched(t, user, id)
-	chs := waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool { return len(cs) == 6 })
-	c4, c5, c6 := chapterNumbered(chs, 4), chapterNumbered(chs, 5), chapterNumbered(chs, 6)
+	chs := waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool { return len(cs) == 9 })
+	c4 := chapterNumbered(chs, 4)
+	var kept []*apigen.UnifiedChapter
+	for n := float32(5); n <= 9; n++ {
+		kept = append(kept, chapterNumbered(chs, n))
+	}
 
-	// The user started chapter 5 and bookmarked chapter 6; nobody touched 4.
+	// Something points at each of 5–9; nobody touched 4. The user started
+	// 5 and bookmarked 6; 7 has a downloaded file, 8 a pinned copy and 9 a
+	// download waiting (far in the future, so it doesn't run).
+	c5, c6, c7, c8, c9 := kept[0], kept[1], kept[2], kept[3], kept[4]
 	call[apigen.ChapterProgress](user, http.MethodPut, "/api/v1/chapters/"+c5.Id.String()+"/progress", map[string]int{"page": 1, "pages": 4}, 200)
 	call[apigen.BookmarkList](user, http.MethodPost, "/api/v1/works/"+id+"/bookmarks", map[string]any{"chapter_ids": []string{c6.Id.String()}, "bookmarked": true}, 200)
+	if _, err := f.h.st.Pool.Exec(ctx, `INSERT INTO chapter_files (chapter_id, storage_id, key, pages, bytes, sha256)
+		SELECT $1, id, 'ghost-test.cbz', 4, 1, 'x' FROM storages WHERE is_default`, c7.Id); err != nil {
+		t.Fatal(err)
+	}
+	call[apigen.ChapterDetail](admin, http.MethodPut, "/api/v1/works/"+id+"/chapters/"+c8.Id.String()+"/pin", map[string]any{"variant_id": c8.Chosen.Id}, 200)
+	if _, err := f.h.st.Pool.Exec(ctx, `INSERT INTO tasks (kind, dedupe_key, run_after) VALUES ($1, $2, now() + interval '1 day')`,
+		downloads.KindDownload, "download:"+c9.Id.String()); err != nil {
+		t.Fatal(err)
+	}
 
 	// Replacing the English series with another one (chapters 1–3): chapter
-	// 4 only the old series had goes; 5 and 6 stay, unavailable.
+	// 4 only the old series had goes; 5–9 stay, unavailable.
 	call[apigen.MatchSeries](admin, http.MethodPost, "/api/v1/works/"+id+"/series", map[string]string{"source_id": "fake:1001", "key": "/series/2"}, 201)
 	chs = waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool {
 		c1 := chapterNumbered(cs, 1) // once the new series' chapters are in
-		return chapterNumbered(cs, 4) == nil && len(cs) == 5 && c1 != nil && c1.Variants == 2
+		return chapterNumbered(cs, 4) == nil && c1 != nil && c1.Variants == 2
 	})
-	for _, c := range []*apigen.UnifiedChapter{c5, c6} {
+	if len(chs) != 8 {
+		t.Fatalf("%d chapters: %+v", len(chs), chs)
+	}
+	for _, c := range kept {
 		got := chapterNumbered(chs, *c.Number)
 		if got == nil || got.Id != c.Id || got.Available {
 			t.Fatalf("chapter %v: %+v", *c.Number, got)
@@ -217,10 +246,55 @@ func TestReattachRemovesGhostChapters(t *testing.T) {
 	}
 	user.expectProblem(http.MethodGet, "/api/v1/works/"+id+"/chapters/"+c4.Id.String(), nil, 404, CodeNotFound)
 
-	// Attaching the old series again brings its chapters back.
+	// Attaching the old series again brings its chapters back; those that
+	// stayed keep their IDs.
 	call[apigen.MatchSeries](admin, http.MethodPost, "/api/v1/works/"+id+"/series", map[string]string{"source_id": "fake:1001", "key": "/series/1"}, 201)
 	waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool {
-		back4, back5 := chapterNumbered(cs, 4), chapterNumbered(cs, 5)
-		return back4 != nil && back4.Available && back5 != nil && back5.Available && back5.Id == c5.Id
+		if back4 := chapterNumbered(cs, 4); back4 == nil || !back4.Available {
+			return false
+		}
+		for _, c := range kept {
+			if back := chapterNumbered(cs, *c.Number); back == nil || !back.Available || back.Id != c.Id {
+				return false
+			}
+		}
+		return true
 	})
+}
+
+func TestEmptyListingKeepsChapters(t *testing.T) {
+	t.Parallel()
+	f := newLibraryFixture(t)
+	user := f.user
+	entry := call[apigen.LibraryEntry](user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 201)
+	id := entry.Work.Id.String()
+	waitWorkMatched(t, user, id)
+	chs := waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool {
+		return len(cs) == 3 && cs[0].Variants == 2 && cs[2].Variants == 2
+	})
+
+	// Both sources answer with an empty list (a broken site, say). Nobody
+	// touched the chapters, but the attached series still have them
+	// (absent): they stay, unavailable, with the same IDs.
+	f.plugin.Sources[0].Series[0].Chapters = nil
+	f.plugin.Sources[1].Series[0].Chapters = nil
+	if q := call[apigen.RefreshQueued](user, http.MethodPost, "/api/v1/works/"+id+"/refresh", nil, 202); q.Queued != 2 {
+		t.Fatalf("queued %d", q.Queued)
+	}
+	after := waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool {
+		for _, c := range cs {
+			if c.Available {
+				return false
+			}
+		}
+		return true
+	})
+	if len(after) != len(chs) {
+		t.Fatalf("%d chapters left of %d", len(after), len(chs))
+	}
+	for i := range chs {
+		if after[i].Id != chs[i].Id {
+			t.Fatalf("chapter %d rebuilt", i)
+		}
+	}
 }

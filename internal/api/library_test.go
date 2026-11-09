@@ -219,10 +219,13 @@ func TestAddFromSourceAPI(t *testing.T) {
 type searchingResolver struct{ *plugintest.Fake }
 
 func (r searchingResolver) ResolveUrl(_ context.Context, req *sourcev1.ResolveUrlRequest) (*sourcev1.ResolveUrlResponse, error) { //nolint:revive // named after the RPC
-	if req.GetUrl() != "https://example-comics.example/?q=salt" {
-		return nil, plugin.ErrNotFound("nothing found")
+	switch req.GetUrl() {
+	case "https://example-comics.example/?q=salt":
+		return &sourcev1.ResolveUrlResponse{SourceId: "1001", Series: r.Sources[0].Series[1].Series, BestEffort: true}, nil
+	case "https://example-comics.example/?q=leuchtturm": // a site using another of the work's titles
+		return &sourcev1.ResolveUrlResponse{SourceId: "1001", Series: &sourcev1.Series{Key: "/series/de", Title: "Der Leuchtturm"}, BestEffort: true}, nil
 	}
-	return &sourcev1.ResolveUrlResponse{SourceId: "1001", Series: r.Sources[0].Series[1].Series, BestEffort: true}, nil
+	return nil, plugin.ErrNotFound("nothing found")
 }
 
 func TestAttachURLBestEffort(t *testing.T) {
@@ -253,6 +256,13 @@ func TestAttachURLBestEffort(t *testing.T) {
 		if s.Source.Id == "fake:1001" && (s.Attached == nil || s.Attached.Id != se.Id || s.Attached.Evidence.BestEffort == nil || !*s.Attached.Evidence.BestEffort) {
 			t.Fatalf("work source %+v", s)
 		}
+	}
+	// A guess is scored against all of the work's titles, not just the main
+	// one.
+	se = call[apigen.MatchSeries](f.admin, http.MethodPost, "/api/v1/works/"+id+"/series", map[string]string{"url": "https://example-comics.example/?q=leuchtturm"}, 201)
+	ev = se.Evidence
+	if ev.BestEffort == nil || !*ev.BestEffort || ev.TitleScore != 1 || ev.EntryTitle == nil || *ev.EntryTitle != "Der Leuchtturm" {
+		t.Fatalf("alternative title %+v", ev)
 	}
 	f.admin.expectProblem(http.MethodPost, "/api/v1/works/"+id+"/series", map[string]string{"url": "https://nowhere.example/x"}, 404, "url_unknown")
 }

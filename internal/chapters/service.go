@@ -346,10 +346,12 @@ func (s *Service) Unify(ctx context.Context, workID uuid.UUID) (int, error) {
 				return err
 			}
 		}
-		// Chapters no attached series lists any more (e.g. those only a
-		// replaced series had) go, unless a user's progress, bookmark,
-		// downloaded file, pin or pending download points at them: those
-		// stay, marked unavailable.
+		// Chapters no attached series lists any more stay, unavailable,
+		// except ghosts: those no attached series has any variant for
+		// (only a replaced or detached series had them) and that no user's
+		// progress or bookmark, downloaded file, pin or pending download
+		// points at are deleted. A source that lists nothing for a while
+		// thus deletes nothing.
 		var gone []uuid.UUID
 		for _, c := range existing {
 			if !kept[c.ID] {
@@ -358,7 +360,14 @@ func (s *Service) Unify(ctx context.Context, workID uuid.UUID) (int, error) {
 		}
 		deleted := map[uuid.UUID]bool{}
 		if len(gone) > 0 {
-			ids, err := q.DeleteUnreferencedChapters(ctx, db.DeleteUnreferencedChaptersParams{WorkID: workID, Ids: gone})
+			// Lock them first, in a statement of its own, so the DELETE
+			// sees progress or a bookmark written meanwhile (those writers
+			// don't take the work's lock).
+			locked, err := q.LockChapters(ctx, db.LockChaptersParams{WorkID: workID, Ids: gone})
+			if err != nil {
+				return err
+			}
+			ids, err := q.DeleteGhostChapters(ctx, db.DeleteGhostChaptersParams{WorkID: workID, Ids: locked})
 			if err != nil {
 				return err
 			}

@@ -387,10 +387,10 @@ func (h *Host) ResolveURL(ctx context.Context, v Viewer, rawURL string) (Resolve
 		if err != nil {
 			continue
 		}
-		res, err := c.ResolveUrl(ctx, &sourcev1.ResolveUrlRequest{Url: rawURL})
+		res, err := h.resolveURL(ctx, c, rawURL)
 		if err != nil {
 			if connect.CodeOf(err) != connect.CodeUnimplemented && connect.CodeOf(err) != connect.CodeNotFound {
-				h.log.DebugContext(ctx, "resolve url failed", "plugin", id, "err", errorMessage(err))
+				h.log.WarnContext(ctx, "resolve url failed", "plugin", id, "err", errorMessage(err))
 			}
 			continue
 		}
@@ -413,6 +413,15 @@ func (h *Host) ResolveURL(ctx context.Context, v Viewer, rawURL string) (Resolve
 		return *guess, nil
 	}
 	return Resolved{}, ErrNotFound
+}
+
+// resolveURL asks one plugin, within callTimeout: plugins are asked one
+// after another, so one that hangs (a best-effort search can take as long
+// as the site's search) mustn't hold up the others.
+func (h *Host) resolveURL(ctx context.Context, c client.Client, rawURL string) (*sourcev1.ResolveUrlResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	return c.ResolveUrl(ctx, &sourcev1.ResolveUrlRequest{Url: rawURL})
 }
 
 // Pages lists a chapter's pages in reading order.

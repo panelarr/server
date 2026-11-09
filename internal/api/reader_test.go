@@ -404,6 +404,83 @@ func TestLibraryLastUpdated(t *testing.T) {
 	}
 }
 
+// A read chapter stays read when it is opened again: saving an earlier page
+// moves the place but keeps the mark; only an explicit completed changes it.
+func TestProgressReadStaysRead(t *testing.T) {
+	t.Parallel()
+	f := newLibraryFixture(t)
+	user := f.user
+	entry := call[apigen.LibraryEntry](user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": "e1"}, 201)
+	id := entry.Work.Id.String()
+	waitWorkMatched(t, user, id)
+	chs := waitChapters(t, user, id, func(cs []apigen.UnifiedChapter) bool { return len(cs) == 3 })
+	last := "/api/v1/chapters/" + chs[2].Id.String() + "/progress"
+	save := func(body map[string]any) apigen.ChapterProgress {
+		t.Helper()
+		return call[apigen.ChapterProgress](user, http.MethodPut, last, body, 200)
+	}
+	continueAt := func() *string {
+		t.Helper()
+		wp := call[apigen.WorkProgress](user, http.MethodGet, "/api/v1/works/"+id+"/progress", nil, 200)
+		lib := call[apigen.LibraryPage](user, http.MethodGet, "/api/v1/library", nil, 200)
+		if len(lib.Entries) != 1 || (wp.ContinueChapterId == nil) != (lib.Entries[0].ContinueChapterId == nil) ||
+			(wp.ContinueChapterId != nil && *wp.ContinueChapterId != *lib.Entries[0].ContinueChapterId) {
+			t.Fatalf("work progress %v and library entry %+v disagree", wp.ContinueChapterId, lib.Entries)
+		}
+		if wp.ContinueChapterId == nil {
+			return nil
+		}
+		c := wp.ContinueChapterId.String()
+		return &c
+	}
+
+	// Everything read, the last chapter by reading to its end.
+	call[struct{}](user, http.MethodPost, "/api/v1/works/"+id+"/progress", map[string]any{"chapter_ids": []string{chs[0].Id.String(), chs[1].Id.String()}, "read": true}, 204)
+	if p := save(map[string]any{"page": 3, "pages": 4}); !p.Completed {
+		t.Fatalf("last page didn't finish the chapter: %+v", p)
+	}
+	if c := continueAt(); c != nil {
+		t.Fatalf("continue at %s with everything read", *c)
+	}
+
+	// Opened again at the start: the place moves, the mark stays, and there
+	// is still nothing to continue.
+	if p := save(map[string]any{"page": 0, "pages": 4}); !p.Completed || p.Page != 0 {
+		t.Fatalf("reopening un-read the chapter: %+v", p)
+	}
+	if p := save(map[string]any{"page": 1}); !p.Completed || p.Page != 1 {
+		t.Fatalf("a save without pages un-read the chapter: %+v", p)
+	}
+	if c := continueAt(); c != nil {
+		t.Fatalf("continue at %s after re-reading a read chapter", *c)
+	}
+	if lib := call[apigen.LibraryPage](user, http.MethodGet, "/api/v1/library", nil, 200); lib.Entries[0].Unread != 0 {
+		t.Fatalf("unread %d after re-reading", lib.Entries[0].Unread)
+	}
+	if h := call[apigen.HistoryPage](user, http.MethodGet, "/api/v1/me/history?page_size=1", nil, 200); len(h.Items) != 1 ||
+		h.Items[0].ChapterId != chs[2].Id || h.Items[0].Page != 1 || !h.Items[0].Completed {
+		t.Fatalf("history after re-reading %+v", h.Items)
+	}
+
+	// An explicit true keeps it read; an explicit false clears it.
+	if p := save(map[string]any{"page": 0, "pages": 4, "completed": true}); !p.Completed {
+		t.Fatalf("explicit true: %+v", p)
+	}
+	if p := save(map[string]any{"page": 0, "pages": 4, "completed": false}); p.Completed || p.Page != 0 {
+		t.Fatalf("explicit false didn't clear the mark: %+v", p)
+	}
+	if c := continueAt(); c == nil || *c != chs[2].Id.String() {
+		t.Fatalf("continue %v after marking the last chapter unread", c)
+	}
+	// Unread again, an earlier page keeps it unread and the last page reads it.
+	if p := save(map[string]any{"page": 2, "pages": 4}); p.Completed {
+		t.Fatalf("an earlier page read the chapter: %+v", p)
+	}
+	if p := save(map[string]any{"page": 3, "pages": 4}); !p.Completed {
+		t.Fatalf("the last page didn't read the chapter again: %+v", p)
+	}
+}
+
 func TestHistory(t *testing.T) {
 	t.Parallel()
 	f := newLibraryFixture(t, func(fk *plugintest.Fake) plugin.Plugin {

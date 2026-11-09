@@ -1,9 +1,13 @@
 -- name: UpsertProgress :one
+-- A chapter once read stays read when it is opened again: only an explicit
+-- completed (set_completed) can clear it.
 INSERT INTO progress (user_id, chapter_id, work_id, page, pages, completed)
 VALUES (@user_id, @chapter_id, @work_id, @page, @pages, @completed)
 ON CONFLICT (user_id, chapter_id) DO UPDATE SET
     page = EXCLUDED.page, pages = COALESCE(EXCLUDED.pages, progress.pages),
-    completed = EXCLUDED.completed, updated_at = now()
+    completed = CASE WHEN @set_completed::boolean THEN EXCLUDED.completed
+                     ELSE progress.completed OR EXCLUDED.completed END,
+    updated_at = now()
 RETURNING *;
 
 -- name: GetProgress :one

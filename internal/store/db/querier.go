@@ -234,6 +234,8 @@ type Querier interface {
 	// download.
 	Updates(ctx context.Context, arg UpdatesParams) ([]UpdatesRow, error)
 	UpsertAssignment(ctx context.Context, arg UpsertAssignmentParams) (NetworkAssignment, error)
+	// A chapter once read stays read when it is opened again: only an explicit
+	// completed (set_completed) can clear it.
 	UpsertProgress(ctx context.Context, arg UpsertProgressParams) (Progress, error)
 	UpsertPush(ctx context.Context, arg UpsertPushParams) error
 	UpsertSource(ctx context.Context, arg UpsertSourceParams) error

@@ -3608,7 +3608,12 @@ paths:
       operationId: setChapterProgress
       tags: [reader]
       summary: Save where you are in a chapter
-      description: Reaching the last page (when `pages` is given) marks the chapter read, unless `completed` says otherwise. Your other devices get a `progress.synced` event.
+      description: |
+        Reaching the last page (when `pages` is given) marks the chapter
+        read. A read chapter stays read when you open it again and save an
+        earlier page: the page still moves (for history and resuming), but
+        only an explicit `completed` (or marking it unread) changes the
+        read mark. Your other devices get a `progress.synced` event.
       x-panelarr-access: user
       parameters:
         - $ref: "#/components/parameters/ChapterId"
@@ -4771,6 +4776,7 @@ components:
           maximum: 10000
         completed:
           type: boolean
+          description: Sets the read mark either way. Left out, the last page marks the chapter read and an earlier page keeps the mark it had.
     WorkProgress:
       type: object
       required: [chapters]

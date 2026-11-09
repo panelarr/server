@@ -112,6 +112,30 @@ func TestStartupGrace(t *testing.T) {
 	}
 }
 
+// A plugin still not answering when the startup window ends is marked down.
+func TestStartupGraceEnds(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h, e := newHost(t)
+	svc := pluginstest.ServeSwitchable(t, plugintest.New(), key)
+	if _, err := h.Register(ctx, plugins.NewPlugin{URL: svc.URL, APIKey: key}); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := plugins.NewHost(e.st, e.box, plugins.RemoteDialer, nil)
+	restarted.SetStartupWindow(200 * time.Millisecond)
+	restarted.SetStartupGrace(50 * time.Millisecond)
+	restarted.SetRecheck()
+	svc.Down.Store(true)
+	if err := restarted.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := restarted.Get(ctx, "fake"); p.Health != "down" {
+		t.Fatalf("unreachable plugin is %s after the window", p.Health)
+	}
+}
+
 // configurable returns a fake plugin that takes settings.
 func configurable(t *testing.T) *plugintest.Fake {
 	t.Helper()

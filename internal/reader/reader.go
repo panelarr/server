@@ -385,7 +385,9 @@ func (s *Service) Page(ctx context.Context, v library.Viewer, chapterID uuid.UUI
 }
 
 // SetProgress records where v is in a chapter. Reaching the last page
-// (when the page count is known) marks it read.
+// (when the page count is known) marks it read, and a read chapter stays
+// read when it is opened again; only an explicit completed sets it either
+// way.
 func (s *Service) SetProgress(ctx context.Context, v library.Viewer, chapterID uuid.UUID, page int32, pages *int32, completed *bool) (db.Progress, error) {
 	ch, err := s.st.GetChapter(ctx, chapterID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -409,6 +411,7 @@ func (s *Service) SetProgress(ctx context.Context, v library.Viewer, chapterID u
 	}
 	p, err := s.st.UpsertProgress(ctx, db.UpsertProgressParams{
 		UserID: v.UserID, ChapterID: chapterID, WorkID: ch.WorkID, Page: page, Pages: pages, Completed: done,
+		SetCompleted: completed != nil,
 	})
 	if err != nil {
 		return db.Progress{}, err
@@ -451,7 +454,7 @@ func (s *Service) MarkRead(ctx context.Context, v library.Viewer, workID uuid.UU
 				return err
 			}
 			if _, err := q.UpsertProgress(ctx, db.UpsertProgressParams{
-				UserID: v.UserID, ChapterID: id, WorkID: workID, Page: page, Pages: pages, Completed: true,
+				UserID: v.UserID, ChapterID: id, WorkID: workID, Page: page, Pages: pages, Completed: true, SetCompleted: true,
 			}); err != nil {
 				return err
 			}

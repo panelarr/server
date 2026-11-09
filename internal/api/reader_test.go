@@ -364,6 +364,25 @@ func TestLibraryLastUpdated(t *testing.T) {
 		}
 	}
 
+	// Background tasks after adding the work (chapter checks) build its
+	// chapters again and would make them available again under the
+	// changes below: let them finish first.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var busy int
+		if err := f.h.st.Pool.QueryRow(context.Background(),
+			"SELECT count(*) FROM tasks WHERE state = 'running' OR (state = 'queued' AND run_after <= now())").Scan(&busy); err != nil {
+			t.Fatal(err)
+		}
+		if busy == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d tasks still busy", busy)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
 	// Only what it had when first listed: never updated.
 	if at := lastUpdated(); at != nil {
 		t.Fatalf("first listing %v", at)

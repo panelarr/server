@@ -9,6 +9,7 @@ import (
 	"io"
 	"slices"
 
+	"connectrpc.com/connect"
 	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -348,35 +349,79 @@ type Resolved struct {
 	BestEffort bool
 }
 
-// ResolveURL finds the series a URL points to, asking each enabled plugin
-// with a source v may use that resolves URLs. ErrNotFound when none knows
-// it.
+// ResolveURL finds the series a URL points to. It asks every enabled
+// plugin with a source v may use, plugins with a native URL resolver (a
+// source with the resolve_url capability) first: a plugin without one may
+// still find the series another way (e.g. by searching the site), and says
+// so with best_effort. A plugin that doesn't implement ResolveUrl, fails
+// or knows nothing is skipped. A best-effort answer is used only when no
+// plugin knows the URL for certain. ErrNotFound when none knows the URL.
 func (h *Host) ResolveURL(ctx context.Context, v Viewer, rawURL string) (Resolved, error) {
 	srcs, err := h.Sources(ctx, v, false)
 	if err != nil {
 		return Resolved{}, err
 	}
-	asked := map[string]bool{}
+	var order []string
+	native := map[string]bool{}
 	for _, s := range srcs {
-		if asked[s.PluginID] || !slices.Contains(s.Capabilities, "resolve_url") {
-			continue
+		if !slices.Contains(order, s.PluginID) {
+			order = append(order, s.PluginID)
 		}
-		asked[s.PluginID] = true
-		c, err := h.Client(ctx, s.PluginID)
+		if slices.Contains(s.Capabilities, "resolve_url") {
+			native[s.PluginID] = true
+		}
+	}
+	slices.SortStableFunc(order, func(a, b string) int {
+		switch {
+		case native[a] == native[b]:
+			return 0
+		case native[a]:
+			return -1
+		default:
+			return 1
+		}
+	})
+	var guess *Resolved
+	for _, id := range order {
+		c, err := h.Client(ctx, id)
 		if err != nil {
 			continue
 		}
-		res, err := c.ResolveUrl(ctx, &sourcev1.ResolveUrlRequest{Url: rawURL})
-		if err != nil || res.GetSeries() == nil {
+		res, err := h.resolveURL(ctx, c, rawURL)
+		if err != nil {
+			if connect.CodeOf(err) != connect.CodeUnimplemented && connect.CodeOf(err) != connect.CodeNotFound {
+				h.log.WarnContext(ctx, "resolve url failed", "plugin", id, "err", errorMessage(err))
+			}
 			continue
 		}
-		found, err := h.Source(ctx, s.PluginID+":"+res.GetSourceId(), v)
+		if res.GetSeries() == nil {
+			continue
+		}
+		found, err := h.Source(ctx, id+":"+res.GetSourceId(), v)
 		if err != nil {
 			continue // a source the viewer may not use
 		}
-		return Resolved{Source: found, Series: res.GetSeries(), BestEffort: res.GetBestEffort()}, nil
+		r := Resolved{Source: found, Series: res.GetSeries(), BestEffort: res.GetBestEffort()}
+		if !r.BestEffort {
+			return r, nil
+		}
+		if guess == nil {
+			guess = &r // keep asking: another plugin may know the URL for certain
+		}
+	}
+	if guess != nil {
+		return *guess, nil
 	}
 	return Resolved{}, ErrNotFound
+}
+
+// resolveURL asks one plugin, within callTimeout: plugins are asked one
+// after another, so one that hangs (a best-effort search can take as long
+// as the site's search) mustn't hold up the others.
+func (h *Host) resolveURL(ctx context.Context, c client.Client, rawURL string) (*sourcev1.ResolveUrlResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	return c.ResolveUrl(ctx, &sourcev1.ResolveUrlRequest{Url: rawURL})
 }
 
 // Pages lists a chapter's pages in reading order.

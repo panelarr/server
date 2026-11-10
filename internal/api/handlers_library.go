@@ -86,7 +86,7 @@ func (s *Server) toMatchSeries(se db.SourceSeries) apigen.MatchSeries {
 		Evidence: apigen.MatchEvidence{
 			EntryTitle: nonEmpty(ev.EntryTitle), MatchedTitle: nonEmpty(ev.MatchedTitle), Query: nonEmpty(ev.Query),
 			TitleScore: float32(ev.TitleScore), AuthorsMatch: ev.AuthorsMatch, SourceAuthors: nonNil(ev.SourceAuthors),
-			ChapterCount: ev.ChapterCount,
+			ChapterCount: ev.ChapterCount, BestEffort: ptr(ev.BestEffort),
 		},
 	}
 	return out

@@ -5400,6 +5400,13 @@ components:
             type: string
         chapter_count:
           type: integer
+        best_effort:
+          type: boolean
+          description: >-
+            The source's plugin only guessed this series (for example the only
+            result of searching the site for a pasted URL), so a person should
+            check it is the right one. title_score then compares the guess with
+            the work's title.
     MatchSeries:
       type: object
       required: [id, source_id, key, title, state, origin, score, priority, evidence]

@@ -159,14 +159,43 @@ func Best(as, bs []string) (score float64, a, b string) {
 	return score, a, b
 }
 
+// placeholders are what sites write where they don't know a person
+// (normalized). Two series both credited to "Unknown" share no one.
+var placeholders = map[string]bool{
+	"unknown": true, "unknown author": true, "unknown artist": true, "unknow": true, "n a": true,
+	"none": true, "null": true, "nil": true, "updating": true, "update": true, "tba": true, "tbd": true,
+	"various": true, "various artists": true, "various authors": true, "anonymous": true, "anon": true,
+	"author": true, "artist": true, "no author": true, "not available": true, "other": true, "others": true,
+	"不明": true, "未知": true, "미상": true,
+}
+
+// Placeholder reports whether a person name is a stand-in for an unknown
+// person ("Unknown", "N/A", "Updating", "Various", …) or empty.
+func Placeholder(name string) bool {
+	n := Normalize(name)
+	return n == "" || placeholders[n]
+}
+
+// RealNames returns names without placeholders.
+func RealNames(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if !Placeholder(n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // SameName reports whether two person names are the same person as far as
 // text tells: the same words in any order ("Akira Toriyama" and
-// "Toriyama Akira"), or one written without spaces.
+// "Toriyama Akira"), or one written without spaces. Placeholders
+// ([Placeholder]) are nobody, so never the same person.
 func SameName(a, b string) bool {
-	na, nb := Normalize(a), Normalize(b)
-	if na == "" || nb == "" {
+	if Placeholder(a) || Placeholder(b) {
 		return false
 	}
+	na, nb := Normalize(a), Normalize(b)
 	if na == nb || strings.ReplaceAll(na, " ", "") == strings.ReplaceAll(nb, " ", "") {
 		return true
 	}

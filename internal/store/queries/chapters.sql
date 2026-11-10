@@ -56,6 +56,39 @@ UPDATE chapters SET volume = @volume, title = @title, preferred_variant_id = @pr
     reason = @reason, available = @available, updated_at = now()
 WHERE id = @id;
 
+-- name: LockChapters :many
+-- Locks these chapters of a work before DeleteGhostChapters, in a statement
+-- of its own: a reader's progress or bookmark written meanwhile holds a key
+-- share lock on its chapter, so this waits for it to commit, and the DELETE
+-- that follows (with a fresh snapshot) sees it. Writers that come later wait
+-- for the transaction and then fail on the foreign key instead of losing
+-- their row to the cascade.
+SELECT id FROM chapters WHERE work_id = @work_id AND id = ANY(@ids::uuid[]) ORDER BY id FOR UPDATE;
+
+-- name: DeleteGhostChapters :many
+-- Of these chapters of a work, deletes the ghosts: chapters no attached
+-- series has a variant for, listed or not (only a replaced or detached
+-- series had them), that nothing else points at: no reading progress or
+-- bookmark of any user, no downloaded file, no pinned variant and no
+-- download waiting or running. A chapter an attached series stopped
+-- listing keeps its absent variant and so stays, unavailable, with the same
+-- ID. Run LockChapters on the same ids first. Re-attaching the old series
+-- rebuilds the deleted ones.
+DELETE FROM chapters
+WHERE chapters.work_id = @work_id AND chapters.id = ANY(@ids::uuid[])
+  AND chapters.pinned_variant_id IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM source_chapters
+      JOIN source_series ON source_series.id = source_chapters.source_series_id
+      WHERE source_chapters.chapter_id = chapters.id AND source_series.state = 'attached')
+  AND NOT EXISTS (SELECT 1 FROM progress WHERE progress.chapter_id = chapters.id)
+  AND NOT EXISTS (SELECT 1 FROM bookmarks WHERE bookmarks.chapter_id = chapters.id)
+  AND NOT EXISTS (SELECT 1 FROM chapter_files WHERE chapter_files.chapter_id = chapters.id)
+  AND NOT EXISTS (
+      SELECT 1 FROM tasks
+      WHERE tasks.dedupe_key = 'download:' || chapters.id::text AND tasks.state IN ('queued', 'running'))
+RETURNING chapters.id;
+
 -- name: SetChapterPin :exec
 UPDATE chapters SET pinned_variant_id = @pinned_variant_id, updated_at = now() WHERE id = @id;
 

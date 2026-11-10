@@ -53,6 +53,15 @@ type Querier interface {
 	DeleteBookmarks(ctx context.Context, arg DeleteBookmarksParams) error
 	DeleteChapterFile(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
+	// Of these chapters of a work, deletes the ghosts: chapters no attached
+	// series has a variant for, listed or not (only a replaced or detached
+	// series had them), that nothing else points at: no reading progress or
+	// bookmark of any user, no downloaded file, no pinned variant and no
+	// download waiting or running. A chapter an attached series stopped
+	// listing keeps its absent variant and so stays, unavailable, with the same
+	// ID. Run LockChapters on the same ids first. Re-attaching the old series
+	// rebuilds the deleted ones.
+	DeleteGhostChapters(ctx context.Context, arg DeleteGhostChaptersParams) ([]uuid.UUID, error)
 	DeleteImageRetrySetting(ctx context.Context, arg DeleteImageRetrySettingParams) (int64, error)
 	DeleteInvite(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteLibraryView(ctx context.Context, arg DeleteLibraryViewParams) (LibraryView, error)
@@ -168,6 +177,13 @@ type Querier interface {
 	// Serialises changes that check "is there another admin?" or "is this the
 	// first account?" within one transaction.
 	LockAccounts(ctx context.Context) error
+	// Locks these chapters of a work before DeleteGhostChapters, in a statement
+	// of its own: a reader's progress or bookmark written meanwhile holds a key
+	// share lock on its chapter, so this waits for it to commit, and the DELETE
+	// that follows (with a fresh snapshot) sees it. Writers that come later wait
+	// for the transaction and then fail on the foreign key instead of losing
+	// their row to the cascade.
+	LockChapters(ctx context.Context, arg LockChaptersParams) ([]uuid.UUID, error)
 	// Serialises changes to one user's views, so the limit, the single
 	// default and the order hold under concurrent requests.
 	LockLibraryViews(ctx context.Context, userID uuid.UUID) error

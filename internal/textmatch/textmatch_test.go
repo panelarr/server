@@ -52,3 +52,30 @@ func TestNames(t *testing.T) {
 		t.Fatal("PeopleOverlap")
 	}
 }
+
+func TestPlaceholderNames(t *testing.T) {
+	// Sites write these where they don't know the person: two series both
+	// credited to "Unknown" share no one.
+	for _, n := range []string{"Unknown", "UNKNOWN", "unknown author", "N/A", "n/a", "Updating", "Various Artists", "Anonymous", "-", "?", "", "不明"} {
+		if !Placeholder(n) {
+			t.Errorf("Placeholder(%q) = false", n)
+		}
+		if SameName(n, n) {
+			t.Errorf("SameName(%q, %q) = true", n, n)
+		}
+	}
+	for _, n := range []string{"A. Author", "Na Ri", "Unknown Soldier Kim"} {
+		if Placeholder(n) {
+			t.Errorf("Placeholder(%q) = true", n)
+		}
+	}
+	if PeopleOverlap([]string{"Unknown", "Some Writer"}, []string{"unknown", "N/A"}) {
+		t.Fatal("placeholders overlap")
+	}
+	if !PeopleOverlap([]string{"Unknown", "Some Writer"}, []string{"unknown", "WRITER Some"}) {
+		t.Fatal("a real name next to a placeholder doesn't overlap")
+	}
+	if got := RealNames([]string{"Unknown", "Some Writer", "N/A"}); len(got) != 1 || got[0] != "Some Writer" {
+		t.Fatalf("RealNames = %q", got)
+	}
+}

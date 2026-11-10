@@ -422,6 +422,9 @@ type Evidence struct {
 	AuthorsMatch  *bool    `json:"authors_match,omitempty"`
 	SourceAuthors []string `json:"source_authors,omitempty"`
 	ChapterCount  *int     `json:"chapter_count,omitempty"`
+	// BestEffort: the source's plugin only guessed the series (e.g. from
+	// searching the site for a pasted URL), so a person should check it.
+	BestEffort bool `json:"best_effort,omitempty"`
 }
 
 func (e Evidence) json() []byte {

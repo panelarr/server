@@ -28,7 +28,7 @@ skipping everything else the default. Fields it reads:
 | `BackupChapter` | 1 URL, 2 name, 3 scanlator, 4 read, 5 bookmark, 6 last page read, 7 date fetched, 8 date uploaded, 9 number (float) |
 | `BackupHistory` | 1 chapter URL, 2 last read |
 | `BackupCategory` | 1 name, 2 order |
-| `BackupTracking` | 1 tracker id |
+| `BackupTracking` | 1 tracker id (an entry without one is skipped) |
 | `BackupSource` | 1 name, 2 source id |
 
 Everything else is skipped: preferences, extension repositories, reader settings, fields only one of the apps
@@ -60,12 +60,43 @@ An error of the reader passed in (a dropped upload) is returned as it is, not as
 ### Limits
 
 The reader streams the file and holds one top-level message (one series with its chapters) at a time, plus the
-model. Each limit can be set; zero takes the default:
+model. Every collection the model keeps has a cap, and so does its text, so the memory an upload takes is bounded
+however the file is crafted: a few bytes on the wire can become a much larger value (a 4-byte empty chapter is a
+136-byte `Chapter`), and the decompressed size alone doesn't bound that. Going over any limit fails with
+`ErrTooLarge`. Each limit can be set; zero takes the default. The defaults leave room for libraries far larger than
+real ones (a large library has a thousand or so series with a few hundred chapters each):
 
-| Limit | Default | Why |
+| Limit | Default | What it bounds |
 |---|---|---|
-| File size | 64 MiB | The import upload's body limit. A large library is a few MiB compressed |
-| Decompressed size | 256 MiB | Bounds a decompression bomb, counted as it streams |
-| One message | 16 MiB | One series with all its chapters is far smaller |
-| Series | 50,000 | Bounds the model's memory |
-| Chapters (over all series) | 2,000,000 | Bounds the model's memory |
+| `MaxFileSize` | 64 MiB | Bytes of the file as uploaded: the import upload's body limit |
+| `MaxDataSize` | 256 MiB | Bytes after decompression, counted as they stream: a decompression bomb |
+| `MaxMessageSize` | 16 MiB | One top-level message (a series with its chapters, a category or a source), which is buffered whole |
+| `MaxSeries` | 50,000 | Series, in the library or not |
+| `MaxChapters` | 1,000,000 | Chapters over all series |
+| `MaxHistory` | 1,000,000 | History entries over all series |
+| `MaxCategoryRefs` | 500,000 | Category orders listed by series, over all series, repeats included |
+| `MaxTrackerLinks` | 200,000 | Tracking entries over all series, including those skipped for having no tracker id |
+| `MaxCategories` | 1,000 | Categories |
+| `MaxSources` | 5,000 | Source names |
+| `MaxText` | 128 MiB | Bytes of text the model keeps (titles, URLs, names, …) after cleaning. Replacing invalid UTF-8 can double text, so the data size alone doesn't bound it |
+
+The chapter, history and tracking counts of a series are checked before it is decoded, and its lists are allocated
+once at their final size. Categories are joined to series with a set, in time linear in the orders listed.
+
+What the defaults allow at most, from the size of each element on 64-bit platforms:
+
+| Part | Worst case |
+|---|---|
+| Series (240 bytes each) | 11 MiB |
+| Chapters (136 bytes each) | 130 MiB |
+| History (40 bytes each) | 38 MiB |
+| Category orders, then joined names | 8 MiB |
+| Tracking, categories, sources and the maps that join them | 2 MiB |
+| Text | 128 MiB |
+| **Model** | **about 320 MiB** |
+| While reading: one message buffer, the text of the message being decoded, the series list growing, one series' last-read times | about 70 MiB more |
+| **Peak** | **about 400 MiB** |
+
+The tests read a backup at every count limit at once and small, hostile files (a few hundred KiB that hold millions
+of entries of one kind, or text that doubles when cleaned), and check the memory `Read` allocates against these
+figures.

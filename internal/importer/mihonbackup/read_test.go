@@ -8,7 +8,9 @@ import (
 	"errors"
 	"io"
 	"math"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -48,6 +50,8 @@ func (m msg) bytes(num protowire.Number, b []byte) msg {
 func (m msg) str(num protowire.Number, s string) msg { return m.bytes(num, []byte(s)) }
 
 func (m msg) msg(num protowire.Number, sub msg) msg { return m.bytes(num, sub) }
+
+func (m msg) append(b []byte) msg { return append(m, b...) }
 
 func gz(t testing.TB, b []byte) []byte {
 	t.Helper()
@@ -276,6 +280,7 @@ func TestReadRejects(t *testing.T) {
 		msg  string
 	}{
 		{name: "empty file", data: nil, want: ErrNotBackup, msg: "empty"},
+		{name: "one byte", data: []byte{0x1f}, want: ErrNotBackup, msg: "too short"},
 		{name: "text", data: []byte("hello, this is not a backup\n"), want: ErrNotBackup},
 		{name: "image", data: []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"), want: ErrNotBackup},
 		{name: "legacy JSON", data: []byte(`{"version":2,"mangas":[]}`), want: ErrUnsupported, msg: "JSON"},
@@ -299,6 +304,14 @@ func TestReadRejects(t *testing.T) {
 		{name: "message too large", data: valid, lim: Limits{MaxMessageSize: 64}, want: ErrTooLarge},
 		{name: "too many series", data: valid, lim: Limits{MaxSeries: 1}, want: ErrTooLarge, msg: "series"},
 		{name: "too many chapters", data: valid, lim: Limits{MaxChapters: 3}, want: ErrTooLarge, msg: "chapters"},
+		{name: "too many history entries", data: valid, lim: Limits{MaxHistory: 1}, want: ErrTooLarge, msg: "history"},
+		{name: "too many category references", data: valid, lim: Limits{MaxCategoryRefs: 1}, want: ErrTooLarge, msg: "category references"},
+		{name: "too many tracking links", data: gz(t, msg{}.msg(1, series.msg(18, msg{}.int(1, 1)).msg(18, msg{}.int(1, 2)))), lim: Limits{MaxTrackerLinks: 1}, want: ErrTooLarge, msg: "tracking"},
+		{name: "too many categories", data: valid, lim: Limits{MaxCategories: 1}, want: ErrTooLarge, msg: "categories"},
+		{name: "too many sources", data: valid, lim: Limits{MaxSources: 1}, want: ErrTooLarge, msg: "sources"},
+		{name: "too much text", data: valid, lim: Limits{MaxText: 100}, want: ErrTooLarge, msg: "text"},
+		{name: "too much text in a category", data: gz(t, msg{}.msg(1, series).msg(2, msg{}.str(1, strings.Repeat("c", 64)))), lim: Limits{MaxText: 64}, want: ErrTooLarge, msg: "category 1"},
+		{name: "too much text in a source", data: gz(t, msg{}.msg(1, series).msg(101, msg{}.str(1, strings.Repeat("s", 64)).int(2, 1))), lim: Limits{MaxText: 64}, want: ErrTooLarge, msg: "source 1"},
 		{name: "huge declared length", data: gz(t, append(protowire.AppendTag(nil, 9001, protowire.BytesType), protowire.AppendVarint(nil, 1<<40)...)), want: ErrTooLarge},
 	}
 	for _, tc := range cases {
@@ -338,6 +351,180 @@ func TestReadStopsDecompressionBomb(t *testing.T) {
 	}
 }
 
+// A tracking entry without its tracker id names no tracker: it is skipped
+// instead of becoming tracker 0.
+func TestReadSkipsTrackingWithoutID(t *testing.T) {
+	s := msg{}.int(1, 1).str(2, "/s").msg(18, msg{}.int(2, 5)).msg(18, msg{}.int(1, 3))
+	b, err := Read(bytes.NewReader(gz(t, msg{}.msg(1, s))), Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(b.Series[0].Trackers, []int32{3}) {
+		t.Errorf("trackers = %v", b.Series[0].Trackers)
+	}
+}
+
+// A long list of category orders joins in linear time: 200,000 distinct
+// orders, all naming categories, took minutes with a quadratic join.
+func TestJoinCategoriesLinear(t *testing.T) {
+	const n = 200_000
+	orders := make([]int64, n)
+	names := make(map[int64]string, n)
+	for i := range orders {
+		orders[i] = int64(i)
+		names[int64(i)] = strconv.Itoa(i)
+	}
+	start := time.Now()
+	got := joinCategories(append(orders, orders...), names)
+	if len(got) != n {
+		t.Fatalf("%d names", len(got))
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Errorf("join took %v", d)
+	}
+}
+
+// invalidText is a series' title, artist and author, 1 MiB each of text
+// where every other byte isn't UTF-8: replaced, it takes twice that in the
+// model. Every series of hostile holds it once.
+func invalidText() msg {
+	bad := strings.Repeat("a\xff", 1<<19)
+	return msg{}.str(3, bad).str(4, bad).str(5, bad)
+}
+
+// hostile builds a small gzip'd backup that repeats one tiny entry n times:
+// inside series, per entries to a series (0: as many as fit in 8 MiB), or,
+// with top true, as top-level fields.
+func hostile(t *testing.T, entry msg, n, per int, top bool) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	write := func(b []byte) {
+		if _, err := zw.Write(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(msg{}.msg(1, msg{}.int(1, 1).str(2, "/s")))
+	switch {
+	case top:
+		per = n
+	case per == 0:
+		per = max(1, (8<<20)/len(entry)) // messages of 8 MiB or less
+	}
+	chunk := bytes.Repeat(entry, per)
+	for n > 0 {
+		k := min(per, n)
+		if top {
+			write(chunk[:k*len(entry)])
+		} else {
+			write(msg{}.msg(1, append(msg{}.int(1, 1).str(2, "/s"), chunk[:k*len(entry)]...)))
+		}
+		n -= k
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// Small hostile files full of tiny entries, each far past one cap, fail
+// with ErrTooLarge at the default limits (text at a lower one, to keep the
+// test quick), and the memory Read allocates stays within a budget set by
+// that cap. Without the caps these entries,
+// a few bytes each on the wire, grew the model to gigabytes.
+func TestReadHostileFilesStayBounded(t *testing.T) {
+	cases := []struct {
+		name   string
+		entry  msg
+		n      int
+		per    int // entries per series; 0: as many as fit
+		top    bool
+		lim    Limits
+		budget uint64 // bytes Read may allocate in total, garbage included
+		msg    string
+	}{
+		{name: "history in one series", entry: msg{}.msg(104, msg{}.str(1, "")), n: 2 * DefaultMaxHistory, budget: 32 << 20, msg: "history"},
+		{name: "history", entry: msg{}.msg(104, msg{}.str(1, "")), n: 2 * DefaultMaxHistory, per: 1000, budget: 64 << 20, msg: "history"},
+		{name: "chapters in one series", entry: msg{}.msg(16, msg{}.str(1, "")), n: 2 * DefaultMaxChapters, budget: 32 << 20, msg: "chapters"},
+		{name: "chapters", entry: msg{}.msg(16, msg{}.str(1, "")), n: 2 * DefaultMaxChapters, per: 1000, budget: 192 << 20, msg: "chapters"},
+		{name: "packed category orders", entry: msg{}.bytes(17, make([]byte, 2*DefaultMaxCategoryRefs)), n: 1, budget: 64 << 20, msg: "category references"},
+		{name: "category orders", entry: msg{}.int(17, 0), n: 2 * DefaultMaxCategoryRefs, budget: 64 << 20, msg: "category references"},
+		{name: "tracking", entry: msg{}.msg(18, msg{}.int(1, 1)), n: 2 * DefaultMaxTrackerLinks, per: 1000, budget: 16 << 20, msg: "tracking"},
+		{name: "categories", entry: msg{}.msg(2, msg{}.str(1, "")), n: 1 << 20, top: true, budget: 16 << 20, msg: "categories"},
+		{name: "sources", entry: msg{}.msg(101, msg{}.int(2, 1)), n: 1 << 20, top: true, budget: 16 << 20, msg: "sources"},
+		{name: "invalid UTF-8 text", entry: invalidText(), n: 4, per: 1, lim: Limits{MaxText: 16 << 20}, budget: 32 << 20, msg: "text"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := hostile(t, tc.entry, tc.n, tc.per, tc.top)
+			if len(data) > 1<<20 {
+				t.Fatalf("hostile file is %d bytes", len(data))
+			}
+			var before, after runtime.MemStats
+			runtime.GC()
+			runtime.ReadMemStats(&before)
+			_, err := Read(bytes.NewReader(data), tc.lim)
+			runtime.ReadMemStats(&after)
+			if !errors.Is(err, ErrTooLarge) || !strings.Contains(err.Error(), tc.msg) {
+				t.Fatalf("err = %v", err)
+			}
+			if got := after.TotalAlloc - before.TotalAlloc; got > tc.budget {
+				t.Errorf("Read allocated %d MiB, budget %d MiB", got>>20, tc.budget>>20)
+			}
+		})
+	}
+}
+
+// A backup at every count limit at once (all but text, which
+// TestReadHostileFilesStayBounded covers) is accepted, and the model it
+// gives stays within the size docs/import.md states for those limits.
+func TestReadAtTheLimitsStaysBounded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and reads a backup of a million chapters")
+	}
+	const series = 1000
+	s := msg{}.int(1, 1).str(2, "/s").
+		bytes(17, make([]byte, DefaultMaxCategoryRefs/series)).
+		append(bytes.Repeat(msg{}.msg(16, msg{}.str(1, "")), DefaultMaxChapters/series)).
+		append(bytes.Repeat(msg{}.msg(104, msg{}.str(1, "")), DefaultMaxHistory/series)).
+		append(bytes.Repeat(msg{}.msg(18, msg{}.int(1, 1)), DefaultMaxTrackerLinks/series))
+	var data msg
+	for range series {
+		data = data.msg(1, s)
+	}
+	for i := range DefaultMaxCategories {
+		data = data.msg(2, msg{}.str(1, "").int(2, int64(i)))
+	}
+	for i := range DefaultMaxSources {
+		data = data.msg(101, msg{}.int(2, int64(i)))
+	}
+	file := gz(t, data)
+	data = nil
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	b, err := Read(bytes.NewReader(file), Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	sum := b.Summary()
+	if sum.Series != series || sum.Chapters != DefaultMaxChapters || sum.History != DefaultMaxHistory ||
+		sum.TrackerLinks != DefaultMaxTrackerLinks || sum.Categories != DefaultMaxCategories {
+		t.Errorf("summary = %+v", sum)
+	}
+	// 130 MiB of chapters, 38 MiB of history, the rest a few MiB.
+	if live := int64(after.HeapAlloc) - int64(before.HeapAlloc); live > 224<<20 { //nolint:gosec // heap sizes
+		t.Errorf("model takes %d MiB", live>>20)
+	}
+	if peak := after.TotalAlloc - before.TotalAlloc; peak > 320<<20 {
+		t.Errorf("Read allocated %d MiB", peak>>20)
+	}
+	runtime.KeepAlive(b)
+}
+
 // An error of the caller's reader isn't reported as a bad backup.
 func TestReadKeepsReaderErrors(t *testing.T) {
 	boom := errors.New("connection reset")
@@ -353,6 +540,19 @@ func TestStatusString(t *testing.T) {
 	if StatusOnHiatus.String() != "on_hiatus" || Status(99).String() != "unknown" || Status(-1).String() != "unknown" {
 		t.Error("status names")
 	}
+}
+
+// clean gives what replacing invalid UTF-8 and then removing NULs gives.
+func FuzzClean(f *testing.F) {
+	for _, s := range []string{"", "plain", "a\xffb", "\xff\xfe", "\xff\x00\xff", "x\x00", "\xe2\x82", "日本\xff語"} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, b []byte) {
+		want := strings.ReplaceAll(strings.ToValidUTF8(string(b), "\uFFFD"), "\x00", "")
+		if got := clean(b); got != want {
+			t.Fatalf("clean(%q) = %q, want %q", b, got, want)
+		}
+	})
 }
 
 func FuzzRead(f *testing.F) {

@@ -47,6 +47,20 @@ type Series struct {
 	categoryOrders []int64 // while reading, before categories are joined
 }
 
+// textSize is the bytes of text the series keeps, chapters and history
+// included.
+func (s *Series) textSize() int {
+	n := len(s.URL) + len(s.Title) + len(s.Author) + len(s.Artist)
+	for i := range s.Chapters {
+		c := &s.Chapters[i]
+		n += len(c.URL) + len(c.Name) + len(c.Scanlator)
+	}
+	for i := range s.History {
+		n += len(s.History[i].URL)
+	}
+	return n
+}
+
 // Chapter is one chapter of a series with the user's reading state.
 type Chapter struct {
 	// URL is the source's key of the chapter.

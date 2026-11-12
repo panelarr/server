@@ -3,10 +3,12 @@
 package mihonbackup
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"google.golang.org/protobuf/encoding/protowire"
 )
@@ -89,8 +91,46 @@ func (f field) string() (string, error) {
 	if err := f.want(protowire.BytesType); err != nil {
 		return "", err
 	}
-	s := strings.ToValidUTF8(string(f.b), "�")
-	return strings.ReplaceAll(s, "\x00", ""), nil
+	if utf8.Valid(f.b) && bytes.IndexByte(f.b, 0) < 0 {
+		return string(f.b), nil // the usual case: one copy
+	}
+	return clean(f.b), nil
+}
+
+// clean replaces each run of invalid UTF-8 with one U+FFFD and drops NUL
+// characters. It measures the result first, so hostile text costs one
+// allocation of the final size (at most twice the input's).
+func clean(b []byte) string {
+	var sb strings.Builder
+	for pass := range 2 {
+		n, invalid := 0, false
+		for i := 0; i < len(b); {
+			r, size := utf8.DecodeRune(b[i:])
+			switch {
+			case r == utf8.RuneError && size == 1:
+				if !invalid {
+					n += utf8.RuneLen(utf8.RuneError)
+					if pass == 1 {
+						sb.WriteRune(utf8.RuneError)
+					}
+				}
+				invalid = true
+			case r == 0:
+				invalid = false
+			default:
+				invalid = false
+				n += size
+				if pass == 1 {
+					sb.Write(b[i : i+size])
+				}
+			}
+			i += size
+		}
+		if pass == 0 {
+			sb.Grow(n)
+		}
+	}
+	return sb.String()
 }
 
 func (f field) message(fn func(field) error) error {

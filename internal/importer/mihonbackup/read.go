@@ -6,8 +6,9 @@
 // (numbered 9000 and up), are skipped. See docs/import.md for the fields read.
 //
 // The reader streams the file: it holds one top-level message at a time
-// (a series, a category or a source) plus the model it builds, and every
-// size is capped by Limits.
+// (a series, a category or a source) plus the model it builds. Limits caps
+// the input and every collection and byte of text the model keeps, so an
+// upload's memory is bounded however the file is crafted.
 package mihonbackup
 
 import (
@@ -37,25 +38,46 @@ var (
 	ErrEmpty = errors.New("backup has no series in the library")
 )
 
-// Default limits. A large library (about a thousand series with their
-// chapters) is a few MiB compressed; the file limit matches the import
-// upload's body limit.
+// Default limits. A large library (a thousand or so series with a few
+// hundred chapters each) is a few MiB compressed and well under every count
+// here; the file limit matches the import upload's body limit. With all of
+// them at their defaults the model takes at most about 320 MiB, and Read
+// about 400 MiB at its peak (see docs/import.md), whatever the file holds.
 const (
-	DefaultMaxFileSize    = 64 << 20  // bytes as uploaded
-	DefaultMaxDataSize    = 256 << 20 // bytes after decompression
-	DefaultMaxMessageSize = 16 << 20  // one series, category or source
-	DefaultMaxSeries      = 50_000
-	DefaultMaxChapters    = 2_000_000 // over all series
+	DefaultMaxFileSize     = 64 << 20  // bytes as uploaded
+	DefaultMaxDataSize     = 256 << 20 // bytes after decompression
+	DefaultMaxMessageSize  = 16 << 20  // one series, category or source
+	DefaultMaxSeries       = 50_000
+	DefaultMaxChapters     = 1_000_000 // over all series
+	DefaultMaxHistory      = 1_000_000 // history entries over all series
+	DefaultMaxCategoryRefs = 500_000   // category orders over all series
+	DefaultMaxTrackerLinks = 200_000   // tracking entries over all series
+	DefaultMaxCategories   = 1_000
+	DefaultMaxSources      = 5_000
+	DefaultMaxText         = 128 << 20 // bytes of text kept in the model
 )
 
-// Limits bound what Read accepts, and so the memory it uses. Zero fields
-// take the defaults.
+// Limits bound what Read accepts, and so the memory it uses. Every
+// collection the model keeps has a cap; going over any of them fails with
+// ErrTooLarge. Zero fields take the defaults.
 type Limits struct {
-	MaxFileSize    int64
-	MaxDataSize    int64
-	MaxMessageSize int64
-	MaxSeries      int
-	MaxChapters    int
+	MaxFileSize    int64 // the file as read
+	MaxDataSize    int64 // the protobuf after decompression
+	MaxMessageSize int64 // one top-level message, which is buffered whole
+	MaxSeries      int   // series, in the library or not
+	MaxChapters    int   // chapters over all series
+	// MaxHistory caps history entries over all series.
+	MaxHistory int
+	// MaxCategoryRefs caps the category orders series list, over all series
+	// (repeats included).
+	MaxCategoryRefs int
+	// MaxTrackerLinks caps tracking entries over all series.
+	MaxTrackerLinks int
+	MaxCategories   int // top-level categories
+	MaxSources      int // top-level source names
+	// MaxText caps the bytes of text (titles, URLs, names, …) the model
+	// keeps, after invalid UTF-8 is replaced.
+	MaxText int64
 }
 
 func (l Limits) withDefaults() Limits {
@@ -73,6 +95,24 @@ func (l Limits) withDefaults() Limits {
 	}
 	if l.MaxChapters <= 0 {
 		l.MaxChapters = DefaultMaxChapters
+	}
+	if l.MaxHistory <= 0 {
+		l.MaxHistory = DefaultMaxHistory
+	}
+	if l.MaxCategoryRefs <= 0 {
+		l.MaxCategoryRefs = DefaultMaxCategoryRefs
+	}
+	if l.MaxTrackerLinks <= 0 {
+		l.MaxTrackerLinks = DefaultMaxTrackerLinks
+	}
+	if l.MaxCategories <= 0 {
+		l.MaxCategories = DefaultMaxCategories
+	}
+	if l.MaxSources <= 0 {
+		l.MaxSources = DefaultMaxSources
+	}
+	if l.MaxText <= 0 {
+		l.MaxText = DefaultMaxText
 	}
 	return l
 }
@@ -142,8 +182,11 @@ func read(file io.Reader, lim Limits) (*Backup, error) {
 	in := bufio.NewReader(file)
 	magic, err := in.Peek(2)
 	if err != nil {
-		if errors.Is(err, io.EOF) {
+		if errors.Is(err, io.EOF) && len(magic) == 0 {
 			return nil, fmt.Errorf("%w: the file is empty", ErrNotBackup)
+		}
+		if errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("%w: the file is too short to be a backup", ErrNotBackup)
 		}
 		return nil, err
 	}
@@ -199,11 +242,25 @@ func (c *capReader) tooLarge() error {
 	return fmt.Errorf("%w: %s over %s", ErrTooLarge, c.what, size(c.max))
 }
 
+// decoder counts what the model keeps over all messages against the Limits.
 type decoder struct {
-	lim      Limits
-	out      *Backup
-	chapters int
-	buf      []byte
+	lim          Limits
+	out          *Backup
+	chapters     int
+	history      int
+	categoryRefs int
+	trackers     int
+	text         int64
+	buf          []byte
+}
+
+// keepText counts n more bytes of text kept in the model.
+func (d *decoder) keepText(n int) error {
+	d.text += int64(n)
+	if d.text > d.lim.MaxText {
+		return fmt.Errorf("%w: over %s of text", ErrTooLarge, size(d.lim.MaxText))
+	}
+	return nil
 }
 
 // decode reads the top-level Backup message field by field, holding one
@@ -264,18 +321,33 @@ func (d *decoder) field(in *bufio.Reader, num protowire.Number) error {
 			return fmt.Errorf("%w: over %d series", ErrTooLarge, d.lim.MaxSeries)
 		}
 		s, err := d.series(d.buf)
+		if err == nil {
+			err = d.keepText(s.textSize())
+		}
 		if err != nil {
 			return fmt.Errorf("series %d: %w", len(d.out.Series)+1, err)
 		}
 		d.out.Series = append(d.out.Series, s)
 	case backupCategories:
+		if len(d.out.Categories) >= d.lim.MaxCategories {
+			return fmt.Errorf("%w: over %d categories", ErrTooLarge, d.lim.MaxCategories)
+		}
 		c, err := category(d.buf)
+		if err == nil {
+			err = d.keepText(len(c.Name))
+		}
 		if err != nil {
 			return fmt.Errorf("category %d: %w", len(d.out.Categories)+1, err)
 		}
 		d.out.Categories = append(d.out.Categories, c)
 	case backupSources:
+		if len(d.out.Sources) >= d.lim.MaxSources {
+			return fmt.Errorf("%w: over %d sources", ErrTooLarge, d.lim.MaxSources)
+		}
 		s, err := source(d.buf)
+		if err == nil {
+			err = d.keepText(len(s.Name))
+		}
 		if err != nil {
 			return fmt.Errorf("source %d: %w", len(d.out.Sources)+1, err)
 		}
@@ -337,25 +409,74 @@ func (d *decoder) finish() (*Backup, error) {
 	return b, nil
 }
 
-// joinCategories turns the category orders a series refers to into names.
-// Orders with no category are dropped, as Mihon does when restoring.
+// joinCategories turns the category orders a series refers to into names,
+// each name once. Orders with no category are dropped, as Mihon does when
+// restoring. The seen set keeps it linear in the number of orders.
 func joinCategories(orders []int64, names map[int64]string) []string {
 	if len(orders) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(orders))
+	var out []string
+	seen := make(map[string]struct{}, min(len(orders), len(names)))
 	for _, order := range orders {
-		if name, ok := names[order]; ok && !slices.Contains(out, name) {
-			out = append(out, name)
+		name, ok := names[order]
+		if !ok {
+			continue
 		}
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
 	}
 	return out
 }
 
+// count checks a series' chapters, history and tracking links against the
+// limits before any is decoded, so that each list is allocated once at its
+// final size instead of growing (and taking up to twice the room) entry by
+// entry.
+func (d *decoder) count(b []byte) (chapters, history, trackers int, err error) {
+	err = fields(b, func(f field) error {
+		switch f.num {
+		case mangaChapters:
+			chapters++
+		case mangaHistory:
+			history++
+		case mangaTracking:
+			trackers++
+		}
+		return nil
+	})
+	switch {
+	case err != nil:
+	case d.chapters+chapters > d.lim.MaxChapters:
+		err = fmt.Errorf("%w: over %d chapters", ErrTooLarge, d.lim.MaxChapters)
+	case d.history+history > d.lim.MaxHistory:
+		err = fmt.Errorf("%w: over %d history entries", ErrTooLarge, d.lim.MaxHistory)
+	case d.trackers+trackers > d.lim.MaxTrackerLinks:
+		err = fmt.Errorf("%w: over %d tracking links", ErrTooLarge, d.lim.MaxTrackerLinks)
+	}
+	return chapters, history, trackers, err
+}
+
 func (d *decoder) series(b []byte) (Series, error) {
 	s := Series{InLibrary: true} // favorite defaults to true and is then left out
+	nChapters, nHistory, nTrackers, err := d.count(b)
+	if err != nil {
+		return s, err
+	}
+	if nChapters > 0 {
+		s.Chapters = make([]Chapter, 0, nChapters)
+	}
+	if nHistory > 0 {
+		s.History = make([]History, 0, nHistory)
+	}
+	if nTrackers > 0 {
+		s.Trackers = make([]int32, 0, nTrackers)
+	}
 	var hasSource, hasURL bool
-	err := fields(b, func(f field) error {
+	err = fields(b, func(f field) error {
 		var err error
 		switch f.num {
 		case mangaSource:
@@ -380,6 +501,10 @@ func (d *decoder) series(b []byte) (Series, error) {
 			s.InLibrary, err = f.bool()
 		case mangaCategory:
 			err = f.varints(func(v uint64) error {
+				if d.categoryRefs >= d.lim.MaxCategoryRefs {
+					return fmt.Errorf("%w: over %d category references", ErrTooLarge, d.lim.MaxCategoryRefs)
+				}
+				d.categoryRefs++
 				s.categoryOrders = append(s.categoryOrders, int64(v)) //nolint:gosec // two's complement, as encoded
 				return nil
 			})
@@ -394,13 +519,26 @@ func (d *decoder) series(b []byte) (Series, error) {
 				s.Chapters = append(s.Chapters, c)
 			}
 		case mangaHistory:
+			if d.history >= d.lim.MaxHistory {
+				return fmt.Errorf("%w: over %d history entries", ErrTooLarge, d.lim.MaxHistory)
+			}
 			var h History
 			h, err = history(f)
-			s.History = append(s.History, h)
+			if err == nil {
+				d.history++
+				s.History = append(s.History, h)
+			}
 		case mangaTracking:
+			if d.trackers >= d.lim.MaxTrackerLinks {
+				return fmt.Errorf("%w: over %d tracking links", ErrTooLarge, d.lim.MaxTrackerLinks)
+			}
 			var id int32
-			id, err = tracking(f)
-			s.Trackers = append(s.Trackers, id)
+			var ok bool
+			id, ok, err = tracking(f)
+			d.trackers++ // counted even when skipped, as count did
+			if err == nil && ok {
+				s.Trackers = append(s.Trackers, id)
+			}
 		}
 		return err
 	})
@@ -464,17 +602,20 @@ func history(f field) (History, error) {
 	return h, err
 }
 
-func tracking(f field) (int32, error) {
-	var id int64
-	err := f.message(func(f field) error {
+// tracking reads a tracking link's tracker id. Mihon requires it; an entry
+// without one names no tracker, so it isn't kept (ok false).
+func tracking(f field) (id int32, ok bool, err error) {
+	var v int64
+	err = f.message(func(f field) error {
 		if f.num != trackingSyncID {
 			return nil
 		}
+		ok = true
 		var err error
-		id, err = f.int64()
+		v, err = f.int64()
 		return err
 	})
-	return int32(id), err //nolint:gosec // an Int in the format
+	return int32(v), ok, err //nolint:gosec // an Int in the format
 }
 
 func category(b []byte) (Category, error) {

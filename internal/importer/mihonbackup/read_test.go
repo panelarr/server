@@ -369,18 +369,84 @@ func TestReadSkipsTrackingWithoutID(t *testing.T) {
 func TestJoinCategoriesLinear(t *testing.T) {
 	const n = 200_000
 	orders := make([]int64, n)
-	names := make(map[int64]string, n)
 	for i := range orders {
 		orders[i] = int64(i)
-		names[int64(i)] = strconv.Itoa(i)
+	}
+	categories := make([]Category, n)
+	for i := range categories {
+		categories[i] = Category{Name: strconv.Itoa(i), Order: int64(i)}
 	}
 	start := time.Now()
-	got := joinCategories(append(orders, orders...), names)
+	got := newCategoryJoin(categories).names(append(orders, orders...))
 	if len(got) != n {
 		t.Fatalf("%d names", len(got))
 	}
 	if d := time.Since(start); d > 10*time.Second {
 		t.Errorf("join took %v", d)
+	}
+}
+
+// Long category names cost the same to join as short ones: 16 distinct
+// names of 1 MiB each, referred to 499,000 times by one series and by a
+// thousand more series once each (500,000 references, the default cap). A join that hashed or compared the name per order read
+// half a terabyte here (minutes); one on integer indexes takes milliseconds.
+func TestReadJoinsLongCategoryNamesFast(t *testing.T) {
+	const names, orders = 16, 499_000
+	data := msg{}
+	for i := range names {
+		name := strings.Repeat(string(rune('a'+i)), 1<<20)
+		data = data.msg(2, msg{}.str(1, name).int(2, int64(i)))
+	}
+	one := msg{}.int(1, 1).str(2, "/all")
+	for i := range orders {
+		one = one.int(17, int64(i%names))
+	}
+	data = data.msg(1, one)
+	for i := range 1000 {
+		data = data.msg(1, msg{}.int(1, 1).str(2, "/s"+strconv.Itoa(i)).int(17, int64(i%names)))
+	}
+	file := gz(t, data)
+
+	start := time.Now()
+	b, err := Read(bytes.NewReader(file), Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("Read took %v", d)
+	}
+	if got := len(b.Series[0].Categories); got != names {
+		t.Fatalf("%d categories", got)
+	}
+	for i, name := range b.Series[0].Categories {
+		if len(name) != 1<<20 || name[0] != byte('a'+i) {
+			t.Errorf("category %d = %q…", i, name[:8])
+		}
+	}
+	if got := b.Series[1].Categories; len(got) != 1 || got[0][0] != 'a' {
+		t.Errorf("second series' categories = %d", len(got))
+	}
+}
+
+// A category join does a fixed amount of work per order, however long the
+// names: built once, it never touches a name again.
+func TestCategoryJoinCountsOrdersNotNames(t *testing.T) {
+	categories := []Category{
+		{Name: "A", Order: 1}, {Name: "B", Order: 2},
+		{Name: "A", Order: 3}, {Name: "B again", Order: 2},
+	}
+	j := newCategoryJoin(categories)
+	if len(j.distinct) != 2 || len(j.index) != 3 {
+		t.Fatalf("distinct = %q, index = %v", j.distinct, j.index)
+	}
+	if got := strings.Join(j.names([]int64{3, 2, 1, 9, 2}), ","); got != "A,B" {
+		t.Errorf("first join = %q", got)
+	}
+	if got := strings.Join(j.names([]int64{2, 2}), ","); got != "B" {
+		t.Errorf("second join = %q", got)
+	}
+	if got := j.names(nil); got != nil {
+		t.Errorf("empty join = %q", got)
 	}
 }
 

@@ -81,7 +81,9 @@ real ones (a large library has a thousand or so series with a few hundred chapte
 | `MaxText` | 128 MiB | Bytes of text the model keeps (titles, URLs, names, …) after cleaning. Replacing invalid UTF-8 can double text, so the data size alone doesn't bound it |
 
 The chapter, history and tracking counts of a series are checked before it is decoded, and its lists are allocated
-once at their final size. Categories are joined to series with a set, in time linear in the orders listed.
+once at their final size. Categories are joined to series on small integers: each distinct category name is hashed
+once, every order maps to an index, and a series' orders are deduplicated on those indexes. The join is linear in the
+orders listed and doesn't depend on how long the names are (a name can be megabytes).
 
 What the defaults allow at most, from the size of each element on 64-bit platforms:
 
@@ -93,10 +95,19 @@ What the defaults allow at most, from the size of each element on 64-bit platfor
 | Category orders, then joined names | 8 MiB |
 | Tracking, categories, sources and the maps that join them | 2 MiB |
 | Text | 128 MiB |
-| **Model** | **about 320 MiB** |
-| While reading: one message buffer, the text of the message being decoded, the series list growing, one series' last-read times | about 70 MiB more |
-| **Peak** | **about 400 MiB** |
+| **Model, by element sizes** | **about 320 MiB** |
+| Allocation overhead (size classes, string headers, slack in maps) | about 30 MiB more |
+| **Model, as measured** | **about 352 MiB** |
+| While reading: one message buffer, the text of the message being decoded, the series list growing, one series' last-read times | about 90 MiB more |
+| **Peak heap, as measured** | **about 445 MiB** |
+| **Peak RSS of the process, as measured** | **about 465 MiB** |
 
-The tests read a backup at every count limit at once and small, hostile files (a few hundred KiB that hold millions
-of entries of one kind, or text that doubles when cleaned), and check the memory `Read` allocates against these
-figures.
+The measured figures come from the worst file a review could build within the defaults. The tests read a backup at
+every count limit at once and small, hostile files (a few hundred KiB that hold millions of entries of one kind, text
+that doubles when cleaned, or megabyte-long category names referred to half a million times), and check the memory
+and time `Read` takes against these figures.
+
+### One read at a time
+
+These figures are for one `Read`. Each call holds its own buffers and model, so concurrent reads add up: a caller
+must allow only one `Read` at a time (the import endpoint holds a lock for it) or budget the memory of each.

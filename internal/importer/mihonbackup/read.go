@@ -160,6 +160,10 @@ const (
 
 // Read parses a backup: gzip-compressed (as Mihon and Suwayomi write it) or
 // plain protobuf (which Mihon also restores).
+//
+// The limits bound the memory of one call (up to about 450 MiB at the
+// defaults, see docs/import.md). Calls don't share anything, so concurrent
+// calls add up: callers must allow only one Read at a time.
 func Read(r io.Reader, lim Limits) (*Backup, error) {
 	lim = lim.withDefaults()
 	file := &capReader{r: r, max: lim.MaxFileSize, what: "file", source: true}
@@ -382,16 +386,11 @@ func (d *decoder) finish() (*Backup, error) {
 	for _, s := range b.Sources {
 		sources[s.ID] = s.Name
 	}
-	categories := make(map[int64]string, len(b.Categories))
-	for _, c := range b.Categories {
-		if _, ok := categories[c.Order]; !ok {
-			categories[c.Order] = c.Name
-		}
-	}
+	join := newCategoryJoin(b.Categories)
 	for i := range b.Series {
 		s := &b.Series[i]
 		s.SourceName = sources[s.SourceID]
-		s.Categories = joinCategories(s.categoryOrders, categories)
+		s.Categories = join.names(s.categoryOrders)
 		s.categoryOrders = nil
 		if len(s.History) == 0 {
 			continue
@@ -409,25 +408,55 @@ func (d *decoder) finish() (*Backup, error) {
 	return b, nil
 }
 
-// joinCategories turns the category orders a series refers to into names,
+// categoryJoin turns the category orders a series refers to into names,
 // each name once. Orders with no category are dropped, as Mihon does when
-// restoring. The seen set keeps it linear in the number of orders.
-func joinCategories(orders []int64, names map[int64]string) []string {
+// restoring, and the first category (by order, then position) wins an order
+// two share.
+//
+// Names can be megabytes long and a backup may list hundreds of thousands of
+// orders, so each name is hashed once, when the join is built, and every
+// order maps to a small integer: joining a series then costs one map lookup
+// on the int64 order and one slice access per order, whatever the names'
+// length.
+type categoryJoin struct {
+	index    map[int64]int // category order → index into distinct
+	distinct []string      // category names, each once
+	seen     []int         // per distinct name: the last join that listed it
+	join     int
+}
+
+func newCategoryJoin(categories []Category) *categoryJoin {
+	j := &categoryJoin{index: make(map[int64]int, len(categories))}
+	byName := make(map[string]int, len(categories))
+	for _, c := range categories {
+		if _, ok := j.index[c.Order]; ok {
+			continue
+		}
+		k, ok := byName[c.Name]
+		if !ok {
+			k = len(j.distinct)
+			byName[c.Name] = k
+			j.distinct = append(j.distinct, c.Name)
+		}
+		j.index[c.Order] = k
+	}
+	j.seen = make([]int, len(j.distinct))
+	return j
+}
+
+func (j *categoryJoin) names(orders []int64) []string {
 	if len(orders) == 0 {
 		return nil
 	}
+	j.join++
 	var out []string
-	seen := make(map[string]struct{}, min(len(orders), len(names)))
 	for _, order := range orders {
-		name, ok := names[order]
-		if !ok {
+		k, ok := j.index[order]
+		if !ok || j.seen[k] == j.join {
 			continue
 		}
-		if _, dup := seen[name]; dup {
-			continue
-		}
-		seen[name] = struct{}{}
-		out = append(out, name)
+		j.seen[k] = j.join
+		out = append(out, j.distinct[k])
 	}
 	return out
 }

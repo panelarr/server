@@ -60,6 +60,9 @@ type Principal struct {
 	// SessionID and CSRFToken are set for sessions.
 	SessionID uuid.UUID
 	CSRFToken string
+	// SessionAuth is how the session was started: SessionPassword or
+	// SessionOIDC.
+	SessionAuth string
 	// APIKeyID is set for API keys.
 	APIKeyID uuid.UUID
 	// Scopes the caller holds.

@@ -101,6 +101,23 @@ func (q *Queries) DeleteUserSessions(ctx context.Context, userID uuid.UUID) erro
 	return err
 }
 
+const deleteUserSessionsByMethod = `-- name: DeleteUserSessionsByMethod :execrows
+DELETE FROM sessions WHERE user_id = $1 AND auth_method = $2
+`
+
+type DeleteUserSessionsByMethodParams struct {
+	UserID     uuid.UUID
+	AuthMethod string
+}
+
+func (q *Queries) DeleteUserSessionsByMethod(ctx context.Context, arg DeleteUserSessionsByMethodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteUserSessionsByMethod, arg.UserID, arg.AuthMethod)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteUserSessionsExcept = `-- name: DeleteUserSessionsExcept :exec
 DELETE FROM sessions WHERE user_id = $1 AND id <> $2
 `

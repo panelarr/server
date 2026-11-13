@@ -63,6 +63,9 @@ func (s *Server) ListUsers(ctx context.Context, req apigen.ListUsersRequestObjec
 	for i, u := range rows {
 		out.Users[i] = toUser(u)
 	}
+	if err := s.withSSOMarks(ctx, out.Users); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -80,7 +83,11 @@ func (s *Server) CreateUser(ctx context.Context, req apigen.CreateUserRequestObj
 	if err != nil {
 		return nil, domainError(err)
 	}
-	return apigen.CreateUser201JSONResponse(toUser(u)), nil
+	out, err := s.userWithSSO(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.CreateUser201JSONResponse(out), nil
 }
 
 // GetUser returns a user.
@@ -89,7 +96,11 @@ func (s *Server) GetUser(ctx context.Context, req apigen.GetUserRequestObject) (
 	if err != nil {
 		return nil, domainError(err)
 	}
-	return apigen.GetUser200JSONResponse(toUser(u)), nil
+	out, err := s.userWithSSO(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.GetUser200JSONResponse(out), nil
 }
 
 // UpdateUser changes a user.
@@ -104,7 +115,11 @@ func (s *Server) UpdateUser(ctx context.Context, req apigen.UpdateUserRequestObj
 	if err != nil {
 		return nil, domainError(err)
 	}
-	return apigen.UpdateUser200JSONResponse(toUser(u)), nil
+	out, err := s.userWithSSO(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.UpdateUser200JSONResponse(out), nil
 }
 
 // DeleteUser deletes a user.

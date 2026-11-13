@@ -146,6 +146,9 @@ type NewUser struct {
 	DisplayName string
 	Role        string
 	Grants      Grants
+	// NoPassword creates the user without a password (single sign-on
+	// only); Password is ignored.
+	NoPassword bool
 }
 
 func (s *Service) create(ctx context.Context, q *db.Queries, n NewUser) (db.User, error) {
@@ -158,9 +161,13 @@ func (s *Service) create(ctx context.Context, q *db.Queries, n NewUser) (db.User
 	if err := n.Grants.Validate(); err != nil {
 		return db.User{}, err
 	}
-	hash, err := s.auth.Hasher().Hash(ctx, n.Password)
-	if err != nil {
-		return db.User{}, err
+	hash := auth.NoPassword
+	if !n.NoPassword {
+		h, err := s.auth.Hasher().Hash(ctx, n.Password)
+		if err != nil {
+			return db.User{}, err
+		}
+		hash = h
 	}
 	g := n.Grants
 	u, err := q.CreateUser(ctx, db.CreateUserParams{

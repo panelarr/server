@@ -52,6 +52,7 @@ type Querier interface {
 	CountImports(ctx context.Context, userID uuid.UUID) (int32, error)
 	CountLibraryViews(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountSourcesByPlugin(ctx context.Context) ([]CountSourcesByPluginRow, error)
+	CountUserIdentitiesAtIssuer(ctx context.Context, arg CountUserIdentitiesAtIssuerParams) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
 	CreateImport(ctx context.Context, arg CreateImportParams) (Import, error)
@@ -91,8 +92,10 @@ type Querier interface {
 	DeleteStorage(ctx context.Context, id string) (int64, error)
 	DeleteUser(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteUserAPIKey(ctx context.Context, arg DeleteUserAPIKeyParams) (int64, error)
+	DeleteUserIdentity(ctx context.Context, arg DeleteUserIdentityParams) (int64, error)
 	DeleteUserSession(ctx context.Context, arg DeleteUserSessionParams) (int64, error)
 	DeleteUserSessions(ctx context.Context, userID uuid.UUID) error
+	DeleteUserSessionsByMethod(ctx context.Context, arg DeleteUserSessionsByMethodParams) (int64, error)
 	DeleteUserSessionsExcept(ctx context.Context, arg DeleteUserSessionsExceptParams) error
 	// Before attaching another series of the same source.
 	DemoteAttached(ctx context.Context, arg DemoteAttachedParams) error
@@ -230,6 +233,7 @@ type Querier interface {
 	ListSourcesByCompatID(ctx context.Context, compatID string) ([]ListSourcesByCompatIDRow, error)
 	ListStorages(ctx context.Context) ([]Storage, error)
 	ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, error)
+	ListUserIdentities(ctx context.Context, userID uuid.UUID) ([]UserIdentity, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
 	ListWorkSourceMatches(ctx context.Context, workID uuid.UUID) ([]WorkSourceMatch, error)
 	// Serialises changes that check "is there another admin?" or "is this the
@@ -300,6 +304,7 @@ type Querier interface {
 	// installed packages still provide in a language turned off.
 	SetUnavailableReasons(ctx context.Context, arg SetUnavailableReasonsParams) error
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
+	SetUserRole(ctx context.Context, arg SetUserRoleParams) (User, error)
 	// Closes the gap a deleted view left in the order.
 	ShiftLibraryViewsUp(ctx context.Context, arg ShiftLibraryViewsUpParams) error
 	// From preview, or again after a cancel or a failure (it resumes): once
@@ -341,6 +346,8 @@ type Querier interface {
 	UpsertSourceSeries(ctx context.Context, arg UpsertSourceSeriesParams) (SourceSeries, error)
 	UpsertWork(ctx context.Context, arg UpsertWorkParams) (UpsertWorkRow, error)
 	UpsertWorkSourceMatch(ctx context.Context, arg UpsertWorkSourceMatchParams) error
+	// Which of the given users have a linked login.
+	UsersWithIdentities(ctx context.Context, userIds []uuid.UUID) ([]uuid.UUID, error)
 	WorkHasPendingImports(ctx context.Context, workID uuid.NullUUID) (bool, error)
 	WorkProgress(ctx context.Context, arg WorkProgressParams) ([]Progress, error)
 	// Present chapters of a work's attached series, with what decides the

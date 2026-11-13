@@ -140,6 +140,11 @@ func TestOIDC(t *testing.T) {
 	if !slices.Equal(o.AllowedGroups, []string{"readers", "admins"}) || o.GroupsClaim != "groups" || o.ButtonLabel != "Sign in with SSO" {
 		t.Fatalf("got %+v", o)
 	}
+	// O2's settings default to the safe side: no provisioning, no role
+	// sync, password login for everyone, logout at Panelarr only.
+	if o.AutoProvision || o.AdminGroups != nil || o.LocalLogin != LocalLoginAll || o.Logout != LogoutLocal || o.UsernameClaim != "preferred_username" {
+		t.Fatalf("defaults: %+v", o)
+	}
 	// The secret never shows when the settings are printed or logged,
 	// alone or as part of the whole configuration.
 	var logged strings.Builder
@@ -209,6 +214,18 @@ func TestOIDCValidation(t *testing.T) {
 		"only button label":   {EnvOIDCIssuer: "", EnvOIDCClientID: "", EnvOIDCButtonLabel: "SSO"},
 		"only groups claim":   {EnvOIDCIssuer: "", EnvOIDCClientID: "", EnvOIDCGroupsClaim: "roles"},
 		"only allowed groups": {EnvOIDCIssuer: "", EnvOIDCClientID: "", EnvOIDCAllowedGroups: "readers"},
+		"only username claim": {EnvOIDCIssuer: "", EnvOIDCClientID: "", EnvOIDCUsernameClaim: "email"},
+		"only auto provision": {EnvOIDCIssuer: "", EnvOIDCClientID: "", EnvOIDCAutoProvision: "true"},
+		"only admin groups":   {EnvOIDCIssuer: "", EnvOIDCClientID: "", EnvOIDCAdminGroups: "admins"},
+		// Limiting password login to admins needs single sign-on for
+		// everyone else.
+		"only local login": {EnvOIDCIssuer: "", EnvOIDCClientID: "", EnvOIDCLocalLogin: "admins"},
+		"only logout":      {EnvOIDCIssuer: "", EnvOIDCClientID: "", EnvOIDCLogout: "provider"},
+		// Password login can't be switched off.
+		"local login none":     {EnvOIDCLocalLogin: "none"},
+		"local login off":      {EnvOIDCLocalLogin: "off"},
+		"logout elsewhere":     {EnvOIDCLogout: "everywhere"},
+		"auto provision maybe": {EnvOIDCAutoProvision: "maybe"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			env := ok()
@@ -223,5 +240,16 @@ func TestOIDCValidation(t *testing.T) {
 	}
 	if _, err := load(t, ok()); err != nil {
 		t.Fatalf("valid: %v", err)
+	}
+	env := ok()
+	env[EnvOIDCAutoProvision], env[EnvOIDCAdminGroups], env[EnvOIDCLocalLogin], env[EnvOIDCLogout], env[EnvOIDCUsernameClaim] =
+		"TRUE", "admins, ops", "Admins", "provider", "email"
+	cfg, err := load(t, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o := cfg.OIDC; !o.AutoProvision || !slices.Equal(o.AdminGroups, []string{"admins", "ops"}) || o.LocalLogin != LocalLoginAdmins ||
+		o.Logout != LogoutProvider || o.UsernameClaim != "email" {
+		t.Fatalf("got %+v", o)
 	}
 }

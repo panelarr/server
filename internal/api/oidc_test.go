@@ -23,13 +23,24 @@ import (
 
 // withSSO turns single sign-on on with the mock provider.
 func withSSO(m *mockOP, allowedGroups ...string) harnessOpt {
+	return withSSOConfig(m, func(c *sso.Config) { c.AllowedGroups = allowedGroups })
+}
+
+// withSSOConfig turns single sign-on on with the mock provider and the
+// settings change makes.
+func withSSOConfig(m *mockOP, change func(*sso.Config)) harnessOpt {
 	return func(d *Deps) {
 		box := secret.NewBox(base64.StdEncoding.EncodeToString(make([]byte, 32)), "")
-		d.SSO = sso.New(sso.Config{
+		c := sso.Config{
 			Issuer: m.issuer, ClientID: mockClientID, ClientSecret: mockClientSecret,
 			Scopes: []string{"openid", "profile", "email"}, RedirectURL: mockRedirectURI,
-			Label: "Sign in with Example ID", AllowedGroups: allowedGroups,
-		}, box, m.srv.Client(), nil)
+			Label: "Sign in with Example ID", PostLogoutRedirectURL: "https://panelarr.example.com/login",
+		}
+		if change != nil {
+			change(&c)
+		}
+		d.SSO = sso.New(c, box, m.srv.Client(), nil)
+		d.Auth.SetPasswordAdminsOnly(c.PasswordAdminsOnly)
 	}
 }
 
@@ -469,8 +480,10 @@ func TestOIDCRateLimited(t *testing.T) {
 	h.link(m, reader.Id, "subject-reader")
 	b := h.browser()
 	for range 30 {
-		b.expectSSOError(b.do(http.MethodGet, "/api/v1/auth/oidc/callback?code=x&state=y", nil), "flow_expired")
-		b.expectSSOError(b.do(http.MethodGet, "/api/v1/auth/oidc/callback?error=access_denied", nil), "flow_expired")
+		// Without a flow cookie (another browser at the same address).
+		nb := h.browser()
+		nb.expectSSOError(nb.do(http.MethodGet, "/api/v1/auth/oidc/callback?code=x&state=y", nil), "flow_expired")
+		nb.expectSSOError(nb.do(http.MethodGet, "/api/v1/auth/oidc/callback?error=access_denied", nil), "flow_expired")
 		b.startSSO("")
 		b.expectSSOError(b.do(http.MethodGet, "/api/v1/auth/oidc/callback?code=x&state=y", nil), "state_mismatch")
 	}

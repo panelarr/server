@@ -263,6 +263,39 @@ func (q *Queries) SetUserPassword(ctx context.Context, arg SetUserPasswordParams
 	return err
 }
 
+const setUserRole = `-- name: SetUserRole :one
+UPDATE users SET role = $1, updated_at = now() WHERE id = $2 RETURNING id, username, display_name, password_hash, role, disabled, may_add, may_download, may_manage_matches, content_rating_ceiling, all_sources, allowed_sources, created_at, updated_at, password_changed_at, last_login_at
+`
+
+type SetUserRoleParams struct {
+	Role string
+	ID   uuid.UUID
+}
+
+func (q *Queries) SetUserRole(ctx context.Context, arg SetUserRoleParams) (User, error) {
+	row := q.db.QueryRow(ctx, setUserRole, arg.Role, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.Role,
+		&i.Disabled,
+		&i.MayAdd,
+		&i.MayDownload,
+		&i.MayManageMatches,
+		&i.ContentRatingCeiling,
+		&i.AllSources,
+		&i.AllowedSources,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PasswordChangedAt,
+		&i.LastLoginAt,
+	)
+	return i, err
+}
+
 const touchUserLogin = `-- name: TouchUserLogin :exec
 UPDATE users SET last_login_at = now() WHERE id = $1
 `

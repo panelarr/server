@@ -54,6 +54,12 @@ func requestCookie(ctx context.Context, name string) string {
 	return c.Value
 }
 
+// requestHeader returns the request's header name, or "".
+func requestHeader(ctx context.Context, name string) string {
+	h, _ := ctx.Value(requestHeaderKey).(http.Header)
+	return h.Get(name)
+}
+
 // ClientIP returns the request's client address.
 func ClientIP(ctx context.Context) string {
 	ip, _ := ctx.Value(clientIPKey).(string)

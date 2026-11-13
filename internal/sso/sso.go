@@ -20,7 +20,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -78,6 +80,18 @@ type Config struct {
 	GroupsClaim string
 	// AllowedGroups, when set, lets only their members sign in.
 	AllowedGroups []string
+	// UsernameClaim names the claim a new user's username comes from.
+	UsernameClaim string
+	// AdminGroups, when set, decides linked users' roles on sign-in.
+	AdminGroups []string
+	// AutoProvision creates users for unknown logins.
+	AutoProvision bool
+	// PasswordAdminsOnly limits password login to admins.
+	PasswordAdminsOnly bool
+	// ProviderLogout also ends the session at the provider on logout
+	// (RP-initiated logout), returning to PostLogoutRedirectURL.
+	ProviderLogout        bool
+	PostLogoutRedirectURL string
 }
 
 // Sealer encrypts the flow cookie (secret.Box).
@@ -127,6 +141,9 @@ func New(cfg Config, sealer Sealer, client *http.Client, log *slog.Logger) *Prov
 	if cfg.GroupsClaim == "" {
 		cfg.GroupsClaim = "groups"
 	}
+	if cfg.UsernameClaim == "" {
+		cfg.UsernameClaim = "preferred_username"
+	}
 	return &Provider{cfg: cfg, sealer: sealer, client: client, log: log, now: time.Now, retryWait: retryMin, nonces: newNonceSet()}
 }
 
@@ -136,6 +153,52 @@ func (p *Provider) Label() string { return p.cfg.Label }
 // Issuer is the provider's issuer, which with a subject identifies a
 // user.
 func (p *Provider) Issuer() string { return p.cfg.Issuer }
+
+// Settings returns the provider's configuration without the client
+// secret, for the admins' status page and the sign-in rules.
+func (p *Provider) Settings() Config {
+	c := p.cfg
+	c.ClientSecret = ""
+	c.Scopes = slices.Clone(c.Scopes)
+	c.AllowedGroups = slices.Clone(c.AllowedGroups)
+	c.AdminGroups = slices.Clone(c.AdminGroups)
+	return c
+}
+
+// PublicClient reports whether the client has no secret (PKCE only).
+func (p *Provider) PublicClient() bool { return p.cfg.ClientSecret == "" }
+
+// LogoutURL is where to send the browser to end its session at the
+// provider too (RP-initiated logout), with the client ID and the
+// post-logout redirect. ok is false when provider logout is off or the
+// provider has no end-session endpoint (or can't be reached): then only
+// Panelarr's session ends.
+func (p *Provider) LogoutURL(ctx context.Context) (string, bool) {
+	if !p.cfg.ProviderLogout {
+		return "", false
+	}
+	d, err := p.discover(ctx, false)
+	if err != nil {
+		return "", false
+	}
+	var meta struct {
+		EndSession string `json:"end_session_endpoint"`
+	}
+	if err := d.provider.Claims(&meta); err != nil || meta.EndSession == "" {
+		return "", false
+	}
+	u, err := url.Parse(meta.EndSession)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return "", false
+	}
+	q := u.Query()
+	q.Set("client_id", p.cfg.ClientID)
+	if p.cfg.PostLogoutRedirectURL != "" {
+		q.Set("post_logout_redirect_uri", p.cfg.PostLogoutRedirectURL)
+	}
+	u.RawQuery = q.Encode()
+	return u.String(), true
+}
 
 // Run fetches the discovery document, retrying with a backoff until it
 // succeeds or ctx ends, so a provider that is down at startup doesn't stop
@@ -250,19 +313,52 @@ type flow struct {
 	Verifier string    `json:"v"`
 	ReturnTo string    `json:"r"`
 	Expires  time.Time `json:"e"`
+	// What the flow is for (Start).
+	Intent    string `json:"i,omitempty"`
+	Invite    string `json:"t,omitempty"`
+	UserID    string `json:"u,omitempty"`
+	SessionID string `json:"x,omitempty"`
+}
+
+// Intents of a flow.
+const (
+	// IntentLogin signs in (or provisions a user).
+	IntentLogin = "login"
+	// IntentLink links the login to the signed-in user.
+	IntentLink = "link"
+	// IntentInvite creates the user an invite allows.
+	IntentInvite = "invite"
+)
+
+// Start describes a sign-in to begin.
+type Start struct {
+	// ReturnTo must already be checked to be a local path.
+	ReturnTo string
+	// Intent is IntentLogin (default), IntentLink or IntentInvite.
+	Intent string
+	// Invite is the invite token (IntentInvite). It travels sealed in
+	// the flow cookie, never to the provider.
+	Invite string
+	// UserID and SessionID are the signed-in user's (IntentLink): the
+	// callback links only while that session is still the caller's.
+	UserID    string
+	SessionID string
 }
 
 // Begin starts a sign-in: it returns the provider's authorization URL to
-// send the browser to and the sealed flow cookie value. returnTo must
-// already be checked to be a local path.
-func (p *Provider) Begin(ctx context.Context, returnTo string) (authURL, cookie string, err error) {
+// send the browser to and the sealed flow cookie value.
+func (p *Provider) Begin(ctx context.Context, st Start) (authURL, cookie string, err error) {
 	d, err := p.discover(ctx, false)
 	if err != nil {
 		return "", "", err
 	}
+	if st.Intent == "" {
+		st.Intent = IntentLogin
+	}
 	f := flow{
 		State: oauth2.GenerateVerifier(), Nonce: oauth2.GenerateVerifier(), Verifier: oauth2.GenerateVerifier(),
-		ReturnTo: returnTo, Expires: p.now().Add(FlowTTL),
+		ReturnTo: st.ReturnTo, Expires: p.now().Add(FlowTTL),
+		Intent: st.Intent, Invite: st.Invite, UserID: st.UserID, SessionID: st.SessionID,
 	}
 	raw, err := json.Marshal(f)
 	if err != nil {
@@ -281,8 +377,18 @@ type Identity struct {
 	Issuer  string
 	Subject string
 	// Email as the provider reports it, for display only.
-	Email  string
-	Groups []string
+	Email string
+	// Name is the user's display name, if the provider says.
+	Name string
+	// Usernames are candidates for a new user's username, best first:
+	// the username claim, the email's local part, the subject.
+	Usernames []string
+	// Groups the user is in. GroupsKnown is false when neither the ID
+	// token nor userinfo had the groups claim at all (then roles aren't
+	// synced: a missing claim is a configuration problem, not "no
+	// groups").
+	Groups      []string
+	GroupsKnown bool
 }
 
 // Result is a finished sign-in.
@@ -290,64 +396,93 @@ type Result struct {
 	Identity Identity
 	// ReturnTo is where the browser asked to go.
 	ReturnTo string
+	// Intent, Invite, UserID and SessionID are the flow's (Start).
+	Intent    string
+	Invite    string
+	UserID    string
+	SessionID string
 }
 
 // Finish completes a sign-in from the callback: cookie is the flow
-// cookie's value, state and code the callback's parameters.
+// cookie's value, state and code the callback's parameters. Once the flow
+// cookie opened and the state matched, the result carries the flow's
+// fields (ReturnTo, Intent…) even with an error.
 func (p *Provider) Finish(ctx context.Context, cookie, state, code string) (Result, error) {
 	f, err := p.claim(cookie, state)
 	if err != nil {
 		return Result{}, err
 	}
+	// From here on the flow is known: failures carry it, so the caller
+	// can send a link flow's errors back where it started.
+	r := Result{ReturnTo: f.ReturnTo, Intent: f.Intent, Invite: f.Invite, UserID: f.UserID, SessionID: f.SessionID}
 	if code == "" {
-		return Result{}, fmt.Errorf("%w: no code", ErrProvider)
+		return r, fmt.Errorf("%w: no code", ErrProvider)
 	}
 	d, err := p.discover(ctx, false)
 	if err != nil {
-		return Result{}, err
+		return r, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, p.client)
 	tok, err := d.oauth.Exchange(ctx, code, oauth2.VerifierOption(f.Verifier))
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: exchange the code: %w", ErrProvider, redactExchangeError(err))
+		return r, fmt.Errorf("%w: exchange the code: %w", ErrProvider, redactExchangeError(err))
 	}
 	rawID, _ := tok.Extra("id_token").(string)
 	if rawID == "" {
-		return Result{}, fmt.Errorf("%w: no ID token in the response", ErrInvalidToken)
+		return r, fmt.Errorf("%w: no ID token in the response", ErrInvalidToken)
 	}
 	idt, err := d.verifier.Verify(oidc.ClientContext(ctx, p.client), rawID)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrInvalidToken, err)
+		return r, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	if idt.Nonce == "" || subtle.ConstantTimeCompare([]byte(idt.Nonce), []byte(f.Nonce)) != 1 {
-		return Result{}, fmt.Errorf("%w: nonce mismatch", ErrInvalidToken)
+		return r, fmt.Errorf("%w: nonce mismatch", ErrInvalidToken)
 	}
 	if idt.Subject == "" {
-		return Result{}, fmt.Errorf("%w: no subject", ErrInvalidToken)
+		return r, fmt.Errorf("%w: no subject", ErrInvalidToken)
 	}
 	var claims map[string]any
 	if err := idt.Claims(&claims); err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrInvalidToken, err)
+		return r, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	if err := p.checkAZP(idt.Audience, claims); err != nil {
-		return Result{}, err
+		return r, err
 	}
-	id := Identity{Issuer: p.cfg.Issuer, Subject: idt.Subject, Email: stringClaim(claims, "email")}
+	id := Identity{
+		Issuer: p.cfg.Issuer, Subject: idt.Subject, Email: stringClaim(claims, "email"), Name: stringClaim(claims, "name"),
+	}
+	email := id.Email
+	if u := stringClaim(claims, p.cfg.UsernameClaim); u != "" {
+		if p.cfg.UsernameClaim == "email" {
+			u, _, _ = strings.Cut(u, "@")
+		}
+		id.Usernames = append(id.Usernames, u)
+	}
+	if local, _, ok := strings.Cut(email, "@"); ok && local != "" {
+		id.Usernames = append(id.Usernames, local)
+	}
+	id.Usernames = append(id.Usernames, idt.Subject)
 	groups, hasGroups := listClaim(claims, p.cfg.GroupsClaim)
-	if !hasGroups && len(p.cfg.AllowedGroups) > 0 {
+	if !hasGroups && (len(p.cfg.AllowedGroups) > 0 || len(p.cfg.AdminGroups) > 0) {
 		// Many providers put groups only in userinfo.
-		groups, err = p.userinfoGroups(ctx, d, tok, idt.Subject)
+		groups, hasGroups, err = p.userinfoGroups(ctx, d, tok, idt.Subject)
 		if err != nil {
-			return Result{}, err
+			return r, err
 		}
 	}
-	id.Groups = groups
-	if len(p.cfg.AllowedGroups) > 0 && !slices.ContainsFunc(groups, func(g string) bool { return slices.Contains(p.cfg.AllowedGroups, g) }) {
-		return Result{Identity: id}, ErrNotAllowed
+	id.Groups, id.GroupsKnown = groups, hasGroups
+	r.Identity = id
+	if len(p.cfg.AllowedGroups) > 0 && !InAny(groups, p.cfg.AllowedGroups) {
+		return r, ErrNotAllowed
 	}
-	return Result{Identity: id, ReturnTo: f.ReturnTo}, nil
+	return r, nil
+}
+
+// InAny reports whether any of groups is one of want.
+func InAny(groups, want []string) bool {
+	return slices.ContainsFunc(groups, func(g string) bool { return slices.Contains(want, g) })
 }
 
 // Cancel ends a flow the provider sent back with an error instead of a
@@ -412,23 +547,23 @@ func (p *Provider) checkAZP(aud []string, claims map[string]any) error {
 
 // userinfoGroups reads the groups claim from the userinfo endpoint. Its
 // subject must be the ID token's (OpenID Connect Core 5.3.2).
-func (p *Provider) userinfoGroups(ctx context.Context, d *discovered, tok *oauth2.Token, subject string) ([]string, error) {
+func (p *Provider) userinfoGroups(ctx context.Context, d *discovered, tok *oauth2.Token, subject string) ([]string, bool, error) {
 	if d.provider.UserInfoEndpoint() == "" {
-		return nil, nil
+		return nil, false, nil
 	}
 	ui, err := d.provider.UserInfo(oidc.ClientContext(ctx, p.client), oauth2.StaticTokenSource(tok))
 	if err != nil {
-		return nil, fmt.Errorf("%w: userinfo: %w", ErrProvider, err)
+		return nil, false, fmt.Errorf("%w: userinfo: %w", ErrProvider, err)
 	}
 	if ui.Subject != subject {
-		return nil, fmt.Errorf("%w: userinfo is about another subject", ErrInvalidToken)
+		return nil, false, fmt.Errorf("%w: userinfo is about another subject", ErrInvalidToken)
 	}
 	var claims map[string]any
 	if err := ui.Claims(&claims); err != nil {
-		return nil, fmt.Errorf("%w: userinfo: %w", ErrProvider, err)
+		return nil, false, fmt.Errorf("%w: userinfo: %w", ErrProvider, err)
 	}
-	groups, _ := listClaim(claims, p.cfg.GroupsClaim)
-	return groups, nil
+	groups, ok := listClaim(claims, p.cfg.GroupsClaim)
+	return groups, ok, nil
 }
 
 // redactExchangeError keeps the provider's error code and drops the

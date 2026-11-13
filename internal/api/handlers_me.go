@@ -22,7 +22,13 @@ func toMe(p *auth.Principal) apigen.Me {
 
 // GetMe returns the caller.
 func (s *Server) GetMe(ctx context.Context, _ apigen.GetMeRequestObject) (apigen.GetMeResponseObject, error) {
-	return apigen.GetMe200JSONResponse(toMe(auth.FromContext(ctx))), nil
+	me := toMe(auth.FromContext(ctx))
+	u := []apigen.User{me.User}
+	if err := s.withSSOMarks(ctx, u); err != nil {
+		return nil, err
+	}
+	me.User = u[0]
+	return apigen.GetMe200JSONResponse(me), nil
 }
 
 // UpdateMe changes the caller's profile.

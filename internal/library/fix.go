@@ -157,6 +157,12 @@ func (s *Service) AttachURL(ctx context.Context, v Viewer, workID uuid.UUID, raw
 func (s *Service) attachSeries(ctx context.Context, v Viewer, workID uuid.UUID, sourceID string, se *sourcev1.Series, origin string, ev Evidence) (db.SourceSeries, error) {
 	var out db.SourceSeries
 	err := s.st.InTx(ctx, func(q *db.Queries, _ pgx.Tx) error {
+		// The work's lock first, as every writer of its series and
+		// chapters takes it: without it, a chapter check of the work
+		// running meanwhile could deadlock with this.
+		if err := q.LockWork(ctx, workID); err != nil {
+			return err
+		}
 		if err := q.DemoteAttached(ctx, db.DemoteAttachedParams{WorkID: workID, SourceID: sourceID}); err != nil {
 			return err
 		}

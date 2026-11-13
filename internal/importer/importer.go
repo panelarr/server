@@ -17,6 +17,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/google/uuid"
@@ -84,7 +86,17 @@ var (
 	ErrFileTooLarge = errors.New("importer: the file is too large")
 	// ErrBusy: another backup is being read; try again shortly.
 	ErrBusy = errors.New("importer: busy reading another backup")
+	// ErrTooMany: the user keeps MaxImports imports already.
+	ErrTooMany = errors.New("importer: too many imports kept")
 )
+
+// MaxImports is how many imports a user keeps: each holds the parsed
+// series of a backup (tens of MiB for a huge one), so they can't pile up.
+// Deleting one makes room.
+const MaxImports = 20
+
+// tempPattern names uploads while they are read.
+const tempPattern = "panelarr-import-*"
 
 // BadBackupError is an upload that isn't a usable backup.
 type BadBackupError struct{ Err error }
@@ -155,6 +167,9 @@ type Service struct {
 	opts  Options
 	// beforeRead runs right before a backup is read (tests).
 	beforeRead func()
+	// afterApplyItem runs after apply went through a series (tests).
+	afterApplyItem func(idx int32)
+	now            func() time.Time
 }
 
 // NewService returns the importer and registers its task kinds on q.
@@ -168,22 +183,30 @@ func NewService(st *store.Store, lib *library.Service, m *meta.Service, host *pl
 	if opts.GateWait == 0 {
 		opts.GateWait = 3 * time.Second
 	}
-	s := &Service{st: st, lib: lib, meta: m, host: host, queue: q, hub: hub, log: log, opts: opts}
+	s := &Service{st: st, lib: lib, meta: m, host: host, queue: q, hub: hub, log: log, opts: opts, now: time.Now}
 	q.Register(KindPreview, queue.Kind{Handler: s.handlePreview, Concurrency: 2, MaxAttempts: 5})
+	q.Register(KindApply, queue.Kind{Handler: s.handleApply, Concurrency: 2, MaxAttempts: 5})
+	q.Register(KindPlace, queue.Kind{Handler: s.handlePlace, Concurrency: 2, MaxAttempts: 3})
+	// Retried with its own backoff until the chapters are placed or
+	// PendingFor is over.
+	q.Register(KindPending, queue.Kind{Handler: s.handlePending, Concurrency: 2, MaxAttempts: 40})
 	return s
 }
 
 // Summary is what an import found in its file, plus the preview's package
 // hints. It is stored with the import.
 type Summary struct {
-	Series       int           `json:"series"`
-	OutOfLibrary int           `json:"out_of_library"`
-	Chapters     int           `json:"chapters"`
-	ChaptersRead int           `json:"chapters_read"`
-	InProgress   int           `json:"in_progress"`
-	Bookmarks    int           `json:"bookmarks"`
-	History      int           `json:"history"`
-	TrackerLinks int           `json:"tracker_links"`
+	Series       int `json:"series"`
+	OutOfLibrary int `json:"out_of_library"`
+	Chapters     int `json:"chapters"`
+	ChaptersRead int `json:"chapters_read"`
+	InProgress   int `json:"in_progress"`
+	Bookmarks    int `json:"bookmarks"`
+	History      int `json:"history"`
+	TrackerLinks int `json:"tracker_links"`
+	// ClampedTimes counts read times in the future that apply capped at
+	// the time it ran.
+	ClampedTimes int           `json:"clamped_times,omitempty"`
 	Categories   []Category    `json:"categories"`
 	PackageHints []PackageHint `json:"package_hints,omitempty"`
 }
@@ -238,7 +261,7 @@ func (s *Service) Upload(ctx context.Context, v library.Viewer, file io.Reader) 
 			return db.Import{}, false, err
 		}
 	}
-	f, err := os.CreateTemp(s.opts.TempDir, "panelarr-import-*")
+	f, err := os.CreateTemp(s.opts.TempDir, tempPattern)
 	if err != nil {
 		return db.Import{}, false, err
 	}
@@ -272,6 +295,11 @@ func (s *Service) Upload(ctx context.Context, v library.Viewer, file io.Reader) 
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return db.Import{}, false, err
 	}
+	if n, err := s.st.CountImports(ctx, v.UserID); err != nil {
+		return db.Import{}, false, err
+	} else if n >= MaxImports {
+		return db.Import{}, false, ErrTooMany
+	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return db.Import{}, false, err
 	}
@@ -288,12 +316,21 @@ func (s *Service) Upload(ctx context.Context, v library.Viewer, file io.Reader) 
 }
 
 func (s *Service) parseAndStore(ctx context.Context, v library.Viewer, f *os.File, sum string) (db.Import, bool, error) {
-	sumRaw, items, err := s.parse(f)
+	b, err := s.read(f)
+	if err != nil {
+		return db.Import{}, false, err
+	}
+	sumRaw, series, err := summaryOf(b)
 	if err != nil {
 		return db.Import{}, false, err
 	}
 	var imp db.Import
-	err = s.st.InTx(ctx, func(q *db.Queries, _ pgx.Tx) error {
+	err = s.st.InTx(ctx, func(q *db.Queries, tx pgx.Tx) error {
+		if n, err := q.CountImports(ctx, v.UserID); err != nil {
+			return err
+		} else if n >= MaxImports {
+			return ErrTooMany
+		}
 		var err error
 		imp, err = q.CreateImport(ctx, db.CreateImportParams{UserID: v.UserID, Format: FormatMihonBackup, FileSha256: sum, Summary: sumRaw})
 		if isUniqueViolation(err) {
@@ -302,10 +339,30 @@ func (s *Service) parseAndStore(ctx context.Context, v library.Viewer, f *os.Fil
 		if err != nil {
 			return err
 		}
-		for i := range items {
-			items[i].ImportID = imp.ID
-		}
-		if _, err := q.InsertImportItems(ctx, items); err != nil {
+		// The rows are built while they are sent, and each series of the
+		// model is dropped once its row is built: the model and the rows
+		// are never in memory together.
+		next := seriesRows(b)
+		built := 0
+		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"import_items"}, importItemColumns, pgx.CopyFromFunc(func() ([]any, error) {
+			row, ok, err := next()
+			if err == nil && ok {
+				// The series dropped from the model and the rows sent are
+				// garbage; collecting it now and then keeps the heap near
+				// what is live instead of letting it grow to twice the model.
+				if built += len(row.Chapters) + len(row.Title) + len(row.SeriesKey); built >= gcEvery {
+					built = 0
+					runtime.GC()
+				}
+			}
+			if !ok || err != nil {
+				return nil, err
+			}
+			return []any{
+				imp.ID, row.Idx, row.Title, row.Author, row.Artist, row.SourceCompatID, row.SourceName, row.SeriesKey,
+				row.AddedAt, row.Categories, row.Chapters, row.ChaptersRead, row.Bookmarks,
+			}, nil
+		})); err != nil {
 			return err
 		}
 		t, _, err := s.queue.EnqueueWith(ctx, q, queue.NewTask{
@@ -321,13 +378,22 @@ func (s *Service) parseAndStore(ctx context.Context, v library.Viewer, f *os.Fil
 	if err != nil {
 		return db.Import{}, false, err
 	}
-	s.log.InfoContext(ctx, "import uploaded", "component", "audit", "actor", v.UserID, "import", imp.ID, "series", len(items))
+	s.log.InfoContext(ctx, "import uploaded", "component", "audit", "actor", v.UserID, "import", imp.ID, "series", series)
 	return imp, true, nil
 }
 
-// parse reads the backup and turns it into rows; the model is dropped on
-// return. The file is deleted once read.
-func (s *Service) parse(f *os.File) ([]byte, []db.InsertImportItemsParams, error) {
+// gcEvery is how many bytes of rows an upload builds between collections.
+const gcEvery = 16 << 20
+
+// importItemColumns are the columns an upload fills, in the order of the
+// rows seriesRows builds (as InsertImportItems has them).
+var importItemColumns = []string{
+	"import_id", "idx", "title", "author", "artist", "source_compat_id", "source_name", "series_key",
+	"added_at", "categories", "chapters", "chapters_read", "bookmarks",
+}
+
+// read reads the backup. The file is deleted once read.
+func (s *Service) read(f *os.File) (*mihonbackup.Backup, error) {
 	if s.beforeRead != nil {
 		s.beforeRead()
 	}
@@ -337,18 +403,18 @@ func (s *Service) parse(f *os.File) ([]byte, []db.InsertImportItemsParams, error
 	if err != nil {
 		for _, bad := range []error{mihonbackup.ErrNotBackup, mihonbackup.ErrUnsupported, mihonbackup.ErrTooLarge, mihonbackup.ErrEmpty} {
 			if errors.Is(err, bad) {
-				return nil, nil, &BadBackupError{err}
+				return nil, &BadBackupError{err}
 			}
 		}
-		return nil, nil, err
+		return nil, err
 	}
-	return rowsOf(b)
+	return b, nil
 }
 
-// rowsOf turns a backup into its summary and one row per series in the
-// library. Series kept only for their history (Mihon) are counted, not
-// imported.
-func rowsOf(b *mihonbackup.Backup) ([]byte, []db.InsertImportItemsParams, error) {
+// summaryOf sums up a backup for its import, and counts the series it
+// imports: those in the library. Series kept only for their history
+// (Mihon) are counted, not imported.
+func summaryOf(b *mihonbackup.Backup) ([]byte, int, error) {
 	bs := b.Summary()
 	sum := Summary{
 		Series: bs.Series, OutOfLibrary: bs.OutOfLibrary, Chapters: bs.Chapters, ChaptersRead: bs.ChaptersRead,
@@ -362,64 +428,124 @@ func rowsOf(b *mihonbackup.Backup) ([]byte, []db.InsertImportItemsParams, error)
 			catIdx[c.Name] = i
 		}
 	}
-	items := make([]db.InsertImportItemsParams, 0, bs.Series)
+	n := 0
 	for i := range b.Series {
 		se := &b.Series[i]
 		if !se.InLibrary {
 			continue
 		}
+		n++
 		for _, c := range se.Categories {
 			if j, ok := catIdx[c]; ok {
 				sum.Categories[j].Series++
 			}
 		}
-		var chs []Chapter
-		var read, marks int32
-		for _, c := range se.Chapters {
-			if !c.Read && !c.Bookmark && c.LastPageRead <= 0 {
-				continue
-			}
-			ch := Chapter{Key: c.URL, Number: c.Number, Read: c.Read, Page: max(c.LastPageRead, 0), Bookmark: c.Bookmark}
-			// Undated marks get the chapter's fetch date, else the
-			// series' added date, so they sort below real reading.
-			for _, t := range []time.Time{c.LastRead, c.DateFetch, se.DateAdded} {
-				if !t.IsZero() {
-					ch.ReadAt = t.UnixMilli()
-					break
-				}
-			}
-			if c.Read {
-				read++
-			}
-			if c.Bookmark {
-				marks++
-			}
-			chs = append(chs, ch)
-		}
-		if chs == nil {
-			chs = []Chapter{}
-		}
-		raw, err := json.Marshal(chs)
-		if err != nil {
-			return nil, nil, err
-		}
-		cats := se.Categories
-		if cats == nil {
-			cats = []string{}
-		}
-		row := db.InsertImportItemsParams{
-			Idx: int32(len(items)), Title: se.Title, Author: se.Author, Artist: se.Artist, //nolint:gosec // capped by the reader
-			SourceCompatID: fmt.Sprintf("%s:%d", compatScheme, se.SourceID), SourceName: se.SourceName,
-			SeriesKey: se.URL, Categories: cats, Chapters: raw, ChaptersRead: read, Bookmarks: marks,
-		}
-		if !se.DateAdded.IsZero() {
-			t := se.DateAdded
-			row.AddedAt = &t
-		}
-		items = append(items, row)
 	}
 	raw, err := json.Marshal(sum)
-	return raw, items, err
+	return raw, n, err
+}
+
+// seriesRows returns an iterator over the rows of the series in the
+// backup's library, in order. It empties each series of b once its row is
+// built, so the model shrinks as the rows go out.
+func seriesRows(b *mihonbackup.Backup) func() (db.InsertImportItemsParams, bool, error) {
+	i, idx := 0, int32(0)
+	return func() (db.InsertImportItemsParams, bool, error) {
+		for ; i < len(b.Series); i++ {
+			se := &b.Series[i]
+			if !se.InLibrary {
+				*se = mihonbackup.Series{}
+				continue
+			}
+			row, err := rowOf(se, idx)
+			*se = mihonbackup.Series{}
+			i++
+			idx++
+			return row, err == nil, err
+		}
+		b.Series = nil
+		return db.InsertImportItemsParams{}, false, nil
+	}
+}
+
+// rowOf is the row of one series in the library.
+func rowOf(se *mihonbackup.Series, idx int32) (db.InsertImportItemsParams, error) {
+	var chs []Chapter
+	var read, marks int32
+	for _, c := range se.Chapters {
+		if !c.Read && !c.Bookmark && c.LastPageRead <= 0 {
+			continue
+		}
+		ch := Chapter{Key: c.URL, Number: c.Number, Read: c.Read, Page: max(c.LastPageRead, 0), Bookmark: c.Bookmark}
+		// Undated marks get the chapter's fetch date, else the series'
+		// added date, so they sort below real reading.
+		for _, t := range []time.Time{c.LastRead, c.DateFetch, se.DateAdded} {
+			if !t.IsZero() {
+				ch.ReadAt = t.UnixMilli()
+				break
+			}
+		}
+		if c.Read {
+			read++
+		}
+		if c.Bookmark {
+			marks++
+		}
+		chs = append(chs, ch)
+	}
+	if chs == nil {
+		chs = []Chapter{}
+	}
+	raw, err := json.Marshal(chs)
+	if err != nil {
+		return db.InsertImportItemsParams{}, err
+	}
+	cats := se.Categories
+	if cats == nil {
+		cats = []string{}
+	}
+	row := db.InsertImportItemsParams{
+		Idx: idx, Title: se.Title, Author: se.Author, Artist: se.Artist,
+		SourceCompatID: fmt.Sprintf("%s:%d", compatScheme, se.SourceID), SourceName: se.SourceName,
+		SeriesKey: se.URL, Categories: cats, Chapters: raw, ChaptersRead: read, Bookmarks: marks,
+	}
+	if !se.DateAdded.IsZero() {
+		t := se.DateAdded
+		row.AddedAt = &t
+	}
+	return row, nil
+}
+
+// SweepTemp deletes uploads a previous run left in the temporary
+// directory: a process that stopped mid-upload never deleted its file.
+// Call it at startup, before serving. Without a TempDir of its own the
+// importer shares the system's, which other processes use, so nothing is
+// swept.
+func (s *Service) SweepTemp() (int, error) {
+	if s.opts.TempDir == "" {
+		return 0, nil
+	}
+	names, err := filepath.Glob(filepath.Join(s.opts.TempDir, tempPattern))
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, name := range names {
+		if fi, err := os.Lstat(name); err != nil || !fi.Mode().IsRegular() {
+			continue
+		}
+		if err := os.Remove(name); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return n, err
+			}
+			continue
+		}
+		n++
+	}
+	if n > 0 {
+		s.log.Info("deleted uploads left from a previous run", "files", n)
+	}
+	return n, nil
 }
 
 // Get returns one of the user's imports.
@@ -434,18 +560,57 @@ func (s *Service) Get(ctx context.Context, userID, id uuid.UUID) (db.Import, err
 	return imp, err
 }
 
-// List returns the user's imports, newest first.
-func (s *Service) List(ctx context.Context, userID uuid.UUID, limit int) ([]db.Import, error) {
+// ImportCursor continues a list of imports: the last one listed.
+type ImportCursor struct {
+	CreatedAt time.Time
+	ID        uuid.UUID
+}
+
+// ImportsPage is a page of a user's imports.
+type ImportsPage struct {
+	Imports []db.Import
+	// Next continues the list; nil on the last page.
+	Next *ImportCursor
+}
+
+// List returns a page of the user's imports, newest first.
+func (s *Service) List(ctx context.Context, userID uuid.UUID, after *ImportCursor, limit int) (ImportsPage, error) {
 	if err := s.SettleStale(ctx, userID); err != nil {
-		return nil, err
+		return ImportsPage{}, err
 	}
-	return s.st.ListImports(ctx, db.ListImportsParams{UserID: userID, Lim: int32(limit)}) //nolint:gosec // bounded
+	p := db.ListImportsParams{UserID: userID, Lim: int32(limit + 1)} //nolint:gosec // bounded
+	if after != nil {
+		p.BeforeCreated = &after.CreatedAt
+		p.BeforeID = uuid.NullUUID{UUID: after.ID, Valid: true}
+	}
+	rows, err := s.st.ListImports(ctx, p)
+	if err != nil {
+		return ImportsPage{}, err
+	}
+	out := ImportsPage{Imports: rows}
+	if len(rows) > limit {
+		out.Imports = rows[:limit]
+		last := rows[limit-1]
+		out.Next = &ImportCursor{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+	return out, nil
 }
 
 // Counts are an import's series per outcome, with their read chapters and
 // bookmarks.
 func (s *Service) Counts(ctx context.Context, id uuid.UUID) ([]db.ImportOutcomeCountsRow, error) {
 	return s.st.ImportOutcomeCounts(ctx, id)
+}
+
+// ApplyProgress is how far an apply is: series gone through out of those
+// to apply.
+func (s *Service) ApplyProgress(ctx context.Context, id uuid.UUID) (db.ImportApplyProgressRow, error) {
+	return s.st.ImportApplyProgress(ctx, id)
+}
+
+// ResultCounts are an import's series per result of apply.
+func (s *Service) ResultCounts(ctx context.Context, id uuid.UUID) ([]db.ImportResultCountsRow, error) {
+	return s.st.ImportResultCounts(ctx, id)
 }
 
 // ItemsPage is a page of an import's series.
@@ -456,14 +621,17 @@ type ItemsPage struct {
 }
 
 // Items lists an import's series by their order in the file, optionally
-// only those with one outcome.
-func (s *Service) Items(ctx context.Context, userID, id uuid.UUID, outcome string, after int32, limit int) (ItemsPage, error) {
+// only those with one outcome or one result.
+func (s *Service) Items(ctx context.Context, userID, id uuid.UUID, outcome, result string, after int32, limit int) (ItemsPage, error) {
 	if _, err := s.Get(ctx, userID, id); err != nil {
 		return ItemsPage{}, err
 	}
 	p := db.ListImportItemsParams{ImportID: id, After: after, Lim: int32(limit + 1)} //nolint:gosec // bounded
 	if outcome != "" {
 		p.Outcome = pgtype.Text{String: outcome, Valid: true}
+	}
+	if result != "" {
+		p.Result = pgtype.Text{String: result, Valid: true}
 	}
 	rows, err := s.st.ListImportItems(ctx, p)
 	if err != nil {

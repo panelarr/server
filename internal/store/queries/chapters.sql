@@ -20,6 +20,10 @@ WHERE id = @id;
 SELECT * FROM source_chapters WHERE source_series_id = $1 ORDER BY position, id;
 
 -- name: LockWork :exec
+-- Every transaction that writes a work's source_series (attach, demote,
+-- candidates) or its chapters takes this first, so that they queue on the
+-- work instead of deadlocking on each other's rows. Single-statement
+-- writes outside a transaction need not.
 SELECT 1 FROM works WHERE id = $1 FOR UPDATE;
 
 -- name: WorkVariants :many

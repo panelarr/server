@@ -14,18 +14,21 @@ import (
 )
 
 const addLibraryEntry = `-- name: AddLibraryEntry :one
-INSERT INTO library_entries (user_id, work_id) VALUES ($1, $2)
+INSERT INTO library_entries (user_id, work_id, added_at)
+VALUES ($1, $2, coalesce($3::timestamptz, now()))
 ON CONFLICT DO NOTHING
 RETURNING user_id, work_id, added_at, seen_at, auto_download
 `
 
 type AddLibraryEntryParams struct {
-	UserID uuid.UUID
-	WorkID uuid.UUID
+	UserID  uuid.UUID
+	WorkID  uuid.UUID
+	AddedAt *time.Time
 }
 
+// added_at defaults to now (an import passes the date from its backup).
 func (q *Queries) AddLibraryEntry(ctx context.Context, arg AddLibraryEntryParams) (LibraryEntry, error) {
-	row := q.db.QueryRow(ctx, addLibraryEntry, arg.UserID, arg.WorkID)
+	row := q.db.QueryRow(ctx, addLibraryEntry, arg.UserID, arg.WorkID, arg.AddedAt)
 	var i LibraryEntry
 	err := row.Scan(
 		&i.UserID,
@@ -33,6 +36,40 @@ func (q *Queries) AddLibraryEntry(ctx context.Context, arg AddLibraryEntryParams
 		&i.AddedAt,
 		&i.SeenAt,
 		&i.AutoDownload,
+	)
+	return i, err
+}
+
+const attachedOnSource = `-- name: AttachedOnSource :one
+SELECT id, work_id, source_id, key, title, url, cover_ref, state, origin, score, evidence, priority, created_at, updated_at, checked_at, check_error, listed_at FROM source_series WHERE work_id = $1 AND source_id = $2 AND state = 'attached'
+`
+
+type AttachedOnSourceParams struct {
+	WorkID   uuid.UUID
+	SourceID string
+}
+
+func (q *Queries) AttachedOnSource(ctx context.Context, arg AttachedOnSourceParams) (SourceSeries, error) {
+	row := q.db.QueryRow(ctx, attachedOnSource, arg.WorkID, arg.SourceID)
+	var i SourceSeries
+	err := row.Scan(
+		&i.ID,
+		&i.WorkID,
+		&i.SourceID,
+		&i.Key,
+		&i.Title,
+		&i.Url,
+		&i.CoverRef,
+		&i.State,
+		&i.Origin,
+		&i.Score,
+		&i.Evidence,
+		&i.Priority,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CheckedAt,
+		&i.CheckError,
+		&i.ListedAt,
 	)
 	return i, err
 }
@@ -240,6 +277,41 @@ SELECT id, work_id, source_id, key, title, url, cover_ref, state, origin, score,
 
 func (q *Queries) GetSourceSeries(ctx context.Context, id uuid.UUID) (SourceSeries, error) {
 	row := q.db.QueryRow(ctx, getSourceSeries, id)
+	var i SourceSeries
+	err := row.Scan(
+		&i.ID,
+		&i.WorkID,
+		&i.SourceID,
+		&i.Key,
+		&i.Title,
+		&i.Url,
+		&i.CoverRef,
+		&i.State,
+		&i.Origin,
+		&i.Score,
+		&i.Evidence,
+		&i.Priority,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CheckedAt,
+		&i.CheckError,
+		&i.ListedAt,
+	)
+	return i, err
+}
+
+const getSourceSeriesByKey = `-- name: GetSourceSeriesByKey :one
+SELECT id, work_id, source_id, key, title, url, cover_ref, state, origin, score, evidence, priority, created_at, updated_at, checked_at, check_error, listed_at FROM source_series WHERE work_id = $1 AND source_id = $2 AND key = $3
+`
+
+type GetSourceSeriesByKeyParams struct {
+	WorkID   uuid.UUID
+	SourceID string
+	Key      string
+}
+
+func (q *Queries) GetSourceSeriesByKey(ctx context.Context, arg GetSourceSeriesByKeyParams) (SourceSeries, error) {
+	row := q.db.QueryRow(ctx, getSourceSeriesByKey, arg.WorkID, arg.SourceID, arg.Key)
 	var i SourceSeries
 	err := row.Scan(
 		&i.ID,

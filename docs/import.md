@@ -1,7 +1,7 @@
 # Importing a library
 
 Panelarr can import a library and its reading state from a Suwayomi or Mihon backup. This page describes the
-backup reader and the preview; applying an import comes later. The API is in [api.md](api.md#imports).
+backup reader, the preview and applying an import. The API is in [api.md](api.md#imports).
 
 ## Why the backup file
 
@@ -129,6 +129,28 @@ must allow only one `Read` at a time or budget the memory of each. The importer 
 model can be collected. An upload that can't get the gate within a few seconds is refused (`429` with `Retry-After`)
 instead of queueing in memory.
 
+The gated section does more than `Read`: it turns the model into rows (each series' chapters as compact JSON) and
+stores them with one `COPY`. Done naively, the model and all the rows are in memory together, on top of what
+`Read` left for the collector. A review measured that at **614 MiB** on a backup of 50,000 series with 1,000,000
+read, bookmarked chapters (with about 100-byte URLs), against 286 MiB for `Read` alone. The upload therefore:
+
+- builds each row only when `COPY` asks for it (`pgx.CopyFromFunc`), and empties that series of the model once its
+  row is built, so the model shrinks as the rows go out;
+- runs the collector after every 16 MiB of rows built. Without that, the series dropped and the rows sent would stay
+  on the heap until it reached twice the model, the collector's default target.
+
+Measured with `TestUploadMemory` (`PANELARR_IMPORT_MEMORY=1 go test ./internal/importer -run TestUploadMemory -v`),
+the heap above the process' own:
+
+| Backup | `Read` alone | Whole upload, before | Whole upload, now |
+|---|---|---|---|
+| 50,000 series, 1,000,000 read and bookmarked chapters, 100-byte URLs (3.2 MiB file) | 285 MiB | about 545 MiB | 288 MiB |
+| The same with 40-byte URLs and a last-read time per chapter (5.9 MiB file) | 419 MiB | about 610 MiB | 385 MiB |
+
+The whole upload now peaks at the read's own peak, and the test checks it stays within 32 MiB of it. **Budget one
+read at the limits, about 445 MiB of heap (465 MiB of RSS, see the table above), per server for imports**: that is
+the most the gated section takes, whatever the file.
+
 ## The preview (`internal/importer`)
 
 `POST /me/imports` copies the upload to a private temporary file, hashing it on the way, and checks two things first,
@@ -137,9 +159,15 @@ without the gate:
 - **The same file again?** If the user already has an import of a file with the same SHA-256 that didn't fail or get
   cancelled, they get that import back.
 - **Another import running?** If one of the user's imports is still running, the upload is refused. A partial unique
-  index on `imports` enforces this.
+  index on `imports` enforces this (a test runs two uploads that both pass the first check and expects the index to
+  refuse one).
+- **Too many imports?** Each user keeps at most 20 imports (`importer.MaxImports`). Each holds the parsed series of a
+  backup, tens of MiB for a huge one, and a preview of series that match nothing finishes quickly. Without a cap,
+  imports would pile up. With 20, the upload answers `409 too_many_imports` until the user deletes one. The list of
+  imports is paged.
 
-Then it takes the gate, reads the backup and deletes the file. It stores the import (`imports`, state `previewing`)
+Then it takes the gate, reads the backup and deletes the file. A process that stops mid-upload can't delete its file,
+so at startup the server deletes every `panelarr-import-*` file left in its temporary directory (`<data>/.tmp`). It stores the import (`imports`, state `previewing`)
 and one row per series in the backup's library (`import_items`), and queues the task `import.preview`. A file that
 isn't a usable backup creates nothing.
 
@@ -187,3 +215,122 @@ Progress (series matched out of the total) is computed from the rows, so it surv
 `import.progress` and `import.finished` go to the importing user only. If the task ends without finishing an import,
 for example because an admin cancelled it or it ran out of attempts, the import is marked `failed` the next time the
 user's imports are read, so a dead import never blocks a new one.
+
+## The states of an import
+
+| State | Means | Goes to |
+|---|---|---|
+| `previewing` | `import.preview` matches the series | `preview`; `cancelled` (`POST …/cancel`); `failed` |
+| `preview` | Every series is matched; nothing changed yet | `applying` (`POST …/apply`) |
+| `applying` | `import.apply` goes through the series | `done`; `cancelled`; `failed` |
+| `done` | Every series was gone through | (resolving a series applies it, the state stays) |
+| `cancelled`, `failed` | Stopped by the user, or the task ran out of attempts or ended early | `applying` again, once every series was matched: apply resumes |
+
+`previewing` and `applying` count as running: a user runs one import at a time. Any import can be deleted, which
+stops it first and keeps what it imported.
+
+A cancelled or failed import can be applied again only if its preview finished. A preview stopped early left series
+unmatched, so that import can't be applied: re-uploading the file makes a new import (an upload offers an earlier
+import of the same file only if it didn't fail or get cancelled). Applying again is safe: series already applied are
+skipped, and the rest go through as on a first apply. A cancel only signals the running task, which stops at the next
+series: applying again before it has stopped answers `409 import_running` (rather than reusing that task, which would
+end the new apply with it), so the client tries again a moment later.
+
+## Applying (`import.apply`)
+
+`POST /me/imports/{id}/apply` moves an import to `applying` and queues the task `import.apply`. The task goes through
+each series that is `ready`, `in_library` or `source_missing` and hasn't been applied or skipped, in file order. A
+restart therefore resumes after the last series applied, and a cancel (`POST …/cancel`) stops between two series.
+What was applied stays, and the rest keeps its preview outcome.
+
+**Grants are checked again.** The preview's outcome reflects the user's grants when it ran. Apply loads the user
+again and checks each series as it is then:
+
+- whether the user can still see the work (content rating limit, sources);
+- `may_add` for a work not in their library;
+- whether the user may still use the backup's source;
+- `may_add` or `may_manage_matches` to attach the backup's series to a work (see below).
+
+A series that no longer passes becomes `not_allowed` with the reason. What apply did is kept apart from the preview's
+`outcome`, as the series' `result`: `applied`, `already_imported` or `skipped`. A series whose work is already in the library
+still gets its reading without `may_add`.
+
+**The work and its source series.** A work not in the library yet is added like any add (`library.AddWith`), which
+starts its matching on the other sources. A new entry takes the backup's added date (never a future one), and an
+existing entry keeps its own. Works are shared, so attaching the backup's series (`library.AttachImported`, origin
+`import`) never changes what other users rely on:
+
+| The work, on that source | The import |
+|---|---|
+| No attached series | Attaches the backup's series |
+| The same series attached | Nothing to do |
+| Another series attached | Keeps it. The backup's series is recorded as a candidate, and the chapters are placed by number |
+| The backup's series was rejected (detached by someone) | Doesn't attach it again. Chapters are placed by number |
+| The source doesn't answer for the series | Doesn't attach. Chapters are placed by number |
+| The user has neither `may_add` nor `may_manage_matches` | Doesn't attach, nor record a candidate. Chapters are placed by key when this very series is attached already, else by number |
+
+The last row follows the manual paths: attaching a series by hand (`POST /works/{id}/series`) needs
+`may_manage_matches`, and adding a work with a source (`POST /library`) needs `may_add`. An import never lets a user
+change a shared work in a way neither would allow. Their own reading is still imported, and the series' message says
+the series isn't attached.
+
+**Placing chapters.** Each chapter with something to import goes on one of the work's chapters:
+
+- by the source's chapter key, when the backup's series is the work's attached series on that source (whatever
+  number the backup gives it);
+- otherwise by chapter number. Backups store numbers as 32-bit floats, read by their shortest decimal form so that
+  1.1 matches 1.1.
+
+When two backup chapters land on one Panelarr chapter (two copies of chapter 5, say), they merge: read if either is,
+with the later time and that copy's page, and bookmarked if either is.
+
+**Reading never goes backwards.** Read marks and pages go through their own upsert, not the reader's:
+
+```sql
+completed  = progress.completed OR EXCLUDED.completed,
+page       = CASE WHEN EXCLUDED.updated_at > progress.updated_at AND NOT progress.completed
+                  THEN EXCLUDED.page ELSE progress.page END,
+updated_at = GREATEST(progress.updated_at, EXCLUDED.updated_at)
+-- written only when it changes something
+```
+
+What this means for the user:
+
+- A chapter read in Panelarr stays read.
+- A page or time that is newer in Panelarr is kept.
+- History shows the backup's own last-read times, never the import's.
+- "Continue" follows the chapter read last.
+- History hidden or cleared before those times stays hidden.
+
+A read mark has a time from the backup's history, else the chapter's fetch date, else the series' added date (see
+the preview). Without any of them, it takes the time of the upload, which says nothing about when it was read. Such
+an undated mark goes through a narrower upsert (`ImportUndatedProgress`): it may add a missing row (at the upload's
+time) and mark an existing row read, but never moves the page or time of reading already in Panelarr. Otherwise it
+would win as the newer reading, move pages back and flood History with "read just now". When two copies of a chapter
+merge, a dated copy wins over an undated one. A time in the future (a wrong clock, or a crafted
+file) is capped at the time of the apply, so it can't outrank later reading forever. The import's summary counts the
+capped times (`clamped_times`). Bookmarks are added with the
+mark's time and never removed. A series with nothing left to change gets the result `already_imported`, so applying a
+backup again adds nothing. A series' reading and its record are written in one transaction, so a series interrupted
+midway is applied again from the start (adding the work and attaching are idempotent).
+
+**Chapters that arrive later.** A newly attached series has no chapters until its first check, and a new work gets
+its sources from matching. Chapters that can't be placed yet are kept with the series (`pending`), and are placed:
+
+- whenever the work's chapters are rebuilt. The chapters service calls `OnUnified` hooks, and the importer queues
+  `import.place` for the work, which costs one indexed query when nothing waits;
+- by `import.pending`, which retries the import's waiting chapters with a backoff (5 minutes, doubling, at most 3
+  hours).
+
+After 24 hours (`importer.PendingFor`), what is left counts as `unplaced` and the series' message says so. A chapter
+without a number that has no key to go by is unplaced right away. Each chapter is placed once and never again, so a
+chapter the user marks unread later stays unread.
+
+**Resolving by hand.** `POST …/items/{idx}/resolve` sets a series' catalogue entry, or skips it.
+
+- The entry must be one the user may see. The series is checked like apply checks it, and refused with the reason
+  when it doesn't pass.
+- Before apply, the series then waits for apply with the others.
+- After apply (`done`, `failed` or `cancelled`), it is applied at once, chapters and all, without uploading the
+  backup again.
+- An applied series can't be resolved again: what it imported is the user's own to change.

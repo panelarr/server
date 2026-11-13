@@ -117,13 +117,18 @@ func importItems(t *testing.T, c *client, id uuid.UUID, query string) map[int]ap
 func outcomes(items map[int]apigen.ImportItem) string {
 	var b strings.Builder
 	for i := range len(items) {
-		fmt.Fprintf(&b, "%d:%s ", i, items[i].Outcome)
+		if r := items[i].Result; r != nil {
+			fmt.Fprintf(&b, "%d:%s ", i, *r)
+		} else {
+			fmt.Fprintf(&b, "%d:%s ", i, items[i].Outcome)
+		}
 	}
 	return strings.TrimSpace(b.String())
 }
 
 type importFixture struct {
 	h      *harness
+	meta   *metatest.Fake
 	admin  *client
 	user   *client
 	userID uuid.UUID
@@ -158,7 +163,7 @@ func newImportFixture(t *testing.T, sources bool) importFixture {
 		call[apigen.Plugin](admin, http.MethodPost, "/api/v1/plugins", map[string]string{"url": pluginstest.Serve(t, plug, "k"), "api_key": "k"}, 201)
 	}
 	user, u := h.createUser(admin, "reader", nil)
-	return importFixture{h: h, admin: admin, user: user, userID: u.Id}
+	return importFixture{h: h, meta: fake, admin: admin, user: user, userID: u.Id}
 }
 
 // importBackup holds one series per outcome (see the comments), with

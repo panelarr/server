@@ -188,3 +188,24 @@ func TestBusyWhenTheGateIsHeld(t *testing.T) {
 }
 
 func viewerOf(id uuid.UUID) library.Viewer { return library.Viewer{UserID: id} }
+
+// rowsOf is the summary and all rows of a backup, as an upload stores
+// them.
+func rowsOf(b *mihonbackup.Backup) ([]byte, []db.InsertImportItemsParams, error) {
+	raw, _, err := summaryOf(b)
+	if err != nil {
+		return nil, nil, err
+	}
+	var items []db.InsertImportItemsParams
+	next := seriesRows(b)
+	for {
+		row, ok, err := next()
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok {
+			return raw, items, nil
+		}
+		items = append(items, row)
+	}
+}

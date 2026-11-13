@@ -51,6 +51,9 @@ func (v Viewer) meta() meta.Viewer {
 	return meta.Viewer{Ceiling: v.Grants.ContentRatingCeiling, Admin: v.Admin}
 }
 
+// Meta is v as the metadata service sees them.
+func (v Viewer) Meta() meta.Viewer { return v.meta() }
+
 // Plugins is v as the plugin host sees them.
 func (v Viewer) Plugins() plugins.Viewer { return v.plugins() }
 
@@ -172,10 +175,23 @@ type Added struct {
 	New bool
 }
 
+// AddOptions tune Add.
+type AddOptions struct {
+	// AddedAt is the entry's added date when Add creates it (an import
+	// keeps the date from the other app); now when nil. An entry that
+	// exists keeps its date.
+	AddedAt *time.Time
+}
+
 // Add puts the work of a metadata entry into v's library, creating the
 // work when nobody has it yet and starting its source matching. With
 // attach, that series is attached to the work first.
 func (s *Service) Add(ctx context.Context, v Viewer, entryID string, attach *SourceRef) (Added, error) {
+	return s.AddWith(ctx, v, entryID, attach, AddOptions{})
+}
+
+// AddWith is Add with options.
+func (s *Service) AddWith(ctx context.Context, v Viewer, entryID string, attach *SourceRef, opts AddOptions) (Added, error) {
 	e, err := s.meta.GetEntry(ctx, entryID, "", v.meta())
 	if err != nil {
 		return Added{}, err
@@ -191,7 +207,7 @@ func (s *Service) Add(ctx context.Context, v Viewer, entryID string, attach *Sou
 		}
 	}
 	out := Added{Work: w}
-	le, err := s.st.AddLibraryEntry(ctx, db.AddLibraryEntryParams{UserID: v.UserID, WorkID: w.ID})
+	le, err := s.st.AddLibraryEntry(ctx, db.AddLibraryEntryParams{UserID: v.UserID, WorkID: w.ID, AddedAt: opts.AddedAt})
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		cur, gerr := s.st.GetLibraryEntry(ctx, db.GetLibraryEntryParams{UserID: v.UserID, WorkID: w.ID})

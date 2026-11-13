@@ -15,8 +15,12 @@ type Querier interface {
 	// Queued and running tasks of a kind whose payload has field = value.
 	ActiveTasksOf(ctx context.Context, arg ActiveTasksOfParams) ([]Task, error)
 	AddBookmarks(ctx context.Context, arg AddBookmarksParams) error
+	// Counts read times from the future that apply capped, for the report.
+	AddImportClampedTimes(ctx context.Context, arg AddImportClampedTimesParams) error
+	// added_at defaults to now (an import passes the date from its backup).
 	AddLibraryEntry(ctx context.Context, arg AddLibraryEntryParams) (LibraryEntry, error)
 	AssignVariants(ctx context.Context, arg AssignVariantsParams) error
+	AttachedOnSource(ctx context.Context, arg AttachedOnSourceParams) (SourceSeries, error)
 	// A work that has the series (by key) attached on one of the sources,
 	// preferring the sources in the order given.
 	AttachedSeriesByKey(ctx context.Context, arg AttachedSeriesByKeyParams) (AttachedSeriesByKeyRow, error)
@@ -26,9 +30,13 @@ type Querier interface {
 	AttachedSourceIDsByWork(ctx context.Context, workIds []uuid.UUID) ([]AttachedSourceIDsByWorkRow, error)
 	AttachedSourceSeries(ctx context.Context, workID uuid.UUID) ([]SourceSeries, error)
 	AutoDownloadUsers(ctx context.Context, workID uuid.UUID) ([]uuid.UUID, error)
+	CancelImport(ctx context.Context, arg CancelImportParams) (Import, error)
 	CancelQueuedTask(ctx context.Context, id uuid.UUID) (Task, error)
 	ChapterFileByKey(ctx context.Context, arg ChapterFileByKeyParams) (ChapterFile, error)
+	ChapterNumbers(ctx context.Context, workID uuid.UUID) ([]ChapterNumbersRow, error)
 	ChapterVariants(ctx context.Context, chapterID uuid.UUID) ([]ChapterVariantsRow, error)
+	// A work's chapters by the keys of one attached series' chapters.
+	ChaptersBySourceKey(ctx context.Context, arg ChaptersBySourceKeyParams) ([]ChaptersBySourceKeyRow, error)
 	// Due tasks of the given kinds, best first, locked for this transaction;
 	// the caller picks the ones its limits allow and marks them running.
 	ClaimCandidates(ctx context.Context, arg ClaimCandidatesParams) ([]Task, error)
@@ -41,6 +49,7 @@ type Querier interface {
 	CountDownloadedByWork(ctx context.Context, workIds []uuid.UUID) ([]CountDownloadedByWorkRow, error)
 	CountEnabledAdmins(ctx context.Context) (int64, error)
 	CountFilesByStorage(ctx context.Context, storageID string) (int64, error)
+	CountImports(ctx context.Context, userID uuid.UUID) (int32, error)
 	CountLibraryViews(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountSourcesByPlugin(ctx context.Context) ([]CountSourcesByPluginRow, error)
 	CountUsers(ctx context.Context) (int64, error)
@@ -98,6 +107,9 @@ type Querier interface {
 	// The user's latest import of the same file that didn't fail or get
 	// cancelled: a re-upload offers it instead of starting another.
 	FindImportByFile(ctx context.Context, arg FindImportByFileParams) (Import, error)
+	// Ends an apply, unless the import was cancelled or deleted meanwhile.
+	FinishImportApply(ctx context.Context, arg FinishImportApplyParams) (Import, error)
+	FinishImportItem(ctx context.Context, arg FinishImportItemParams) error
 	// Ends a preview, unless the import was deleted or moved on meanwhile.
 	FinishImportPreview(ctx context.Context, arg FinishImportPreviewParams) (Import, error)
 	FinishJobRun(ctx context.Context, arg FinishJobRunParams) (JobRun, error)
@@ -112,6 +124,7 @@ type Querier interface {
 	GetImport(ctx context.Context, arg GetImportParams) (Import, error)
 	// For the import's own tasks, which act for its user.
 	GetImportByID(ctx context.Context, id uuid.UUID) (Import, error)
+	GetImportItem(ctx context.Context, arg GetImportItemParams) (ImportItem, error)
 	GetJobRun(ctx context.Context, id uuid.UUID) (JobRun, error)
 	GetLibraryEntry(ctx context.Context, arg GetLibraryEntryParams) (LibraryEntry, error)
 	GetLibraryView(ctx context.Context, arg GetLibraryViewParams) (LibraryView, error)
@@ -128,6 +141,7 @@ type Querier interface {
 	GetSolver(ctx context.Context, id string) (NetworkSolver, error)
 	GetSource(ctx context.Context, id string) (GetSourceRow, error)
 	GetSourceSeries(ctx context.Context, id uuid.UUID) (SourceSeries, error)
+	GetSourceSeriesByKey(ctx context.Context, arg GetSourceSeriesByKeyParams) (SourceSeries, error)
 	GetStorage(ctx context.Context, id string) (Storage, error)
 	GetTask(ctx context.Context, id uuid.UUID) (Task, error)
 	GetUser(ctx context.Context, id uuid.UUID) (User, error)
@@ -145,9 +159,24 @@ type Querier interface {
 	HurryTask(ctx context.Context, arg HurryTaskParams) (Task, error)
 	// A source's own setting and its package's.
 	ImageRetrySettingsFor(ctx context.Context, arg ImageRetrySettingsForParams) ([]ImageRetrySetting, error)
+	ImportApplyProgress(ctx context.Context, importID uuid.UUID) (ImportApplyProgressRow, error)
+	// Bookmarks an import adds; existing ones (and their times) stay.
+	ImportBookmarks(ctx context.Context, arg ImportBookmarksParams) (int64, error)
+	// The next series apply hasn't gone through yet, in file order.
+	ImportItemsToApply(ctx context.Context, arg ImportItemsToApplyParams) ([]ImportItem, error)
 	// Series per source the preview found missing in Panelarr, for package hints.
 	ImportMissingSources(ctx context.Context, importID uuid.UUID) ([]ImportMissingSourcesRow, error)
 	ImportOutcomeCounts(ctx context.Context, importID uuid.UUID) ([]ImportOutcomeCountsRow, error)
+	// Imported reading never loses newer reading: a read chapter stays read,
+	// a page or time newer in Panelarr is kept, and the original times are
+	// kept (History shows them). A row it doesn't change isn't written.
+	ImportProgress(ctx context.Context, arg ImportProgressParams) (int64, error)
+	// Series per result of apply (those apply went through or skipped).
+	ImportResultCounts(ctx context.Context, importID uuid.UUID) ([]ImportResultCountsRow, error)
+	// Imported reading the backup has no time for (it gets the upload's): it
+	// may add a missing row, and mark an existing one read, but never moves
+	// the page or time of reading done in Panelarr.
+	ImportUndatedProgress(ctx context.Context, arg ImportUndatedProgressParams) (int64, error)
 	InsertChapter(ctx context.Context, arg InsertChapterParams) (Chapter, error)
 	InsertChapterFile(ctx context.Context, arg InsertChapterFileParams) (ChapterFile, error)
 	InsertImportItems(ctx context.Context, arg []InsertImportItemsParams) (int64, error)
@@ -174,6 +203,7 @@ type Querier interface {
 	// ones they asked for, admins all.
 	ListDownloadTasks(ctx context.Context, arg ListDownloadTasksParams) ([]ListDownloadTasksRow, error)
 	ListImportItems(ctx context.Context, arg ListImportItemsParams) ([]ListImportItemsRow, error)
+	// Newest first, after a (created_at, id) cursor.
 	ListImports(ctx context.Context, arg ListImportsParams) ([]Import, error)
 	ListJobRuns(ctx context.Context, arg ListJobRunsParams) ([]JobRun, error)
 	// A user's library by title, after a (sort_title, id) cursor. Content
@@ -209,9 +239,15 @@ type Querier interface {
 	// for the transaction and then fail on the foreign key instead of losing
 	// their row to the cascade.
 	LockChapters(ctx context.Context, arg LockChaptersParams) ([]uuid.UUID, error)
+	// An import's series with whose it is, locked while its chapters are placed.
+	LockImportItem(ctx context.Context, arg LockImportItemParams) (LockImportItemRow, error)
 	// Serialises changes to one user's views, so the limit, the single
 	// default and the order hold under concurrent requests.
 	LockLibraryViews(ctx context.Context, userID uuid.UUID) error
+	// Every transaction that writes a work's source_series (attach, demote,
+	// candidates) or its chapters takes this first, so that they queue on the
+	// work instead of deadlocking on each other's rows. Single-statement
+	// writes outside a transaction need not.
 	LockWork(ctx context.Context, id uuid.UUID) error
 	MarkInviteUsed(ctx context.Context, arg MarkInviteUsedParams) error
 	MarkLibrarySeen(ctx context.Context, arg MarkLibrarySeenParams) (int64, error)
@@ -223,6 +259,8 @@ type Querier interface {
 	OrderLibraryViews(ctx context.Context, arg OrderLibraryViewsParams) error
 	// The next series the preview hasn't matched yet.
 	PendingImportItems(ctx context.Context, arg PendingImportItemsParams) ([]PendingImportItemsRow, error)
+	PendingImportItemsOfImport(ctx context.Context, importID uuid.UUID) ([]PendingImportItemsOfImportRow, error)
+	PendingImportItemsOnWork(ctx context.Context, workID uuid.NullUUID) ([]PendingImportItemsOnWorkRow, error)
 	PruneFinishedTasks(ctx context.Context, before *time.Time) (int64, error)
 	PruneJobRuns(ctx context.Context, arg PruneJobRunsParams) (int64, error)
 	PutImageRetrySetting(ctx context.Context, arg PutImageRetrySettingParams) (ImageRetrySetting, error)
@@ -240,7 +278,11 @@ type Querier interface {
 	SetAutoDownload(ctx context.Context, arg SetAutoDownloadParams) (int64, error)
 	SetChapterPin(ctx context.Context, arg SetChapterPinParams) error
 	SetDefaultStorage(ctx context.Context, id string) (int64, error)
+	// A series resolved by hand, or skipped: not once it was applied, nor
+	// while its import runs.
+	SetImportItemChoice(ctx context.Context, arg SetImportItemChoiceParams) (int64, error)
 	SetImportItemMatch(ctx context.Context, arg SetImportItemMatchParams) error
+	SetImportItemPending(ctx context.Context, arg SetImportItemPendingParams) error
 	SetImportTask(ctx context.Context, arg SetImportTaskParams) error
 	SetJobRunProgress(ctx context.Context, arg SetJobRunProgressParams) error
 	SetLibraryViewDefault(ctx context.Context, arg SetLibraryViewDefaultParams) error
@@ -257,6 +299,9 @@ type Querier interface {
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error
 	// Closes the gap a deleted view left in the order.
 	ShiftLibraryViewsUp(ctx context.Context, arg ShiftLibraryViewsUpParams) error
+	// From preview, or again after a cancel or a failure (it resumes): once
+	// every series was matched.
+	StartImportApply(ctx context.Context, arg StartImportApplyParams) (Import, error)
 	StartTask(ctx context.Context, arg StartTaskParams) (Task, error)
 	TaskStats(ctx context.Context) ([]TaskStatsRow, error)
 	TouchAPIKey(ctx context.Context, id uuid.UUID) error
@@ -292,6 +337,7 @@ type Querier interface {
 	UpsertSourceSeries(ctx context.Context, arg UpsertSourceSeriesParams) (SourceSeries, error)
 	UpsertWork(ctx context.Context, arg UpsertWorkParams) (UpsertWorkRow, error)
 	UpsertWorkSourceMatch(ctx context.Context, arg UpsertWorkSourceMatchParams) error
+	WorkHasPendingImports(ctx context.Context, workID uuid.NullUUID) (bool, error)
 	WorkProgress(ctx context.Context, arg WorkProgressParams) ([]Progress, error)
 	// Present chapters of a work's attached series, with what decides the
 	// preferred variant.

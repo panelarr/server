@@ -50,6 +50,7 @@ Each user keeps named views of their own library (filters, sort, display). The s
 
 - [x] **S1. Recently updated:** library entries carry `last_updated_at`, when a later check last found one of the work's available chapters (the updates feed's "appeared"), for a "Recently updated" sort and an "updated within" filter.
 - [x] **S2. Views storage and API:** `/me/library-views` (list, create, read, change, delete, order) with a validated definition, one default and an order per user, limits, and a `library_views.changed` event to the owner.
+- [x] **S3. Content-rating filter:** `content_ratings` in a view's definition, an include-list of the meta ratings (`safe`, `suggestive`, `erotic`, `pornographic`, `unknown`); empty means any and is stored as absent. It only narrows: `GET /library` never lists works above the user's ceiling, whatever a view says.
 
 ## Import from Suwayomi and Mihon
 

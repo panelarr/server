@@ -38,6 +38,12 @@ const (
 	MaxUpdatedWithin   = 365  // days
 )
 
+// viewContentRatings are the content ratings a view may filter by: a
+// work's meta rating (the same value the user's ceiling uses), with
+// unknown for works meta has no rating for. A view's list only narrows
+// the library; works above the caller's ceiling are never listed.
+var viewContentRatings = []string{"safe", "suggestive", "erotic", "pornographic", "unknown"}
+
 // Errors of saved views; a view that isn't the caller's is ErrNotFound.
 var (
 	ErrViewNameTaken   = errors.New("library: you have a view with this name")
@@ -94,6 +100,7 @@ type viewDefinition struct {
 	Filters           *viewFilters `json:"filters,omitempty"`
 	Types             []string     `json:"types,omitempty"`
 	Statuses          []string     `json:"statuses,omitempty"`
+	ContentRatings    []string     `json:"content_ratings,omitempty"`
 	UpdatedWithinDays *int         `json:"updated_within_days,omitempty"`
 	Sort              *string      `json:"sort,omitempty"`
 	Reverse           *bool        `json:"reverse,omitempty"`
@@ -159,6 +166,22 @@ func cleanViewDefinition(raw json.RawMessage) ([]byte, error) {
 		}
 		return nil
 	}
+	ratings := func(field string, vs []string) error {
+		if len(vs) > len(viewContentRatings) {
+			return bad(field, fmt.Sprintf("at most %d values", len(viewContentRatings)))
+		}
+		seen := make(map[string]bool, len(vs))
+		for _, v := range vs {
+			if !slices.Contains(viewContentRatings, v) {
+				return bad(field, "each value must be one of "+strings.Join(viewContentRatings, ", "))
+			}
+			if seen[v] {
+				return bad(field, "values must be unique")
+			}
+			seen[v] = true
+		}
+		return nil
+	}
 	var errs []error
 	if f := d.Filters; f != nil {
 		errs = append(errs,
@@ -168,7 +191,8 @@ func cleanViewDefinition(raw json.RawMessage) ([]byte, error) {
 			oneOf(".filters.bookmarked", f.Bookmarked, viewFilterValues),
 			oneOf(".filters.new", f.New, viewFilterValues))
 	}
-	errs = append(errs, values(".types", d.Types), values(".statuses", d.Statuses), oneOf(".sort", d.Sort, viewSorts))
+	errs = append(errs, values(".types", d.Types), values(".statuses", d.Statuses),
+		ratings(".content_ratings", d.ContentRatings), oneOf(".sort", d.Sort, viewSorts))
 	if n := d.UpdatedWithinDays; n != nil && (*n < 1 || *n > MaxUpdatedWithin) {
 		errs = append(errs, bad(".updated_within_days", fmt.Sprintf("must be 1 to %d", MaxUpdatedWithin)))
 	}

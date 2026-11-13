@@ -55,6 +55,7 @@ Each user keeps named views of their own library (filters, sort, display). The s
 
 Users import their library and reading state from a Suwayomi or Mihon backup file into their own account: a preview first, then apply. See [docs/import.md](docs/import.md).
 
+- [x] **S1. Sources by compat ID:** sources store the IDs plugins report they are known by in other apps (`compat_ids`, saved and updated on every sync, malformed ones dropped), shown to admins on the source calls; a lookup by compat ID that prefers sources the user may use, then the oldest plugin; `import` as a series origin.
 - [x] **S2. Backup reader:** `internal/importer/mihonbackup` reads `.tachibk` backups (gzip or plain protobuf, Mihon's field numbers, other fields skipped) into series, chapters with read marks, bookmarks and last pages, history times, categories joined by order, source names and tracker links; streaming, with a limit on the file, the decompressed data, one message, every collection the model keeps and its text, so memory stays bounded for any input; clear errors for files that aren't backups, legacy JSON backups and backups with nothing in the library.
 - [ ] **S3. Preview:** import records, series matching, `/me/imports`; one backup read at a time (the reader's memory bound is per read).
 - [ ] **S4. Apply and resolve.**

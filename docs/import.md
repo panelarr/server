@@ -10,6 +10,20 @@ Reading the file needs no credentials and no network access to the old server, w
 and covers both apps with one reader. Suwayomi exports only series in its library, while Mihon also keeps series that
 are only in its history.
 
+## Finding the sources
+
+A backup names each series' source by the app's own source ID. Panelarr's core doesn't know any app's IDs: plugins
+report, per source, the IDs it is known by elsewhere (`compat_ids`, `"<scheme>:<id>"`, e.g. `mihon:<id>` from a plugin
+that runs Mihon extensions). The server stores them with the source on every sync (`sources.compat_ids`, a GIN index
+for lookups; well-formed values only, at most 32 per source) and shows them to admins on the source calls
+(`GET /sources`, and a source after a change), never to users.
+
+The importer looks a source up by the ID its format uses (`Host.SourcesByCompatID`). More than one installed source
+may claim one ID (two plugins serving the same extensions), so the lookup returns all of them, best first: sources
+the importing user may use, then the others; within each, the plugin added first. Sources the user may not use and
+ones their plugin no longer lists stay in the list, so the import can tell "not allowed" or "missing" from
+"unknown". Series an import attaches are recorded with the origin `import`.
+
 ## The reader (`internal/importer/mihonbackup`)
 
 `mihonbackup.Read` parses a backup into a plain model: the series with their source id, series URL, title, author,

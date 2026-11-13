@@ -28,10 +28,12 @@ DELETE FROM plugins WHERE id = $1;
 -- name: UpsertSource :exec
 INSERT INTO sources (
     id, plugin_id, source_id, name, lang, content_rating, icon_url, home_url, capabilities,
-    health, health_reason, health_message, health_checked_at, package_id, package_name, health_checks_disabled, present
+    health, health_reason, health_message, health_checked_at, package_id, package_name, health_checks_disabled, present,
+    compat_ids
 ) VALUES (
     @id, @plugin_id, @source_id, @name, @lang, @content_rating, @icon_url, @home_url, @capabilities,
-    @health, @health_reason, @health_message, @health_checked_at, @package_id, @package_name, @health_checks_disabled, true
+    @health, @health_reason, @health_message, @health_checked_at, @package_id, @package_name, @health_checks_disabled, true,
+    @compat_ids
 )
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name, lang = EXCLUDED.lang, content_rating = EXCLUDED.content_rating,
@@ -39,7 +41,7 @@ ON CONFLICT (id) DO UPDATE SET
     health = EXCLUDED.health, health_reason = EXCLUDED.health_reason, health_message = EXCLUDED.health_message,
     health_checked_at = EXCLUDED.health_checked_at, package_id = EXCLUDED.package_id,
     package_name = EXCLUDED.package_name, health_checks_disabled = EXCLUDED.health_checks_disabled,
-    present = true, unavailable_reason = '', updated_at = now();
+    compat_ids = EXCLUDED.compat_ids, present = true, unavailable_reason = '', updated_at = now();
 
 -- name: SetUnavailableReasons :exec
 -- Why a plugin's absent sources are absent: "language" for those its
@@ -60,6 +62,14 @@ ORDER BY sources.plugin_id, lower(sources.name), sources.id;
 SELECT sqlc.embed(sources), plugins.enabled AS plugin_enabled
 FROM sources JOIN plugins ON plugins.id = sources.plugin_id
 WHERE sources.id = $1;
+
+-- name: ListSourcesByCompatID :many
+-- Every source known by this compat ID ("<scheme>:<id>"), present or not,
+-- oldest plugin first.
+SELECT sqlc.embed(sources), plugins.enabled AS plugin_enabled
+FROM sources JOIN plugins ON plugins.id = sources.plugin_id
+WHERE sources.compat_ids @> ARRAY[@compat_id::text]
+ORDER BY plugins.created_at, plugins.id, sources.id;
 
 -- name: SetSourceEnabled :execrows
 UPDATE sources SET enabled = @enabled, updated_at = now() WHERE id = @id;

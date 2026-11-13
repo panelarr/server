@@ -202,6 +202,9 @@ func TestAddFromSourceAPI(t *testing.T) {
 		if s.Attached != nil && s.Attached.Key == "/series/2" {
 			found = true
 		}
+		if s.Source.CompatIds != nil {
+			t.Fatalf("compat IDs shown to a user: %+v", s.Source)
+		}
 	}
 	if !found {
 		t.Fatalf("series not attached: %+v", w.Sources)

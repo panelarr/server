@@ -265,6 +265,7 @@ type Source struct {
 	PackageName          string
 	UnavailableReason    string
 	HealthChecksDisabled bool
+	CompatIds            []string
 }
 
 type SourceChapter struct {

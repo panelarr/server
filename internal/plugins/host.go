@@ -633,7 +633,7 @@ func sourceParams(pluginID string, s *sourcev1.Source) db.UpsertSourceParams {
 		ID: pluginID + ":" + s.GetId(), PluginID: pluginID, SourceID: s.GetId(),
 		Name: s.GetName(), Lang: s.GetLang(), ContentRating: sourceRating(s.GetContentRating()),
 		IconUrl: s.GetIconUrl(), HomeUrl: s.GetHomeUrl(), Capabilities: caps, Health: "unknown",
-		PackageID: s.GetPackageId(),
+		PackageID: s.GetPackageId(), CompatIds: compatIDs(s.GetCompatIds()),
 	}
 	if hl := s.GetHealth(); hl != nil {
 		switch hl.GetStatus() {
@@ -649,6 +649,28 @@ func sourceParams(pluginID string, s *sourcev1.Source) db.UpsertSourceParams {
 		}
 	}
 	return p
+}
+
+// compatPattern is the form of a compat ID: "<scheme>:<id>".
+var compatPattern = regexp.MustCompile(`^[a-z0-9-]+:.+$`)
+
+// maxCompatIDs caps how many compat IDs one source keeps.
+const maxCompatIDs = 32
+
+// compatIDs keeps a source's well-formed compat IDs, once each, in the
+// plugin's order (never nil: the column is NOT NULL). Malformed ones are
+// dropped rather than failing the sync.
+func compatIDs(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if len(out) == maxCompatIDs {
+			break
+		}
+		if len(id) <= 200 && compatPattern.MatchString(id) && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // RatingName is a content rating's name: safe, mixed, nsfw or unknown.

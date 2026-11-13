@@ -226,10 +226,10 @@ paths:
         `invalid_credentials`; too many failed attempts answer `429` with
         code `rate_limited` and a `Retry-After` header. When password login
         is limited to admins (`GET /auth/methods` says `password: admins`),
-        anyone else answers `403` with code `password_login_admins_only`
-        (checked after the password, so a wrong one is still
-        `invalid_credentials`). Users created by single sign-on have no
-        password until they set one.
+        anyone else answers `401` with code `invalid_credentials`, the same
+        as a wrong password or an unknown user, whether their password was
+        right or not. Users created by single sign-on have no password
+        until they set one.
       security: []
       x-panelarr-access: public
       requestBody:

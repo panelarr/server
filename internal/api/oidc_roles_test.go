@@ -3,9 +3,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -305,7 +307,18 @@ func TestOIDCUnlinkLastLoginMethod(t *testing.T) {
 	b.expectProblem(http.MethodDelete, "/api/v1/me/identities/"+identity.String(), nil, http.StatusConflict, "last_login_method")
 	admin.expectProblem(http.MethodDelete, "/api/v1/users/"+me.User.Id.String()+"/identities/"+identity.String(), nil, http.StatusConflict, "last_login_method")
 
-	// The first password needs no current one.
+	// The first password needs no current one, but like every other
+	// /me write it needs a signed-in browser session and its CSRF token:
+	// not anonymous, not an API key, not without the token.
+	first := map[string]string{"current_password": "", "new_password": "a new password 1"}
+	h.client().expectProblem(http.MethodPost, "/api/v1/me/password", first, http.StatusUnauthorized, "unauthenticated")
+	h.keyClient(b.newAPIKey("read", "write")).expectProblem(http.MethodPost, "/api/v1/me/password", first, http.StatusForbidden, "session_required")
+	token := b.csrf
+	b.csrf = ""
+	b.expectProblem(http.MethodPost, "/api/v1/me/password", first, http.StatusForbidden, "csrf_failed")
+	b.csrf = "not the token"
+	b.expectProblem(http.MethodPost, "/api/v1/me/password", first, http.StatusForbidden, "csrf_failed")
+	b.csrf = token
 	if res := b.do(http.MethodPost, "/api/v1/me/password", map[string]string{"current_password": "", "new_password": "a new password 1"}); res.status != http.StatusNoContent {
 		t.Fatalf("set the first password: %d %s", res.status, res.body)
 	}
@@ -481,8 +494,15 @@ func TestOIDCPasswordAdminsOnly(t *testing.T) {
 		admin, _ := h.setupAdmin()
 		h.browser().expectProblem(http.MethodGet, "/api/v1/auth/oidc/start", nil, http.StatusServiceUnavailable, "oidc_unavailable")
 		h.login("Admin", adminPassword)
-		call[apigen.User](admin, http.MethodPost, "/api/v1/users", map[string]any{"username": "reader", "password": "user password 1"}, http.StatusCreated)
-		h.client().expectProblem(http.MethodPost, "/api/v1/auth/login", map[string]string{"username": "reader", "password": "user password 1"}, http.StatusForbidden, "password_login_admins_only")
+		reader := call[apigen.User](admin, http.MethodPost, "/api/v1/users", map[string]any{"username": "reader", "password": "user password 1"}, http.StatusCreated)
+		h.client().expectProblem(http.MethodPost, "/api/v1/auth/login", map[string]string{"username": "reader", "password": "user password 1"}, http.StatusUnauthorized, "invalid_credentials")
+		// Disabled, a non-admin's right password still answers like a
+		// wrong one (not account_disabled).
+		call[apigen.User](admin, http.MethodPatch, "/api/v1/users/"+reader.Id.String(), map[string]any{"disabled": true}, http.StatusOK)
+		expectSameLoginAnswer(t, h,
+			map[string]string{"username": "reader", "password": "user password 1"},
+			map[string]string{"username": "reader", "password": "wrong password"},
+		)
 	})
 
 	m := newMockOP(t)
@@ -493,8 +513,13 @@ func TestOIDCPasswordAdminsOnly(t *testing.T) {
 		t.Fatalf("methods: %+v", methods)
 	}
 	reader := call[apigen.User](admin, http.MethodPost, "/api/v1/users", map[string]any{"username": "reader", "password": "user password 1"}, http.StatusCreated)
-	h.client().expectProblem(http.MethodPost, "/api/v1/auth/login", map[string]string{"username": "reader", "password": "user password 1"}, http.StatusForbidden, "password_login_admins_only")
-	h.client().expectProblem(http.MethodPost, "/api/v1/auth/login", map[string]string{"username": "reader", "password": "wrong password"}, http.StatusUnauthorized, "invalid_credentials")
+	// A non-admin's password login says nothing about the password: right,
+	// wrong and an unknown user get byte-identical answers.
+	expectSameLoginAnswer(t, h,
+		map[string]string{"username": "reader", "password": "user password 1"},
+		map[string]string{"username": "reader", "password": "wrong password"},
+		map[string]string{"username": "nobody", "password": "user password 1"},
+	)
 	h.link(m, reader.Id, "s-reader")
 	b := h.browser()
 	b.signedIn(b.ssoLogin(m, mockClaims{Subject: "s-reader"}, "/"), "/")
@@ -636,5 +661,34 @@ func TestOIDCForgedCallbackKeepsTheFlow(t *testing.T) {
 	b.signedIn(b.do(http.MethodGet, cb, nil), "/library")
 	if b.cookie(OIDCFlowCookie) != nil {
 		t.Fatal("flow cookie kept after the callback")
+	}
+}
+
+var requestIDField = regexp.MustCompile(`"request_id":"[^"]*"`)
+
+// expectSameLoginAnswer checks each password login fails with 401
+// invalid_credentials, sets no cookie and gets the same body, byte for
+// byte apart from the request ID.
+func expectSameLoginAnswer(t *testing.T, h *harness, logins ...map[string]string) {
+	t.Helper()
+	var first response
+	for i, l := range logins {
+		res := h.client().do(http.MethodPost, "/api/v1/auth/login", l)
+		if res.status != http.StatusUnauthorized || res.problem(t).Code != "invalid_credentials" {
+			t.Fatalf("login %d: %d %s", i, res.status, res.body)
+		}
+		if c := res.header.Values("Set-Cookie"); len(c) > 0 {
+			t.Fatalf("login %d sets cookies: %v", i, c)
+		}
+		// Every request has its own request_id; everything else must
+		// be byte-identical.
+		res.body = requestIDField.ReplaceAll(res.body, []byte(`"request_id":""`))
+		if i == 0 {
+			first = res
+			continue
+		}
+		if !bytes.Equal(res.body, first.body) || res.header.Get("Content-Type") != first.header.Get("Content-Type") {
+			t.Fatalf("login %d answers differently:\n%s\n%s", i, first.body, res.body)
+		}
 	}
 }

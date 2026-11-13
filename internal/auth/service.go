@@ -30,9 +30,6 @@ var (
 	ErrExpiryInPast       = errors.New("auth: expiry is in the past")
 	// ErrNotLinked: no user is linked to a provider login.
 	ErrNotLinked = errors.New("auth: no account is linked to this login")
-	// ErrPasswordAdminsOnly: password login is limited to admins and
-	// the user isn't one.
-	ErrPasswordAdminsOnly = errors.New("auth: only admins may sign in with a password")
 )
 
 // NoPassword is the password hash of a user without a password (created
@@ -163,18 +160,23 @@ func (s *Service) Login(ctx context.Context, username, password string, ci Clien
 	if err != nil {
 		return db.User{}, NewSession{}, fmt.Errorf("auth: verify password of %s: %w", u.ID, err)
 	}
+	if u.Role != RoleAdmin && s.PasswordAdminsOnly() {
+		// Password login is for admins only. Anyone else gets the
+		// answer of a wrong password, whether this one was right or
+		// not (and whether the account is disabled), so the answer
+		// never confirms a password that can't be used here. The hash
+		// was checked above, so the time is the same too.
+		if ok {
+			s.audit(ctx, "login refused: password login is for admins only", "user_id", u.ID, "ip", ci.IP)
+		}
+		return fail()
+	}
 	if !ok {
 		return fail()
 	}
 	if u.Disabled {
 		s.audit(ctx, "login refused: account disabled", "user_id", u.ID, "ip", ci.IP)
 		return db.User{}, NewSession{}, ErrDisabled
-	}
-	if u.Role != RoleAdmin && s.PasswordAdminsOnly() {
-		// Checked after the password, so the answer says nothing about
-		// a username's role to someone who doesn't know its password.
-		s.audit(ctx, "login refused: password login is for admins only", "user_id", u.ID, "ip", ci.IP)
-		return db.User{}, NewSession{}, ErrPasswordAdminsOnly
 	}
 	s.userFails.Reset(userKey)
 	if rehash {

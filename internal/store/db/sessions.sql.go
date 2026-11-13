@@ -13,18 +13,19 @@ import (
 )
 
 const createSession = `-- name: CreateSession :one
-INSERT INTO sessions (token_hash, user_id, csrf_token, user_agent, ip, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, token_hash, user_id, csrf_token, user_agent, ip, created_at, last_seen_at, expires_at
+INSERT INTO sessions (token_hash, user_id, csrf_token, user_agent, ip, expires_at, auth_method)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, token_hash, user_id, csrf_token, user_agent, ip, created_at, last_seen_at, expires_at, auth_method
 `
 
 type CreateSessionParams struct {
-	TokenHash []byte
-	UserID    uuid.UUID
-	CsrfToken string
-	UserAgent string
-	Ip        string
-	ExpiresAt time.Time
+	TokenHash  []byte
+	UserID     uuid.UUID
+	CsrfToken  string
+	UserAgent  string
+	Ip         string
+	ExpiresAt  time.Time
+	AuthMethod string
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
@@ -35,6 +36,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.UserAgent,
 		arg.Ip,
 		arg.ExpiresAt,
+		arg.AuthMethod,
 	)
 	var i Session
 	err := row.Scan(
@@ -47,6 +49,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.CreatedAt,
 		&i.LastSeenAt,
 		&i.ExpiresAt,
+		&i.AuthMethod,
 	)
 	return i, err
 }
@@ -113,7 +116,7 @@ func (q *Queries) DeleteUserSessionsExcept(ctx context.Context, arg DeleteUserSe
 }
 
 const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
-SELECT sessions.id, sessions.token_hash, sessions.user_id, sessions.csrf_token, sessions.user_agent, sessions.ip, sessions.created_at, sessions.last_seen_at, sessions.expires_at, users.id, users.username, users.display_name, users.password_hash, users.role, users.disabled, users.may_add, users.may_download, users.may_manage_matches, users.content_rating_ceiling, users.all_sources, users.allowed_sources, users.created_at, users.updated_at, users.password_changed_at, users.last_login_at
+SELECT sessions.id, sessions.token_hash, sessions.user_id, sessions.csrf_token, sessions.user_agent, sessions.ip, sessions.created_at, sessions.last_seen_at, sessions.expires_at, sessions.auth_method, users.id, users.username, users.display_name, users.password_hash, users.role, users.disabled, users.may_add, users.may_download, users.may_manage_matches, users.content_rating_ceiling, users.all_sources, users.allowed_sources, users.created_at, users.updated_at, users.password_changed_at, users.last_login_at
 FROM sessions JOIN users ON users.id = sessions.user_id
 WHERE sessions.token_hash = $1 AND sessions.expires_at > now()
 `
@@ -136,6 +139,7 @@ func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (
 		&i.Session.CreatedAt,
 		&i.Session.LastSeenAt,
 		&i.Session.ExpiresAt,
+		&i.Session.AuthMethod,
 		&i.User.ID,
 		&i.User.Username,
 		&i.User.DisplayName,
@@ -157,7 +161,7 @@ func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (
 }
 
 const listSessionsByUser = `-- name: ListSessionsByUser :many
-SELECT id, token_hash, user_id, csrf_token, user_agent, ip, created_at, last_seen_at, expires_at FROM sessions WHERE user_id = $1 AND expires_at > now() ORDER BY last_seen_at DESC
+SELECT id, token_hash, user_id, csrf_token, user_agent, ip, created_at, last_seen_at, expires_at, auth_method FROM sessions WHERE user_id = $1 AND expires_at > now() ORDER BY last_seen_at DESC
 `
 
 func (q *Queries) ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]Session, error) {
@@ -179,6 +183,7 @@ func (q *Queries) ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]S
 			&i.CreatedAt,
 			&i.LastSeenAt,
 			&i.ExpiresAt,
+			&i.AuthMethod,
 		); err != nil {
 			return nil, err
 		}

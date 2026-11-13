@@ -122,7 +122,7 @@ func TestPublicOperationsAreFew(t *testing.T) {
 		}
 	}
 	sort.Strings(public)
-	want := []string{"acceptInvite", "checkInvite", "createSetupAdmin", "getSetup", "getSystemInfo", "login"}
+	want := []string{"acceptInvite", "checkInvite", "createSetupAdmin", "finishOidcLogin", "getAuthMethods", "getSetup", "getSystemInfo", "login", "startOidcLogin"}
 	if len(public) != len(want) {
 		t.Fatalf("public operations %v, want %v", public, want)
 	}

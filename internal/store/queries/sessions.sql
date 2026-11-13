@@ -1,6 +1,6 @@
 -- name: CreateSession :one
-INSERT INTO sessions (token_hash, user_id, csrf_token, user_agent, ip, expires_at)
-VALUES (@token_hash, @user_id, @csrf_token, @user_agent, @ip, @expires_at)
+INSERT INTO sessions (token_hash, user_id, csrf_token, user_agent, ip, expires_at, auth_method)
+VALUES (@token_hash, @user_id, @csrf_token, @user_agent, @ip, @expires_at, @auth_method)
 RETURNING *;
 
 -- name: GetSessionByTokenHash :one

@@ -56,3 +56,27 @@ func TestEnvKey(t *testing.T) {
 		t.Fatal("unsealed value opened")
 	}
 }
+
+func TestSealForBindsThePurpose(t *testing.T) {
+	b := NewBox(base64.StdEncoding.EncodeToString(make([]byte, 32)), "")
+	sealed, err := b.SealFor("cookie", "value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain, err := b.OpenFor("cookie", sealed); err != nil || plain != "value" {
+		t.Fatalf("open: %q %v", plain, err)
+	}
+	if _, err := b.OpenFor("other", sealed); err == nil {
+		t.Fatal("opened with another purpose")
+	}
+	if _, err := b.Open(sealed); err == nil {
+		t.Fatal("plain Open opened a value sealed for a purpose")
+	}
+	stored, err := b.Seal("stored secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.OpenFor("cookie", stored); err == nil {
+		t.Fatal("a stored secret opened as a cookie")
+	}
+}

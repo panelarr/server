@@ -10,7 +10,7 @@ The Panelarr server's REST API is a **public client API**: the web app is one cl
 
 ## Authentication
 
-- **Browser sessions.** `POST /api/v1/auth/login` (or the first-run `POST /api/v1/setup/admin`, or accepting an invite) sets two cookies: `panelarr_session` (HTTP-only) and `panelarr_csrf` (readable). Every request that changes something (not GET, HEAD or OPTIONS) must echo the CSRF token in the `X-CSRF-Token` header. Cross-site requests are refused. Sessions last 30 days from their last use.
+- **Browser sessions.** `POST /api/v1/auth/login` (or the first-run `POST /api/v1/setup/admin`, or accepting an invite) sets two cookies: `panelarr_session` (HTTP-only) and `panelarr_csrf` (readable). Every request that changes something (not GET, HEAD or OPTIONS) must echo the CSRF token in the `X-CSRF-Token` header. Cross-site requests are refused. Sessions last 30 days from their last use. When single sign-on is configured (`GET /api/v1/auth/methods` says so), a browser navigation to `GET /api/v1/auth/oidc/start` signs in with the identity provider and ends with the same two cookies; see [configuration](configuration.md#single-sign-on-oidc).
 - **Personal API keys** (`pnl_…`), created by a signed-in user under `/api/v1/me/api-keys`. Send `X-Api-Key: <key>` or `Authorization: Bearer <key>`; no CSRF token is needed. Scopes: `read` (GET), `write` (changes), `admin` (admin endpoints; admins only), `metrics:read` (`/metrics`; admins only). A key never holds more than its owner's current role allows. Changing the password and managing sessions and keys need a browser session.
 - Sending an invalid key is an error (`401 invalid_api_key`), never a silent fallback to anonymous.
 

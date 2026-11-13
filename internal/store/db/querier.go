@@ -62,6 +62,7 @@ type Querier interface {
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateStorage(ctx context.Context, arg CreateStorageParams) (Storage, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	CreateUserIdentity(ctx context.Context, arg CreateUserIdentityParams) (UserIdentity, error)
 	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) (int64, error)
 	DeleteBookmarks(ctx context.Context, arg DeleteBookmarksParams) error
 	DeleteChapterFile(ctx context.Context, id uuid.UUID) (int64, error)
@@ -145,6 +146,8 @@ type Querier interface {
 	GetStorage(ctx context.Context, id string) (Storage, error)
 	GetTask(ctx context.Context, id uuid.UUID) (Task, error)
 	GetUser(ctx context.Context, id uuid.UUID) (User, error)
+	// The user a provider login is linked to, by issuer and subject only.
+	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (GetUserByIdentityRow, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
 	GetUserForUpdate(ctx context.Context, id uuid.UUID) (User, error)
 	GetWork(ctx context.Context, id uuid.UUID) (Work, error)
@@ -306,6 +309,7 @@ type Querier interface {
 	TaskStats(ctx context.Context) ([]TaskStatsRow, error)
 	TouchAPIKey(ctx context.Context, id uuid.UUID) error
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
+	TouchUserIdentity(ctx context.Context, arg TouchUserIdentityParams) error
 	TouchUserLogin(ctx context.Context, id uuid.UUID) error
 	// Back to the queue without counting the attempt (the server stopped).
 	UnclaimTask(ctx context.Context, id uuid.UUID) (Task, error)

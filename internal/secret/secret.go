@@ -100,7 +100,15 @@ func (b *Box) key() ([]byte, error) {
 }
 
 // Seal encrypts plain.
-func (b *Box) Seal(plain string) (string, error) {
+func (b *Box) Seal(plain string) (string, error) { return b.SealFor("", plain) }
+
+// Open decrypts a value from Seal.
+func (b *Box) Open(sealed string) (string, error) { return b.OpenFor("", sealed) }
+
+// SealFor encrypts plain bound to purpose: only OpenFor with the same
+// purpose opens it. Values sealed for one use (a cookie, say) then can't
+// be passed off as another (a stored secret), and the other way round.
+func (b *Box) SealFor(purpose, plain string) (string, error) {
 	aead, err := b.load()
 	if err != nil {
 		return "", err
@@ -109,12 +117,12 @@ func (b *Box) Seal(plain string) (string, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
-	out := aead.Seal(nonce, nonce, []byte(plain), nil)
+	out := aead.Seal(nonce, nonce, []byte(plain), additional(purpose))
 	return prefix + base64.StdEncoding.EncodeToString(out), nil
 }
 
-// Open decrypts a value from Seal.
-func (b *Box) Open(sealed string) (string, error) {
+// OpenFor decrypts a value from SealFor with the same purpose.
+func (b *Box) OpenFor(purpose, sealed string) (string, error) {
 	if !strings.HasPrefix(sealed, prefix) {
 		return "", errors.New("secret: not a sealed value")
 	}
@@ -126,9 +134,18 @@ func (b *Box) Open(sealed string) (string, error) {
 	if err != nil || len(raw) < aead.NonceSize() {
 		return "", errors.New("secret: malformed sealed value")
 	}
-	plain, err := aead.Open(nil, raw[:aead.NonceSize()], raw[aead.NonceSize():], nil)
+	plain, err := aead.Open(nil, raw[:aead.NonceSize()], raw[aead.NonceSize():], additional(purpose))
 	if err != nil {
 		return "", errors.New("secret: can't decrypt (a different key?)")
 	}
 	return string(plain), nil
+}
+
+// additional is the data authenticated with a value: none for plain
+// Seal, so values sealed before purposes existed still open.
+func additional(purpose string) []byte {
+	if purpose == "" {
+		return nil
+	}
+	return []byte(purpose)
 }

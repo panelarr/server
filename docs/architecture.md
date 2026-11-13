@@ -8,6 +8,7 @@ api/openapi.yaml         the public API contract (spec-first)
 internal/api/            HTTP layer: router, middleware, problem errors, handlers
 internal/api/apigen/     code generated from the spec (do not edit)
 internal/auth/           sessions, API keys, password hashing, login limits
+internal/sso/            single sign-on with an OpenID Connect provider (off unless configured)
 internal/users/          accounts, grants, invites, first-run setup
 internal/secret/         encryption of stored secrets
 internal/meta/           the metadata service: connection, checks, catalogue

@@ -27,6 +27,14 @@ var (
 	ErrNotFound           = errors.New("auth: not found")
 	ErrScopeNotAllowed    = errors.New("auth: scope not allowed for this account")
 	ErrExpiryInPast       = errors.New("auth: expiry is in the past")
+	// ErrNotLinked: no user is linked to a provider login.
+	ErrNotLinked = errors.New("auth: no account is linked to this login")
+)
+
+// How a session was started (sessions.auth_method).
+const (
+	SessionPassword = "password"
+	SessionOIDC     = "oidc"
 )
 
 // RateLimitedError says a login was refused because of too many failures.
@@ -144,6 +152,67 @@ func (s *Service) Login(ctx context.Context, username, password string, ci Clien
 	return u, sess, nil
 }
 
+// Identity is a login at an identity provider: its issuer and subject
+// identify it. Email is shown to people, never used to find a user.
+type Identity struct {
+	Issuer  string
+	Subject string
+	Email   string
+}
+
+// SSOBlocked reports a rate-limit error while the client address has too
+// many failed logins, of any kind.
+func (s *Service) SSOBlocked(ctx context.Context, ci ClientInfo) error {
+	k := "ip:" + ci.IP
+	if blocked, wait := s.ipFails.Blocked(k); blocked {
+		s.audit(ctx, "sso login refused: rate limited", "ip", ci.IP)
+		return &RateLimitedError{RetryAfter: wait}
+	}
+	return nil
+}
+
+// SSOFailed records a failed single sign-on: it counts against the client
+// address like a wrong password. reason is a short code, never a token.
+func (s *Service) SSOFailed(ctx context.Context, ci ClientInfo, reason string, args ...any) {
+	s.ipFails.Fail("ip:" + ci.IP)
+	s.log.WarnContext(ctx, "sso login failed", append([]any{"component", "audit", "reason", reason, "ip", ci.IP}, args...)...)
+}
+
+// LoginIdentity starts a session for the user linked to a provider login,
+// found by issuer and subject only.
+func (s *Service) LoginIdentity(ctx context.Context, id Identity, ci ClientInfo) (db.User, NewSession, error) {
+	if err := s.SSOBlocked(ctx, ci); err != nil {
+		return db.User{}, NewSession{}, err
+	}
+	row, err := s.st.GetUserByIdentity(ctx, db.GetUserByIdentityParams{Issuer: id.Issuer, Subject: id.Subject})
+	if errors.Is(err, pgx.ErrNoRows) {
+		s.SSOFailed(ctx, ci, "not_linked", "issuer", id.Issuer, "subject", id.Subject)
+		return db.User{}, NewSession{}, ErrNotLinked
+	}
+	if err != nil {
+		return db.User{}, NewSession{}, err
+	}
+	u := row.User
+	if u.Disabled {
+		s.SSOFailed(ctx, ci, "account_disabled", "user_id", u.ID, "identity_id", row.UserIdentity.ID)
+		return db.User{}, NewSession{}, ErrDisabled
+	}
+	var sess NewSession
+	err = s.st.InTx(ctx, func(q *db.Queries, _ pgx.Tx) error {
+		if err := q.TouchUserIdentity(ctx, db.TouchUserIdentityParams{ID: row.UserIdentity.ID, Email: truncate(id.Email, 320)}); err != nil {
+			return err
+		}
+		var err error
+		sess, err = s.startSession(ctx, q, u, ci, SessionOIDC)
+		return err
+	})
+	if err != nil {
+		return db.User{}, NewSession{}, err
+	}
+	s.audit(ctx, "login", "method", SessionOIDC, "user_id", u.ID, "identity_id", row.UserIdentity.ID, "ip", ci.IP)
+	return u, sess, nil
+}
+
 func (s *Service) limiterFor(key string) *FailureLimiter {
 	if strings.HasPrefix(key, "ip:") {
 		return s.ipFails
@@ -151,18 +220,23 @@ func (s *Service) limiterFor(key string) *FailureLimiter {
 	return s.userFails
 }
 
-// StartSession creates a session for u with q (so it can join a
+// StartSession creates a password session for u with q (so it can join a
 // transaction) and records the login.
 func (s *Service) StartSession(ctx context.Context, q *db.Queries, u db.User, ci ClientInfo) (NewSession, error) {
+	return s.startSession(ctx, q, u, ci, SessionPassword)
+}
+
+func (s *Service) startSession(ctx context.Context, q *db.Queries, u db.User, ci ClientInfo, method string) (NewSession, error) {
 	token := newToken("")
 	csrf := newToken("")
 	sess, err := q.CreateSession(ctx, db.CreateSessionParams{
-		TokenHash: hashToken(token),
-		UserID:    u.ID,
-		CsrfToken: csrf,
-		UserAgent: truncate(ci.UserAgent, 300),
-		Ip:        ci.IP,
-		ExpiresAt: s.now().Add(s.sessionTTL),
+		TokenHash:  hashToken(token),
+		UserID:     u.ID,
+		CsrfToken:  csrf,
+		UserAgent:  truncate(ci.UserAgent, 300),
+		Ip:         ci.IP,
+		ExpiresAt:  s.now().Add(s.sessionTTL),
+		AuthMethod: method,
 	})
 	if err != nil {
 		return NewSession{}, fmt.Errorf("auth: create session: %w", err)

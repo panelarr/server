@@ -29,6 +29,7 @@ import (
 	"github.com/panelarr/server/internal/plugins"
 	"github.com/panelarr/server/internal/queue"
 	"github.com/panelarr/server/internal/reader"
+	"github.com/panelarr/server/internal/sso"
 	"github.com/panelarr/server/internal/storage"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/users"
@@ -66,6 +67,10 @@ type Deps struct {
 	Storages  *storage.Manager
 	Network   *network.Service
 	Importer  *importer.Service
+	// SSO signs users in with an OpenID Connect provider; nil when single
+	// sign-on isn't configured (the default): its endpoints then answer
+	// 404.
+	SSO *sso.Provider
 
 	// SecureCookies marks session cookies Secure (https deployments).
 	SecureCookies bool

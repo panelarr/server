@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -57,7 +58,48 @@ type Config struct {
 	Log Log
 	// Metrics configures the Prometheus endpoint.
 	Metrics Metrics
+	// OIDC configures single sign-on. Off unless an issuer is set.
+	OIDC OIDC
 }
+
+// OIDC configures signing in with an OpenID Connect provider. It is off
+// unless Issuer is set; password login keeps working either way.
+type OIDC struct {
+	// Issuer is the provider's issuer URL; discovery reads
+	// <Issuer>/.well-known/openid-configuration. https, except on
+	// localhost.
+	Issuer string
+	// ClientID is Panelarr's client at the provider.
+	ClientID string
+	// ClientSecret is the client's secret; empty for a public client
+	// (PKCE only). Never logged.
+	ClientSecret string
+	// Scopes asked for; always includes openid.
+	Scopes []string
+	// ButtonLabel is the login page's button.
+	ButtonLabel string
+	// GroupsClaim names the claim that lists the user's groups.
+	GroupsClaim string
+	// AllowedGroups, when set, lets only their members sign in with it.
+	AllowedGroups []string
+}
+
+// Enabled reports whether single sign-on is configured.
+func (o OIDC) Enabled() bool { return o.Issuer != "" }
+
+// LogValue keeps the client secret out of logs.
+func (o OIDC) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("issuer", o.Issuer), slog.String("client_id", o.ClientID),
+		slog.Bool("client_secret_set", o.ClientSecret != ""), slog.Any("scopes", o.Scopes),
+	)
+}
+
+// String keeps the client secret out of formatted output.
+func (o OIDC) String() string { return o.LogValue().String() }
+
+// GoString keeps the client secret out of %#v.
+func (o OIDC) GoString() string { return o.String() }
 
 // Log configures structured logging.
 type Log struct {
@@ -93,6 +135,22 @@ const (
 	EnvMetaURL        = "PANELARR_META_URL"
 	EnvMetaAPIKey     = "PANELARR_META_KEY" //nolint:gosec // a variable name, not a credential
 	EnvWebDir         = "PANELARR_WEB_DIR"
+
+	EnvOIDCIssuer           = "PANELARR_OIDC_ISSUER"
+	EnvOIDCClientID         = "PANELARR_OIDC_CLIENT_ID"
+	EnvOIDCClientSecret     = "PANELARR_OIDC_CLIENT_SECRET"      //nolint:gosec // a variable name, not a credential
+	EnvOIDCClientSecretFile = "PANELARR_OIDC_CLIENT_SECRET_FILE" //nolint:gosec // a variable name, not a credential
+	EnvOIDCScopes           = "PANELARR_OIDC_SCOPES"
+	EnvOIDCButtonLabel      = "PANELARR_OIDC_BUTTON_LABEL"
+	EnvOIDCGroupsClaim      = "PANELARR_OIDC_GROUPS_CLAIM"
+	EnvOIDCAllowedGroups    = "PANELARR_OIDC_ALLOWED_GROUPS"
+)
+
+// OIDC defaults.
+const (
+	DefaultOIDCScopes      = "openid profile email"
+	DefaultOIDCButtonLabel = "Sign in with SSO"
+	DefaultOIDCGroupsClaim = "groups"
 )
 
 // DefaultTrustedProxies are loopback and private networks.
@@ -162,6 +220,11 @@ func (f *Flags) Load(getenv func(string) string) (Config, error) {
 		return cfg, fmt.Errorf("config: %s: %q is not true or false", EnvMetricsEnabled, v)
 	}
 	cfg.Metrics.Enabled = b
+	oidc, err := loadOIDC(getenv)
+	if err != nil {
+		return cfg, fmt.Errorf("config: %w", err)
+	}
+	cfg.OIDC = oidc
 	if cfg.ConfigDir == "" {
 		dir, err := os.UserConfigDir()
 		if err != nil {
@@ -207,10 +270,105 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Errorf("%s: %q: %w", EnvMetricsListen, c.Metrics.Listen, err))
 		}
 	}
+	errs = append(errs, c.validateOIDC()...)
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
 	return nil
+}
+
+// loadOIDC reads the single sign-on settings. The client secret may come
+// from a file (a mounted secret) instead of the environment.
+func loadOIDC(getenv func(string) string) (OIDC, error) {
+	env := func(name string) string { return strings.TrimSpace(getenv(name)) }
+	o := OIDC{
+		Issuer:      strings.TrimRight(env(EnvOIDCIssuer), "/"),
+		ClientID:    env(EnvOIDCClientID),
+		ButtonLabel: env(EnvOIDCButtonLabel),
+		GroupsClaim: env(EnvOIDCGroupsClaim),
+	}
+	secret, secretFile := env(EnvOIDCClientSecret), env(EnvOIDCClientSecretFile)
+	switch {
+	case secret != "" && secretFile != "":
+		return o, fmt.Errorf("set %s or %s, not both", EnvOIDCClientSecret, EnvOIDCClientSecretFile)
+	case secretFile != "":
+		raw, err := os.ReadFile(secretFile) //nolint:gosec // the path is the operator's own setting
+		if err != nil {
+			// The error names the file, never its contents.
+			return o, fmt.Errorf("%s: %w", EnvOIDCClientSecretFile, err)
+		}
+		o.ClientSecret = strings.TrimSpace(string(raw))
+		if o.ClientSecret == "" {
+			return o, fmt.Errorf("%s: %s is empty", EnvOIDCClientSecretFile, secretFile)
+		}
+	default:
+		o.ClientSecret = secret
+	}
+	scopes := env(EnvOIDCScopes)
+	if scopes == "" {
+		scopes = DefaultOIDCScopes
+	}
+	o.Scopes = splitList(scopes, " ,")
+	if !slices.Contains(o.Scopes, "openid") {
+		o.Scopes = append([]string{"openid"}, o.Scopes...)
+	}
+	if o.ButtonLabel == "" {
+		o.ButtonLabel = DefaultOIDCButtonLabel
+	}
+	if o.GroupsClaim == "" {
+		o.GroupsClaim = DefaultOIDCGroupsClaim
+	}
+	o.AllowedGroups = splitList(env(EnvOIDCAllowedGroups), ",")
+	if o.Issuer == "" && (o.ClientID != "" || o.ClientSecret != "" || len(o.AllowedGroups) > 0) {
+		// Half a configuration is a mistake, not "off".
+		return o, fmt.Errorf("%s is required to sign in with OIDC (other %s settings are set)", EnvOIDCIssuer, "PANELARR_OIDC_*")
+	}
+	return o, nil
+}
+
+// splitList splits s at any of seps, dropping empty items and duplicates.
+func splitList(s, seps string) []string {
+	var out []string
+	for _, f := range strings.FieldsFunc(s, func(r rune) bool { return strings.ContainsRune(seps, r) }) {
+		if f = strings.TrimSpace(f); f != "" && !slices.Contains(out, f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func (c Config) validateOIDC() []error {
+	o := c.OIDC
+	if !o.Enabled() {
+		return nil
+	}
+	var errs []error
+	u, err := url.Parse(o.Issuer)
+	switch {
+	case err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http"):
+		errs = append(errs, fmt.Errorf("%s: %q is not an http(s) URL", EnvOIDCIssuer, o.Issuer))
+	case u.Scheme == "http" && !isLocalHost(u.Hostname()):
+		errs = append(errs, fmt.Errorf("%s: %q must use https (plain http only for localhost)", EnvOIDCIssuer, o.Issuer))
+	case u.RawQuery != "" || u.Fragment != "" || u.User != nil:
+		errs = append(errs, fmt.Errorf("%s: %q must not have a query, fragment or user", EnvOIDCIssuer, o.Issuer))
+	}
+	if o.ClientID == "" {
+		errs = append(errs, fmt.Errorf("%s is required with %s", EnvOIDCClientID, EnvOIDCIssuer))
+	}
+	if c.BaseURL == "" {
+		errs = append(errs, fmt.Errorf("%s is required with %s: the provider redirects back to <%s>/api/v1/auth/oidc/callback", EnvBaseURL, EnvOIDCIssuer, EnvBaseURL))
+	}
+	return errs
+}
+
+// isLocalHost reports whether host is this machine: localhost or a
+// loopback address.
+func isLocalHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	a, err := netip.ParseAddr(host)
+	return err == nil && a.IsLoopback()
 }
 
 // RequireDatabase reports a clear error when no database URL is set.

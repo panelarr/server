@@ -824,3 +824,116 @@ func TestImportPlacesEachChapterOnce(t *testing.T) {
 		t.Fatalf("chapter 1 read again: %+v", g)
 	}
 }
+
+// TestImportDatedCopyBeatsUndated: of two backup copies of a chapter, one
+// read at a known time and one with no time at all, the dated one's page
+// and time land, though the undated one carries the later (upload) time.
+func TestImportDatedCopyBeatsUndated(t *testing.T) {
+	t.Parallel()
+	f := newImportFixture(t, true)
+	libraryWithLanternKeeper(t, f.user)
+	// No added date on the series and no fetch dates: only the history
+	// dates a copy.
+	backup := backuptest.Backup{Series: []backuptest.Series{{
+		SourceID: 1001, URL: "/series/1", Title: "The Lantern Keeper", Author: "A. Author",
+		Chapters: []backuptest.Chapter{
+			{URL: "/series/1/2", Number: 2, LastPage: 5, Bookmark: true},
+			{URL: "/elsewhere/2", Number: 2, LastPage: 7, Bookmark: true}, // placed by number
+		},
+		History: []backuptest.History{{URL: "/series/1/2", LastRead: readFirst}},
+	}}}
+	imp := waitImport(t, f.user, f.user.uploadImport(backup.File(), 202).Id)
+	applyAndWait(t, f.user, imp.Id)
+	waitQuiet(t, f.h)
+	if g := progressOf(t, f.h, f.userID, "e1")[2]; g.completed || g.page != 5 || !g.at.Equal(readFirst) {
+		t.Fatalf("chapter 2: %+v", g)
+	}
+	if b := bookmarksOf(t, f.h, f.userID, "e1"); len(b) != 1 || !b[2].Equal(readFirst) {
+		t.Fatalf("bookmarks %+v", b)
+	}
+}
+
+// TestImportAttachesWithManageMatchesOnly: a user who may fix matches but
+// not add works attaches an import's series to a work in their library,
+// as attaching by hand would let them.
+func TestImportAttachesWithManageMatchesOnly(t *testing.T) {
+	t.Parallel()
+	f := newImportFixture(t, true)
+	fixer, fu := f.h.createUser(f.admin, "fixer", nil)
+	libraryWithLanternKeeper(t, fixer)
+	backup := backuptest.Backup{Series: []backuptest.Series{{
+		// No series on this source is attached yet: it is now.
+		SourceID: 2001, URL: "/series/2", Title: "The Lantern Keeper", Author: "A. Author", DateAdded: backupAdded,
+		Chapters: []backuptest.Chapter{{URL: "/series/2/1", Number: 1, Read: true}},
+		History:  []backuptest.History{{URL: "/series/2/1", LastRead: readFirst}},
+	}, {
+		// Another series of the attached source: recorded as a candidate.
+		SourceID: 1001, URL: "/series/3", Title: "The Lantern Keeper", Author: "A. Author", DateAdded: backupAdded,
+		Chapters: []backuptest.Chapter{{URL: "/series/3/2", Number: 2, LastPage: 3}},
+		History:  []backuptest.History{{URL: "/series/3/2", LastRead: readSecond}},
+	}}}
+	imp := waitImport(t, fixer, fixer.uploadImport(backup.File(), 202).Id)
+	call[apigen.User](f.admin, http.MethodPatch, "/api/v1/users/"+fu.Id.String(),
+		map[string]any{"grants": map[string]any{"may_add": false, "may_manage_matches": true}}, 200)
+	applyAndWait(t, fixer, imp.Id)
+	waitQuiet(t, f.h)
+	items := importItems(t, fixer, imp.Id, "")
+	if got := outcomes(items); got != "0:applied 1:applied" {
+		t.Fatalf("outcomes %s", got)
+	}
+	if it := items[0]; it.SourceId == nil || *it.SourceId != "fake:2001" {
+		t.Fatalf("item 0 %+v", it)
+	}
+	if it := items[1]; it.SourceId != nil {
+		t.Fatalf("item 1 %+v", it)
+	}
+	series := func(source, key string) string {
+		t.Helper()
+		var state, origin string
+		if err := f.h.st.Pool.QueryRow(context.Background(), `
+			SELECT ss.state, ss.origin FROM source_series ss JOIN works w ON w.id = ss.work_id
+			WHERE w.meta_entry_id = 'e1' AND ss.source_id = $1 AND ss.key = $2`, source, key).Scan(&state, &origin); err != nil {
+			t.Fatalf("%s %s: %v", source, key, err)
+		}
+		return state + " " + origin
+	}
+	if got := series("fake:2001", "/series/2"); got != "attached import" {
+		t.Fatalf("fake:2001 series: %s", got)
+	}
+	if got := series("fake:1001", "/series/3"); got != "candidate import" {
+		t.Fatalf("fake:1001 series: %s", got)
+	}
+	p := progressOf(t, f.h, fu.Id, "e1")
+	if g := p[1]; !g.completed || !g.at.Equal(readFirst) {
+		t.Fatalf("chapter 1: %+v", g)
+	}
+	if g := p[2]; g.page != 3 || !g.at.Equal(readSecond) {
+		t.Fatalf("chapter 2: %+v", g)
+	}
+}
+
+// TestImportWithoutAttachGrantsPlacesByKey: a user who may neither add
+// works nor fix matches still has their reading placed by key when the
+// backup's series is the one attached already, whatever its numbers say.
+func TestImportWithoutAttachGrantsPlacesByKey(t *testing.T) {
+	t.Parallel()
+	f := newImportFixture(t, true)
+	bare, bu := f.h.createUser(f.admin, "bare", nil)
+	libraryWithLanternKeeper(t, bare)
+	backup := backuptest.Backup{Series: []backuptest.Series{{
+		SourceID: 1001, URL: "/series/1", Title: "The Lantern Keeper", Author: "A. Author", DateAdded: backupAdded,
+		Chapters: []backuptest.Chapter{{URL: "/series/1/2", Number: 77, Read: true}}, // a wrong number: the key places it
+		History:  []backuptest.History{{URL: "/series/1/2", LastRead: readSecond}},
+	}}}
+	imp := waitImport(t, bare, bare.uploadImport(backup.File(), 202).Id)
+	call[apigen.User](f.admin, http.MethodPatch, "/api/v1/users/"+bu.Id.String(),
+		map[string]any{"grants": map[string]any{"may_add": false, "may_manage_matches": false}}, 200)
+	applyAndWait(t, bare, imp.Id)
+	waitQuiet(t, f.h)
+	if it := importItems(t, bare, imp.Id, "")[0]; deref(it.Result) != apigen.ImportResultApplied || it.SourceId == nil || it.Placed != 1 {
+		t.Fatalf("item %+v", it)
+	}
+	if g := progressOf(t, f.h, bu.Id, "e1")[2]; !g.completed || !g.at.Equal(readSecond) {
+		t.Fatalf("chapter 2: %+v", g)
+	}
+}

@@ -248,6 +248,13 @@ func (r response) problem(t *testing.T) apigen.Problem {
 
 func (c *client) do(method, path string, body any) response {
 	c.h.t.Helper()
+	return c.doWith(method, path, body, nil)
+}
+
+// doWith sends a request with extra headers, which the client's own
+// headers override.
+func (c *client) doWith(method, path string, body any, extra http.Header) response {
+	c.h.t.Helper()
 	var rd io.Reader
 	switch b := body.(type) {
 	case nil:
@@ -266,6 +273,9 @@ func (c *client) do(method, path string, body any) response {
 	}
 	if rd != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range extra {
+		req.Header[k] = v
 	}
 	if c.csrf != "" {
 		req.Header.Set(CSRFHeader, c.csrf)
@@ -302,9 +312,11 @@ func call[T any](c *client, method, path string, body any, want int) T {
 }
 
 // expectProblem checks a request fails with status and code.
+// It asks for JSON, as an API client does: browser navigations to some
+// endpoints are redirected instead.
 func (c *client) expectProblem(method, path string, body any, status int, code string) apigen.Problem {
 	c.h.t.Helper()
-	res := c.do(method, path, body)
+	res := c.doWith(method, path, body, http.Header{"Accept": {"application/json"}})
 	if res.status != status {
 		c.h.t.Fatalf("%s %s: status %d, want %d: %s", method, path, res.status, status, res.body)
 	}

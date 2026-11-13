@@ -46,7 +46,73 @@ var errSSOOff = NewProblem(http.StatusNotFound, CodeNotFound, "no such endpoint"
 
 // StartOidcLogin sends the browser to the identity provider: to sign in,
 // to link the login to the signed-in user, or to accept an invite.
+//
+// It is a browser navigation, so a refusal answered as JSON would leave
+// the user looking at raw JSON. A navigation is sent to the login page
+// instead, with the refusal's code in sso_error (as a failed callback
+// is); API clients that can be told apart still get the problem.
 func (s *Server) StartOidcLogin(ctx context.Context, req apigen.StartOidcLoginRequestObject) (apigen.StartOidcLoginResponseObject, error) {
+	res, err := s.startOidcLogin(ctx, req)
+	var p *Problem
+	if err == nil || !errors.As(err, &p) || p == errSSOOff || !navigation(ctx) {
+		return res, err
+	}
+	if w := responseWriter(ctx); w != nil {
+		w.Header().Set("Cache-Control", "no-store")
+	}
+	loc := startRefusalPage(req.Params, p.Code)
+	return apigen.StartOidcLogin302Response{Headers: apigen.StartOidcLogin302ResponseHeaders{Location: &loc}}, nil
+}
+
+// startRefusalPage is where a navigation goes when the start is refused:
+// back to a link flow's return_to (the signed-in user's page, which shows
+// sso_error, as a failed link callback does), or the login page, which
+// keeps the return_to as its redirect so "Try again" comes back to it.
+// A return_to that isn't valid is never put into the URL.
+func startRefusalPage(params apigen.StartOidcLoginParams, code string) string {
+	var returnTo string
+	if params.ReturnTo != nil {
+		returnTo, _ = returnPath(params.ReturnTo)
+	}
+	if returnTo != "" && params.Intent != nil && *params.Intent == apigen.StartOidcLoginParamsIntentLink {
+		return withQuery(returnTo, "sso_error", code)
+	}
+	q := url.Values{"sso_error": {code}}
+	if returnTo != "" && returnTo != "/" {
+		q.Set("redirect", returnTo)
+	}
+	return ssoErrorPage + "?" + q.Encode()
+}
+
+// navigation reports whether the request is a browser navigation rather
+// than an API call. Fetch Metadata says so in browsers that send it;
+// without it, a client that asks for JSON (and not HTML) is an API
+// client, and anything else is treated as a browser.
+func navigation(ctx context.Context) bool {
+	if mode := requestHeader(ctx, "Sec-Fetch-Mode"); mode != "" {
+		return mode == "navigate"
+	}
+	return !wantsJSON(requestHeader(ctx, "Accept"))
+}
+
+// wantsJSON reports whether an Accept header asks for JSON and not HTML.
+func wantsJSON(accept string) bool {
+	jsonOK, html := false, false
+	for _, part := range strings.Split(accept, ",") {
+		mt, _, _ := strings.Cut(part, ";")
+		switch mt = strings.ToLower(strings.TrimSpace(mt)); {
+		case mt == "text/html" || mt == "application/xhtml+xml":
+			html = true
+		case mt == "application/json" || strings.HasSuffix(mt, "+json"):
+			jsonOK = true
+		}
+	}
+	return jsonOK && !html
+}
+
+// startOidcLogin is StartOidcLogin's work, answering refusals as
+// problems.
+func (s *Server) startOidcLogin(ctx context.Context, req apigen.StartOidcLoginRequestObject) (apigen.StartOidcLoginResponseObject, error) {
 	if s.deps.SSO == nil {
 		return nil, errSSOOff
 	}

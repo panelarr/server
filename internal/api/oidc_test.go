@@ -420,12 +420,25 @@ func TestOIDCReturnTo(t *testing.T) {
 		"javascript:alert(1)", "data:text/html,x", " /library", "\t//evil.example.com",
 		"/library\r\nSet-Cookie: x=y", "/library\x00", "https:/evil.example.com",
 	} {
-		res := b.do(http.MethodGet, "/api/v1/auth/oidc/start?return_to="+url.QueryEscape(bad), nil)
+		start := "/api/v1/auth/oidc/start?return_to=" + url.QueryEscape(bad)
+		res := b.doWith(http.MethodGet, start, nil, http.Header{"Accept": {"application/json"}})
 		if res.status == http.StatusFound {
 			t.Fatalf("return_to %q accepted: %s", bad, res.header.Get("Location"))
 		}
 		if res.status != http.StatusBadRequest {
 			t.Fatalf("return_to %q: status %d: %s", bad, res.status, res.body)
+		}
+		// A navigation goes to the login page, without the return_to.
+		// (A NUL is refused for every endpoint before its handler.)
+		res = b.do(http.MethodGet, start, nil)
+		if strings.ContainsRune(bad, 0) {
+			if res.status != http.StatusBadRequest || res.problem(t).Code != CodeInvalidRequest {
+				t.Fatalf("return_to %q as a navigation: %d %s", bad, res.status, res.body)
+			}
+			continue
+		}
+		if loc := res.header.Get("Location"); res.status != http.StatusFound || loc != "/login?sso_error=invalid_return_to" {
+			t.Fatalf("return_to %q as a navigation: %d %q", bad, res.status, loc)
 		}
 	}
 	b.expectProblem(http.MethodGet, "/api/v1/auth/oidc/start?return_to="+url.QueryEscape("//evil.example.com"), nil, http.StatusBadRequest, "invalid_return_to")

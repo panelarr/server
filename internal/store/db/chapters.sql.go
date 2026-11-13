@@ -415,6 +415,10 @@ const lockWork = `-- name: LockWork :exec
 SELECT 1 FROM works WHERE id = $1 FOR UPDATE
 `
 
+// Every transaction that writes a work's source_series (attach, demote,
+// candidates) or its chapters takes this first, so that they queue on the
+// work instead of deadlocking on each other's rows. Single-statement
+// writes outside a transaction need not.
 func (q *Queries) LockWork(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, lockWork, id)
 	return err

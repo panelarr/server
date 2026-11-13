@@ -386,9 +386,25 @@ func (s *Service) handleMatchSource(ctx context.Context, t *queue.Task) (any, er
 // single strong one, unless a series is attached already or the strong
 // one was rejected before.
 func (s *Service) saveMatches(ctx context.Context, workID uuid.UUID, sourceID string, cands, strong []*candidate) (status string, attached *db.SourceSeries, err error) {
+	return s.saveMatchesPaused(ctx, workID, sourceID, cands, strong, nil)
+}
+
+// saveMatchesPaused is saveMatches; tests pass pause to run something
+// between dropping the old candidates and saving the new ones.
+func (s *Service) saveMatchesPaused(ctx context.Context, workID uuid.UUID, sourceID string, cands, strong []*candidate, pause func()) (status string, attached *db.SourceSeries, err error) {
 	err = s.st.InTx(ctx, func(q *db.Queries, _ pgx.Tx) error {
+		// The work's lock first, as every writer of its series takes it:
+		// without it, attaching one of these candidates by hand meanwhile
+		// could deadlock with this (the attach holds the work and waits on
+		// a dropped candidate; the insert below waits on the work).
+		if err := q.LockWork(ctx, workID); err != nil {
+			return err
+		}
 		if err := q.DropCandidates(ctx, db.DropCandidatesParams{WorkID: workID, SourceID: sourceID}); err != nil {
 			return err
+		}
+		if pause != nil {
+			pause()
 		}
 		current, err := q.AttachedSourceSeries(ctx, workID)
 		if err != nil {

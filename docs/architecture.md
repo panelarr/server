@@ -41,6 +41,7 @@ More packages arrive with each slice (see [PROGRESS.md](../PROGRESS.md)).
 ## Principles
 
 - **One database, PostgreSQL only.** Postgres features (JSONB, `SKIP LOCKED`, `pg_trgm`) are used freely.
+- **One lock order for a work.** Every transaction that writes a work's source series (attaching, demoting, replacing candidates) or its chapters locks the work's row first (`LockWork`). Writers of the same work then wait for each other instead of deadlocking on each other's rows.
 - **The spec is the contract.** Handlers implement the generated strict interface; the router never serves an undocumented endpoint under `/api/v1`.
 - **Shared content, personal everything else.** Works, chapters and files are stored once; libraries, progress and settings are per user. Every handler checks what the caller may see.
 - **Degrade, don't fail.** Only the database is required to be ready. When the metadata service or a plugin is down, the server says so and keeps serving what it can.

@@ -244,6 +244,10 @@ type Querier interface {
 	// Serialises changes to one user's views, so the limit, the single
 	// default and the order hold under concurrent requests.
 	LockLibraryViews(ctx context.Context, userID uuid.UUID) error
+	// Every transaction that writes a work's source_series (attach, demote,
+	// candidates) or its chapters takes this first, so that they queue on the
+	// work instead of deadlocking on each other's rows. Single-statement
+	// writes outside a transaction need not.
 	LockWork(ctx context.Context, id uuid.UUID) error
 	MarkInviteUsed(ctx context.Context, arg MarkInviteUsedParams) error
 	MarkLibrarySeen(ctx context.Context, arg MarkLibrarySeenParams) (int64, error)

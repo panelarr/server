@@ -47,6 +47,10 @@ func (s *Service) Attach(ctx context.Context, v Viewer, workID, seriesID uuid.UU
 	}
 	var out db.SourceSeries
 	err = s.st.InTx(ctx, func(q *db.Queries, _ pgx.Tx) error {
+		// The work's lock first, as every writer of its series takes it.
+		if err := q.LockWork(ctx, workID); err != nil {
+			return err
+		}
 		if err := q.DemoteAttached(ctx, db.DemoteAttachedParams{WorkID: workID, SourceID: se.SourceID}); err != nil {
 			return err
 		}

@@ -26,6 +26,7 @@ import (
 	"github.com/panelarr/server/internal/downloads"
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/imagecache"
+	"github.com/panelarr/server/internal/importer"
 	"github.com/panelarr/server/internal/jobs"
 	"github.com/panelarr/server/internal/library"
 	"github.com/panelarr/server/internal/limits"
@@ -196,6 +197,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	dl := downloads.NewService(st, host, storages, metaSvc, q, lim, hub, filepath.Join(cfg.DataDir, ".tmp"), logging.Component(log, "downloads"))
 	rdr.SetFiles(dl)
 	chs.OnNewChapters(dl.NewChapters)
+	imp := importer.NewService(st, lib, metaSvc, host, q, hub, importer.Options{TempDir: filepath.Join(cfg.DataDir, ".tmp")}, logging.Component(log, "importer"))
 	jm := jobs.NewManager(st, hub, m, logging.Component(log, "jobs"))
 	registerJobs(jm, st, authSvc, host, lib, chs, netSvc, metaSvc)
 	if err := jm.Start(ctx); err != nil {
@@ -249,6 +251,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		Downloads:      dl,
 		Storages:       storages,
 		Network:        netSvc,
+		Importer:       imp,
 		SecureCookies:  cfg.SecureCookies(),
 		TrustedProxies: cfg.TrustedProxies,
 		Web:            webui.Handler(webFiles),

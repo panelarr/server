@@ -51,6 +51,9 @@ func (v Viewer) meta() meta.Viewer {
 	return meta.Viewer{Ceiling: v.Grants.ContentRatingCeiling, Admin: v.Admin}
 }
 
+// Plugins is v as the plugin host sees them.
+func (v Viewer) Plugins() plugins.Viewer { return v.plugins() }
+
 func (v Viewer) plugins() plugins.Viewer {
 	return plugins.Viewer{Grants: v.Grants, Admin: v.Admin, HideUnknown: v.HideUnknown}
 }
@@ -106,18 +109,27 @@ func NewService(st *store.Store, m *meta.Service, host *plugins.Host, q *queue.Q
 // Rating ranks on the users' ceiling scale; -1 is unknown.
 func ratingRank(r string) int { return slices.Index(users.ContentRatings, r) }
 
+// AllowsRating reports whether a content rating (a work's, or a catalogue
+// entry's by its API name) is within v's ceiling; unknown ratings are
+// allowed unless the instance hides them.
+func (v Viewer) AllowsRating(rating string) bool {
+	if v.Admin {
+		return true
+	}
+	rank := ratingRank(rating)
+	if rank < 0 {
+		return !v.HideUnknown
+	}
+	return rank <= ratingRank(v.Grants.ContentRatingCeiling)
+}
+
 // Visible reports whether v may see a work: within their ceiling, and
 // either not matched to any source yet or matched to one they may use.
 func (v Viewer) Visible(w db.Work, attachedSources []string) bool {
 	if v.Admin {
 		return true
 	}
-	rank := ratingRank(w.ContentRating)
-	if rank < 0 {
-		if v.HideUnknown {
-			return false
-		}
-	} else if rank > ratingRank(v.Grants.ContentRatingCeiling) {
+	if !v.AllowsRating(w.ContentRating) {
 		return false
 	}
 	if len(attachedSources) == 0 {

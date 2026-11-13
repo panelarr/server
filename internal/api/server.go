@@ -20,6 +20,7 @@ import (
 	"github.com/panelarr/server/internal/downloads"
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/imagecache"
+	"github.com/panelarr/server/internal/importer"
 	"github.com/panelarr/server/internal/jobs"
 	"github.com/panelarr/server/internal/library"
 	"github.com/panelarr/server/internal/meta"
@@ -64,6 +65,7 @@ type Deps struct {
 	Downloads *downloads.Service
 	Storages  *storage.Manager
 	Network   *network.Service
+	Importer  *importer.Service
 
 	// SecureCookies marks session cookies Secure (https deployments).
 	SecureCookies bool
@@ -94,7 +96,7 @@ func NewHandler(deps Deps) (http.Handler, error) {
 	}
 	if deps.Auth == nil || deps.Users == nil || deps.Meta == nil || deps.Images == nil || deps.Plugins == nil || deps.Signer == nil ||
 		deps.Jobs == nil || deps.Queue == nil || deps.Hub == nil || deps.Store == nil || deps.Library == nil || deps.Chapters == nil || deps.Reader == nil ||
-		deps.Downloads == nil || deps.Storages == nil || deps.Network == nil {
+		deps.Downloads == nil || deps.Storages == nil || deps.Network == nil || deps.Importer == nil {
 		return nil, fmt.Errorf("api: every service dependency is required")
 	}
 	s := &Server{deps: deps, policies: pols, iconWarnings: newLogThrottle(10 * time.Minute)}

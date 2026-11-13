@@ -86,6 +86,8 @@ tags:
     description: The task queue (admins).
   - name: library
     description: Your library, works and how they are matched on sources.
+  - name: imports
+    description: Importing your library and reading state from another app's backup into your account.
   - name: chapters
     description: Works' unified chapters and update checks.
   - name: reader
@@ -3099,6 +3101,8 @@ paths:
         | `progress.synced` | the user (all devices) | `WorkEvent` (`chapter_id`, `page`, `completed` when one chapter changed) |
         | `bookmarks.changed` | the user (all devices) | `WorkEvent` |
         | `library_views.changed` | the user (all devices) | `LibraryViewsEvent` |
+        | `import.progress` | the user | `ImportProgressEvent` |
+        | `import.finished` | the user | `ImportFinishedEvent` (refetch the import) |
       x-panelarr-access: user
       responses:
         "200":
@@ -4071,6 +4075,125 @@ paths:
       responses:
         "204":
           description: Deleted.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/imports:
+    get:
+      operationId: listMyImports
+      tags: [imports]
+      summary: Your imports
+      description: Your imports from other apps' backups, newest first (at most 100).
+      x-panelarr-access: user
+      responses:
+        "200":
+          description: Your imports.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createMyImport
+      tags: [imports]
+      summary: Upload a backup to import
+      description: |
+        Upload a Suwayomi or Mihon backup (`.tachibk`) as the multipart
+        field `file`, at most 64 MiB (larger bodies answer `413`, code
+        `too_large`). The server reads it right away and keeps only the
+        parsed series, never the file. A file that isn't a usable backup
+        (not gzip or protobuf, damaged, a legacy JSON backup, over a limit
+        once decompressed, or nothing in the library) answers `422`, code
+        `bad_backup`, and creates nothing.
+
+        The new import (`202`) is in state `previewing`: its series are
+        matched in the background (task `import.preview`), with
+        `import.progress` and then `import.finished` on your event stream.
+        Nothing changes in your library until you apply it.
+
+        Uploading a file you already imported (the same bytes) answers
+        `200` with that import, unless it failed or was cancelled. While
+        another import of yours is running, `409`, code `import_running`.
+        The server reads one backup at a time: when it is busy, `429`,
+        code `busy`, with `Retry-After`.
+      x-panelarr-access: user
+      x-panelarr-max-body: 67108864
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/ImportUpload"
+      responses:
+        "200":
+          description: You imported this file before; that import.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Import"
+        "202":
+          description: The new import, previewing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Import"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/imports/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      operationId: getMyImport
+      tags: [imports]
+      summary: One of your imports
+      description: With what the file holds, how far the preview is and the series per outcome. Another user's import answers `404`, like a missing one.
+      x-panelarr-access: user
+      responses:
+        "200":
+          description: The import.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Import"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteMyImport
+      tags: [imports]
+      summary: Delete one of your imports
+      description: Deletes the import and its series, stopping it if it runs. What it already imported stays in your library.
+      x-panelarr-access: user
+      responses:
+        "204":
+          description: Deleted.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/imports/{id}/items:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      operationId: listMyImportItems
+      tags: [imports]
+      summary: The series of one of your imports
+      description: In the backup's order, optionally only those with one outcome. Series the preview hasn't reached yet are `pending`.
+      x-panelarr-access: user
+      parameters:
+        - name: outcome
+          in: query
+          schema:
+            $ref: "#/components/schemas/ImportOutcome"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/PageToken"
+      responses:
+        "200":
+          description: A page of series.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportItemPage"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -5320,6 +5443,250 @@ components:
           type: string
           format: uuid
           description: The view that changed, when one did (absent after reordering).
+    ImportUpload:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+          description: The backup file.
+    ImportState:
+      type: string
+      description: |
+        `previewing` (matching the series), `preview` (ready to review),
+        `applying`, `done`, `failed` (see `message`) or `cancelled`.
+      enum: [previewing, preview, applying, done, failed, cancelled]
+    ImportOutcome:
+      type: string
+      description: |
+        What the preview found for a series: `pending` (not matched yet),
+        `ready` (the work is clear and its source is in Panelarr),
+        `in_library`, `needs_choice` (several catalogue entries could be
+        it), `not_found`, `source_missing` (the work is clear, but the
+        backup's source isn't in Panelarr: it imports without it) or
+        `not_allowed` (your account may not add works, may not use the
+        source, or the work is above your content rating limit).
+      enum: [pending, ready, in_library, needs_choice, not_found, source_missing, not_allowed]
+    Import:
+      type: object
+      required: [id, format, state, created_at, progress, summary, outcomes]
+      properties:
+        id:
+          type: string
+          format: uuid
+        format:
+          type: string
+          enum: [mihon_backup]
+          description: A Suwayomi or Mihon backup.
+        state:
+          $ref: "#/components/schemas/ImportState"
+        message:
+          type: string
+          description: Why it failed, when it did.
+        created_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        progress:
+          $ref: "#/components/schemas/ImportProgress"
+        summary:
+          $ref: "#/components/schemas/ImportSummary"
+        outcomes:
+          type: array
+          description: Series per outcome, with their read chapters and bookmarks.
+          items:
+            $ref: "#/components/schemas/ImportOutcomeCount"
+    ImportProgress:
+      type: object
+      required: [done, total]
+      properties:
+        done:
+          type: integer
+          description: Series matched.
+        total:
+          type: integer
+    ImportOutcomeCount:
+      type: object
+      required: [outcome, series, chapters_read, bookmarks]
+      properties:
+        outcome:
+          $ref: "#/components/schemas/ImportOutcome"
+        series:
+          type: integer
+        chapters_read:
+          type: integer
+        bookmarks:
+          type: integer
+    ImportSummary:
+      type: object
+      description: What the backup holds. Only series in its library count; categories and tracker links aren't imported.
+      required: [series, out_of_library, chapters, chapters_read, in_progress, bookmarks, history, tracker_links, categories, package_hints]
+      properties:
+        series:
+          type: integer
+          description: Series in the backup's library.
+        out_of_library:
+          type: integer
+          description: Series kept only for their history (Mihon backups); not imported.
+        chapters:
+          type: integer
+        chapters_read:
+          type: integer
+        in_progress:
+          type: integer
+          description: Unread chapters with a page read.
+        bookmarks:
+          type: integer
+        history:
+          type: integer
+          description: Last-read times.
+        tracker_links:
+          type: integer
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImportCategory"
+        package_hints:
+          type: array
+          description: Packages a plugin offers that would provide sources the import is missing (after the preview).
+          items:
+            $ref: "#/components/schemas/ImportPackageHint"
+    ImportCategory:
+      type: object
+      required: [name, series]
+      properties:
+        name:
+          type: string
+        series:
+          type: integer
+    ImportPackageHint:
+      type: object
+      required: [plugin_id, package_id, package_name, series]
+      properties:
+        plugin_id:
+          type: string
+        package_id:
+          type: string
+        package_name:
+          type: string
+        series:
+          type: integer
+          description: Series of the import it would let Panelarr attach.
+    ImportList:
+      type: object
+      required: [imports]
+      properties:
+        imports:
+          type: array
+          items:
+            $ref: "#/components/schemas/Import"
+    ImportItem:
+      type: object
+      required: [idx, title, author, artist, source_name, source_compat_id, series_key, categories, outcome, candidates, chapters, chapters_read, bookmarks]
+      properties:
+        idx:
+          type: integer
+          description: The series' position in the backup.
+        title:
+          type: string
+        author:
+          type: string
+        artist:
+          type: string
+        source_name:
+          type: string
+          description: The source's name in the backup (no language).
+        source_compat_id:
+          type: string
+          description: The source as the backup names it, e.g. `mihon:<id>`.
+        series_key:
+          type: string
+        added_at:
+          type: string
+          format: date-time
+        categories:
+          type: array
+          items:
+            type: string
+        outcome:
+          $ref: "#/components/schemas/ImportOutcome"
+        message:
+          type: string
+          description: Why, for `not_allowed`.
+        work_id:
+          type: string
+          format: uuid
+          description: The work, when it exists.
+        entry_id:
+          type: string
+          description: The catalogue entry, when it is clear.
+        source_id:
+          type: string
+          description: The Panelarr source the series would be attached on.
+        candidates:
+          type: array
+          description: Catalogue entries it could be (for `needs_choice`), best first.
+          items:
+            $ref: "#/components/schemas/ImportCandidate"
+        chapters:
+          type: integer
+          description: Chapters with something to import (read, a page or a bookmark).
+        chapters_read:
+          type: integer
+        bookmarks:
+          type: integer
+    ImportCandidate:
+      type: object
+      required: [entry_id, title, score]
+      properties:
+        entry_id:
+          type: string
+        title:
+          type: string
+        year:
+          type: integer
+        score:
+          type: number
+          format: float
+        matched_title:
+          type: string
+        authors_match:
+          type: boolean
+    ImportItemPage:
+      type: object
+      required: [items, next_page_token]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImportItem"
+        next_page_token:
+          type: string
+    ImportProgressEvent:
+      type: object
+      description: Data of `import.progress`.
+      required: [import_id, done, total]
+      properties:
+        import_id:
+          type: string
+          format: uuid
+        done:
+          type: integer
+        total:
+          type: integer
+    ImportFinishedEvent:
+      type: object
+      description: Data of `import.finished`; refetch the import.
+      required: [import_id, state]
+      properties:
+        import_id:
+          type: string
+          format: uuid
+        state:
+          $ref: "#/components/schemas/ImportState"
     LibraryPage:
       type: object
       required: [entries, next_page_token]

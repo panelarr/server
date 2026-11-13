@@ -24,8 +24,9 @@ const nulMessage = "text can't contain the NUL character (U+0000)"
 // every operation here keeps the handlers free of the same check.
 //
 // It reads and buffers the body (already limited to maxBodyBytes) and puts
-// it back for the spec validator and the generated code.
-func rejectNUL(r *http.Request, rc *chi.Context) *Problem {
+// it back for the spec validator and the generated code; without body
+// (uploads, which stream to their handler) it checks only the parameters.
+func rejectNUL(r *http.Request, rc *chi.Context, checkBody bool) *Problem {
 	for i, k := range rc.URLParams.Keys {
 		if strings.ContainsRune(rc.URLParams.Values[i], 0) {
 			return fieldProblem(k, nulMessage)
@@ -50,7 +51,7 @@ func rejectNUL(r *http.Request, rc *chi.Context) *Problem {
 			}
 		}
 	}
-	if r.Body == nil || r.Body == http.NoBody {
+	if !checkBody || r.Body == nil || r.Body == http.NoBody {
 		return nil
 	}
 	data, err := io.ReadAll(r.Body)

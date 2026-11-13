@@ -33,6 +33,10 @@ type policy struct {
 	// ReadOnly operations only read even when their method isn't GET (a
 	// POST with a structured query): a key's read scope is enough.
 	ReadOnly bool
+	// MaxBody raises the request body limit for this operation (an
+	// upload). Its body is left to the handler: neither buffered for the
+	// NUL check nor validated against the spec.
+	MaxBody int64
 	// Route lets the request validator check the request against the spec.
 	Route *routers.Route
 }
@@ -71,6 +75,9 @@ func loadPolicies() (policies, error) {
 				return nil, err
 			}
 			if err := extBool(op, "x-panelarr-read-only", &p.ReadOnly); err != nil {
+				return nil, err
+			}
+			if err := extInt(op, "x-panelarr-max-body", &p.MaxBody); err != nil {
 				return nil, err
 			}
 			if p.Access == AccessPublic && p.SessionOnly {
@@ -130,4 +137,17 @@ func (ps policies) lookup(method, routePattern string) *policy {
 // safeMethod reports whether a method only reads.
 func safeMethod(m string) bool {
 	return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions
+}
+
+func extInt(op *openapi3.Operation, name string, dst *int64) error {
+	v, ok := ext(op, name)
+	if !ok {
+		return nil
+	}
+	f, isNumber := v.(float64)
+	if !isNumber || f <= 0 || f != float64(int64(f)) {
+		return fmt.Errorf("api: %s: %s must be a positive integer", op.OperationID, name)
+	}
+	*dst = int64(f)
+	return nil
 }

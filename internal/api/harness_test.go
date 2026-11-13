@@ -26,6 +26,7 @@ import (
 	"github.com/panelarr/server/internal/downloads"
 	"github.com/panelarr/server/internal/events"
 	"github.com/panelarr/server/internal/imagecache"
+	"github.com/panelarr/server/internal/importer"
 	"github.com/panelarr/server/internal/jobs"
 	"github.com/panelarr/server/internal/library"
 	"github.com/panelarr/server/internal/limits"
@@ -58,6 +59,8 @@ type harness struct {
 	hub     *events.Hub
 	srv     *httptest.Server
 	dataDir string
+	// gate is the harness' backup read gate.
+	gate *importer.ReadGate
 	// release lets the demo job finish.
 	release chan struct{}
 }
@@ -141,6 +144,9 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	dl := downloads.NewService(st, host, storages, m, q, lim, hub, filepath.Join(dataDir, ".tmp"), nil)
 	rdr.SetFiles(dl)
 	chs.OnNewChapters(dl.NewChapters)
+	// A read gate of its own: tests in parallel don't wait on each other.
+	gate := importer.NewReadGate()
+	imp := importer.NewService(st, lib, m, host, q, hub, importer.Options{TempDir: t.TempDir(), Gate: gate, GateWait: 50 * time.Millisecond}, nil)
 	jm := jobs.NewManager(st, hub, nil, nil)
 	release := make(chan struct{})
 	jm.Register(jobs.Definition{
@@ -181,6 +187,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		Downloads: dl,
 		Storages:  storages,
 		Network:   netSvc,
+		Importer:  imp,
 		Checks: []Check{
 			{Name: "database", Required: true, Run: st.Pool.Ping},
 			{Name: "meta", Run: m.ReadyCheck},
@@ -199,7 +206,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	}
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &harness{t: t, st: st, auth: a, users: u, meta: m, metrics: deps.Metrics, queue: q, chs: chs, jobs: jm, hub: hub, srv: srv, release: release, dataDir: dataDir}
+	return &harness{t: t, st: st, auth: a, users: u, meta: m, metrics: deps.Metrics, queue: q, chs: chs, jobs: jm, hub: hub, srv: srv, release: release, dataDir: dataDir, gate: gate}
 }
 
 // client is an API client that keeps cookies, sends the CSRF token it was

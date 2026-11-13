@@ -45,7 +45,7 @@ func TestRejectNUL(t *testing.T) {
 			for k, v := range tc.params {
 				rc.URLParams.Add(k, v)
 			}
-			p := rejectNUL(r, rc)
+			p := rejectNUL(r, rc, true)
 			if !tc.reject {
 				if p != nil {
 					t.Fatalf("rejected: %+v", p)

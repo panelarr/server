@@ -41,12 +41,16 @@ func (c *client) signedIn(res response, want string) apigen.Me {
 // linkSSO runs a link flow from a signed-in browser.
 func (c *client) linkSSO(m *mockOP, claims mockClaims, returnTo string) response {
 	c.h.t.Helper()
-	res := c.do(http.MethodGet, "/api/v1/auth/oidc/start?intent=link&return_to="+url.QueryEscape(returnTo), nil)
-	if res.status != http.StatusFound {
-		c.h.t.Fatalf("start link: %d %s", res.status, res.body)
-	}
+	start := c.startLink(returnTo)
 	m.next = claims
-	return c.do(http.MethodGet, m.authorize(res.header.Get("Location")), nil)
+	return c.do(http.MethodGet, m.authorize(start), nil)
+}
+
+// startLink starts a link flow with POST /auth/oidc/link and returns the
+// provider's URL.
+func (c *client) startLink(returnTo string) string {
+	c.h.t.Helper()
+	return call[apigen.OidcLinkStart](c, http.MethodPost, "/api/v1/auth/oidc/link", map[string]string{"return_to": returnTo}, http.StatusOK).RedirectTo
 }
 
 // noSessionCookie checks a response set no session cookie.
@@ -233,30 +237,30 @@ func TestOIDCLinking(t *testing.T) {
 
 	// A link flow whose session ended meanwhile links nothing.
 	gone := stopAtRedirects(h.login("other", "user password 1"))
-	start := gone.do(http.MethodGet, "/api/v1/auth/oidc/start?intent=link&return_to=/account", nil)
+	start := gone.startLink("/account")
 	gone.do(http.MethodPost, "/api/v1/auth/logout", nil)
 	m.next = mockClaims{Subject: "s-other"}
-	if res := gone.do(http.MethodGet, m.authorize(start.header.Get("Location")), nil); res.header.Get("Location") != "/account?sso_error=session_changed" {
+	if res := gone.do(http.MethodGet, m.authorize(start), nil); res.header.Get("Location") != "/account?sso_error=session_changed" {
 		t.Fatalf("link after logout: %d %q", res.status, res.header.Get("Location"))
 	}
 	h.browser().expectSSOError(h.browser().ssoLogin(m, mockClaims{Subject: "s-other"}, ""), "not_linked")
 	// Nor one whose session was replaced, even by the same user.
 	again := stopAtRedirects(h.login("other", "user password 1"))
-	start = again.do(http.MethodGet, "/api/v1/auth/oidc/start?intent=link&return_to=/account", nil)
+	start = again.startLink("/account")
 	in := call[apigen.LoginResponse](again, http.MethodPost, "/api/v1/auth/login", map[string]string{"username": "other", "password": "user password 1"}, http.StatusOK)
 	again.csrf = in.CsrfToken
 	m.next = mockClaims{Subject: "s-other"}
-	if res := again.do(http.MethodGet, m.authorize(start.header.Get("Location")), nil); res.header.Get("Location") != "/account?sso_error=session_changed" {
+	if res := again.do(http.MethodGet, m.authorize(start), nil); res.header.Get("Location") != "/account?sso_error=session_changed" {
 		t.Fatalf("link after a new session: %d %q", res.status, res.header.Get("Location"))
 	}
 	// Nor one whose browser signed in as someone else meanwhile: the
 	// login must not land on that account.
 	switched := stopAtRedirects(h.login("other", "user password 1"))
-	start = switched.do(http.MethodGet, "/api/v1/auth/oidc/start?intent=link&return_to=/account", nil)
+	start = switched.startLink("/account")
 	in = call[apigen.LoginResponse](switched, http.MethodPost, "/api/v1/auth/login", map[string]string{"username": "reader", "password": "user password 1"}, http.StatusOK)
 	switched.csrf = in.CsrfToken
 	m.next = mockClaims{Subject: "s-other"}
-	if res := switched.do(http.MethodGet, m.authorize(start.header.Get("Location")), nil); res.header.Get("Location") != "/account?sso_error=session_changed" {
+	if res := switched.do(http.MethodGet, m.authorize(start), nil); res.header.Get("Location") != "/account?sso_error=session_changed" {
 		t.Fatalf("link after switching users: %d %q", res.status, res.header.Get("Location"))
 	}
 	h.browser().expectSSOError(h.browser().ssoLogin(m, mockClaims{Subject: "s-other"}, ""), "not_linked")
@@ -290,6 +294,100 @@ func TestOIDCLinking(t *testing.T) {
 	}
 	h.browser().expectSSOError(h.browser().ssoLogin(m, mockClaims{Subject: "s-reader"}, ""), "not_linked")
 	h.login("reader", "user password 1")
+}
+
+// Starting a link changes the account, so it needs the session's CSRF
+// token: in the header with POST /auth/oidc/link, or in csrf_token with the
+// older GET. Fetch Metadata alone isn't enough: older browsers don't send
+// it, and a same-origin navigation can come from a link someone posted.
+func TestOIDCLinkStart(t *testing.T) {
+	t.Parallel()
+	m := newMockOP(t)
+	h := newHarness(t, withSSO(m))
+	admin, _ := h.setupAdmin()
+	readerPw, _ := h.createUser(admin, "reader", nil)
+	reader := stopAtRedirects(readerPw)
+	const get = "/api/v1/auth/oidc/start?intent=link&return_to=/account"
+
+	// The GET without the token, with any Fetch Metadata or none.
+	for _, site := range []string{"", "same-origin", "none"} {
+		if site == "" {
+			reader.header.Del("Sec-Fetch-Site")
+		} else {
+			reader.header.Set("Sec-Fetch-Site", site)
+		}
+		reader.expectProblem(http.MethodGet, get, nil, http.StatusForbidden, "csrf_failed")
+		reader.expectProblem(http.MethodGet, get+"&csrf_token=", nil, http.StatusForbidden, "csrf_failed")
+		reader.expectProblem(http.MethodGet, get+"&csrf_token=not-the-token", nil, http.StatusForbidden, "csrf_failed")
+		// Another session's token doesn't do either.
+		other := h.login("reader", "user password 1")
+		reader.expectProblem(http.MethodGet, get+"&csrf_token="+url.QueryEscape(other.csrf), nil, http.StatusForbidden, "csrf_failed")
+	}
+	// A cross-site start is refused even with the token.
+	reader.header.Set("Sec-Fetch-Site", "cross-site")
+	reader.expectProblem(http.MethodGet, get+"&csrf_token="+url.QueryEscape(reader.csrf), nil, http.StatusForbidden, "cross_site")
+	reader.header.Del("Sec-Fetch-Site")
+	if reader.cookie(OIDCFlowCookie) != nil {
+		t.Fatal("a refused start set a flow cookie")
+	}
+	// With the token, the GET still works, and the flow links.
+	res := reader.do(http.MethodGet, get+"&csrf_token="+url.QueryEscape(reader.csrf), nil)
+	if res.status != http.StatusFound || !strings.HasPrefix(res.header.Get("Location"), m.srv.URL) {
+		t.Fatalf("GET start with the token: %d %q", res.status, res.header.Get("Location"))
+	}
+	m.next = mockClaims{Subject: "s-reader"}
+	if res := reader.do(http.MethodGet, m.authorize(res.header.Get("Location")), nil); res.header.Get("Location") != "/account" {
+		t.Fatalf("link via GET: %d %q", res.status, res.header.Get("Location"))
+	}
+
+	// The POST needs the token in its header, a session and SSO.
+	body := map[string]string{"return_to": "/account"}
+	token := reader.csrf
+	reader.csrf = ""
+	reader.expectProblem(http.MethodPost, "/api/v1/auth/oidc/link", body, http.StatusForbidden, "csrf_failed")
+	reader.csrf = "not the token"
+	reader.expectProblem(http.MethodPost, "/api/v1/auth/oidc/link", body, http.StatusForbidden, "csrf_failed")
+	reader.csrf = token
+	h.browser().expectProblem(http.MethodPost, "/api/v1/auth/oidc/link", body, http.StatusUnauthorized, "unauthenticated")
+	h.keyClient(readerPw.newAPIKey("read", "write")).expectProblem(http.MethodPost, "/api/v1/auth/oidc/link", body, http.StatusForbidden, "session_required")
+	// Without a body it returns to /.
+	start := call[apigen.OidcLinkStart](reader, http.MethodPost, "/api/v1/auth/oidc/link", nil, http.StatusOK)
+	if !strings.HasPrefix(start.RedirectTo, m.srv.URL) || reader.cookie(OIDCFlowCookie) == nil {
+		t.Fatalf("POST start: %+v", start)
+	}
+	m.next = mockClaims{Subject: "s-reader"}
+	if res := reader.do(http.MethodGet, m.authorize(start.RedirectTo), nil); res.header.Get("Location") != "/" {
+		t.Fatalf("link via POST: %d %q", res.status, res.header.Get("Location"))
+	}
+}
+
+// return_to never points into the API: the browser lands there signed in,
+// so it could, say, start a link flow the user didn't ask for.
+func TestOIDCReturnToNotAPI(t *testing.T) {
+	t.Parallel()
+	m := newMockOP(t)
+	h := newHarness(t, withSSO(m))
+	admin, _ := h.setupAdmin()
+	readerPw, _ := h.createUser(admin, "reader", nil)
+	reader := stopAtRedirects(readerPw)
+	anon := h.browser()
+	for _, bad := range []string{
+		"/api", "/api/", "/api/v1/auth/oidc/start?intent=link", "/API/v1/me", "/Api/v1",
+		"/api?x=1", "/api#x", "/./api/v1", "/x/../api/v1", "/library/../../api/v1",
+		"/%61pi/v1", "/%41PI/v1", "/%2561pi/v1", "/%252561pi/v1", "/api%2Fv1", "/%2Fapi/v1",
+	} {
+		q := url.QueryEscape(bad)
+		anon.expectProblem(http.MethodGet, "/api/v1/auth/oidc/start?return_to="+q, nil, http.StatusBadRequest, "invalid_return_to")
+		reader.expectProblem(http.MethodGet, "/api/v1/auth/oidc/start?intent=link&csrf_token="+url.QueryEscape(reader.csrf)+"&return_to="+q, nil, http.StatusBadRequest, "invalid_return_to")
+		reader.expectProblem(http.MethodPost, "/api/v1/auth/oidc/link", map[string]string{"return_to": bad}, http.StatusBadRequest, "invalid_return_to")
+	}
+	// Pages that only start like the API are fine.
+	for _, good := range []string{"/apis", "/api-docs", "/library/api", "/search?q=/api/v1"} {
+		if loc := anon.startSSO(good); !strings.HasPrefix(loc, m.srv.URL) {
+			t.Fatalf("return_to %q: %s", good, loc)
+		}
+		call[apigen.OidcLinkStart](reader, http.MethodPost, "/api/v1/auth/oidc/link", map[string]string{"return_to": good}, http.StatusOK)
+	}
 }
 
 // Unlinking never leaves a user without a way in; an admin's unlink also
@@ -609,13 +707,20 @@ func TestOIDCSystemAuth(t *testing.T) {
 	o := got.Oidc
 	if got.Password != apigen.SystemAuthPasswordAdmins || !o.Enabled || deref(o.Issuer) != m.issuer || !isTrue(o.Reachable) || o.Error != nil ||
 		isTrue(o.PublicClient) || deref(o.ClientId) != mockClientID || !isTrue(o.AutoProvision) || o.Logout == nil || *o.Logout != apigen.OidcStatusLogoutProvider ||
-		o.AdminGroups == nil || len(*o.AdminGroups) != 1 || o.AllowedGroups == nil || (*o.AllowedGroups)[0] != "readers" || deref(o.UsernameClaim) != "preferred_username" {
+		o.AdminGroups == nil || len(*o.AdminGroups) != 1 || (*o.AdminGroups)[0] != "admins" || o.AllowedGroups == nil || (*o.AllowedGroups)[0] != "readers" || deref(o.UsernameClaim) != "preferred_username" {
 		t.Fatalf("on: %+v", got)
 	}
 	for _, path := range []string{"/api/v1/auth/methods", "/api/v1/system/health", "/api/v1/me"} {
 		if res := admin.do(http.MethodGet, path, nil); strings.Contains(string(res.body), mockClientSecret) {
 			t.Fatalf("%s returns the client secret", path)
 		}
+	}
+
+	// Without admin groups the list is empty: roles are Panelarr's own.
+	plain := newHarness(t, withSSO(newMockOP(t)))
+	adminPlain, _ := plain.setupAdmin()
+	if got := call[apigen.SystemAuth](adminPlain, http.MethodGet, "/api/v1/system/auth", nil, http.StatusOK); got.Oidc.AdminGroups == nil || len(*got.Oidc.AdminGroups) != 0 {
+		t.Fatalf("no admin groups: %+v", got.Oidc)
 	}
 
 	down := newMockOP(t)

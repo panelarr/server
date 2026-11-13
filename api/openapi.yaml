@@ -354,10 +354,15 @@ paths:
         configured, and `503` with code `oidc_unavailable` while the
         provider can't be reached.
 
-        `intent=link` links the login to the signed-in user instead (from
-        the account page): it needs a browser session (`401` otherwise)
-        and a navigation from Panelarr itself (`403` with code
-        `cross_site` otherwise). `invite` accepts an invite with single
+        `return_to` must not point into the API (`/api/...`).
+
+        `intent=link` links the login to the signed-in user instead. Use
+        `POST /auth/oidc/link`, which carries the CSRF token in a header;
+        this navigation form is kept for older clients and needs the
+        session's CSRF token in `csrf_token` (`403` with code
+        `csrf_failed` otherwise), a browser session (`401` otherwise) and
+        a navigation from Panelarr itself (`403` with code `cross_site`
+        otherwise). `invite` accepts an invite with single
         sign-on: the user is created with the invite's role and grants; an
         unknown, used or expired invite answers `404` with code
         `invite_invalid`.
@@ -376,6 +381,12 @@ paths:
           schema:
             type: string
             enum: [login, link]
+        - name: csrf_token
+          in: query
+          description: With `intent=link`, the session's CSRF token. Prefer `POST /auth/oidc/link`, which keeps it out of the URL.
+          schema:
+            type: string
+            maxLength: 256
         - name: invite
           in: query
           description: An invite token to accept with single sign-on.
@@ -389,6 +400,41 @@ paths:
             Location:
               schema:
                 type: string
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /auth/oidc/link:
+    post:
+      operationId: startOidcLink
+      tags: [auth]
+      summary: Start linking a single sign-on login (session only)
+      description: |
+        Starts a flow that links a login at the identity provider to the
+        signed-in user. It sets the flow cookie (as
+        `GET /auth/oidc/start` does) and answers the provider's URL:
+        send the browser there. The provider sends it back to
+        `return_to`, with `sso_error=<code>` added when linking failed.
+        As a changing request it needs the `X-CSRF-Token` header, so no
+        other site can start it. `return_to` must be a path on this
+        server outside the API (`400` with code `invalid_return_to`
+        otherwise). Answers `404` when single sign-on isn't configured,
+        and `503` with code `oidc_unavailable` while the provider can't
+        be reached.
+      x-panelarr-access: user
+      x-panelarr-session-only: true
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OidcLinkRequest"
+      responses:
+        "200":
+          description: The flow started; send the browser to `redirect_to`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OidcLinkStart"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -606,7 +652,7 @@ paths:
       operationId: listMyIdentities
       tags: [me]
       summary: Your linked single sign-on logins (session only)
-      description: Link one with `GET /auth/oidc/start?intent=link`.
+      description: Link one with `POST /auth/oidc/link`.
       x-panelarr-access: user
       x-panelarr-session-only: true
       responses:
@@ -9068,6 +9114,20 @@ components:
           description: Who may sign in with a password. `admins` means everyone else signs in with single sign-on.
         oidc:
           $ref: "#/components/schemas/OidcMethod"
+    OidcLinkRequest:
+      type: object
+      properties:
+        return_to:
+          type: string
+          maxLength: 2048
+          description: Where the provider sends the browser back to. Default `/`.
+    OidcLinkStart:
+      type: object
+      required: [redirect_to]
+      properties:
+        redirect_to:
+          type: string
+          description: The identity provider's authorization URL; send the browser there.
     LogoutResult:
       type: object
       required: [redirect_to]
@@ -9154,6 +9214,12 @@ components:
             type: string
         admin_groups:
           type: array
+          description: |
+            The provider's groups whose members are admins. Empty when none
+            are configured. When set, they decide every single sign-on
+            user's role at each sign-in (admin for members, user for
+            everyone else), overriding the role an admin or an invite gave;
+            the last enabled admin is never demoted.
           items:
             type: string
         logout:

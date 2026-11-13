@@ -124,6 +124,8 @@ func TestOIDCOffByDefault(t *testing.T) {
 	anon.expectProblem(http.MethodGet, "/api/v1/auth/oidc/callback?code=x&state=y", nil, http.StatusNotFound, CodeNotFound)
 	// Signed in, too.
 	admin.expectProblem(http.MethodGet, "/api/v1/auth/oidc/start", nil, http.StatusNotFound, CodeNotFound)
+	admin.expectProblem(http.MethodPost, "/api/v1/auth/oidc/link", nil, http.StatusNotFound, CodeNotFound)
+	admin.expectProblem(http.MethodGet, "/api/v1/auth/oidc/start?intent=link&csrf_token="+url.QueryEscape(admin.csrf), nil, http.StatusNotFound, CodeNotFound)
 	if anon.cookie(OIDCFlowCookie) != nil {
 		t.Fatal("a flow cookie was set with single sign-on off")
 	}

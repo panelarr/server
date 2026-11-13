@@ -283,6 +283,108 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /auth/methods:
+    get:
+      operationId: getAuthMethods
+      tags: [auth]
+      summary: How users can sign in
+      description: For the login page. `oidc` is present only when single sign-on is configured.
+      security: []
+      x-panelarr-access: public
+      x-panelarr-setup: true
+      responses:
+        "200":
+          description: The sign-in methods.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthMethods"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /auth/oidc/start:
+    get:
+      operationId: startOidcLogin
+      tags: [auth]
+      summary: Start signing in with single sign-on
+      description: |
+        A browser navigation, not an API call: redirects to the identity
+        provider. The flow's secrets travel in a short-lived, encrypted,
+        HTTP-only cookie. `return_to` must be a path on this server
+        (`/library`); anything else answers `400` with code
+        `invalid_return_to`. Answers `404` when single sign-on isn't
+        configured, and `503` with code `oidc_unavailable` while the
+        provider can't be reached.
+      security: []
+      x-panelarr-access: public
+      parameters:
+        - name: return_to
+          in: query
+          description: Where to go once signed in. Default `/`.
+          schema:
+            type: string
+            maxLength: 2048
+      responses:
+        "302":
+          description: To the identity provider.
+          headers:
+            Location:
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /auth/oidc/callback:
+    get:
+      operationId: finishOidcLogin
+      tags: [auth]
+      summary: Finish signing in with single sign-on
+      description: |
+        The identity provider sends the browser here. On success it sets
+        the session cookies (as `POST /auth/login` does) and redirects to
+        the flow's `return_to`. On failure it starts no session and
+        redirects to `/login?sso_error=<code>`, where the code is one of:
+        `flow_expired` (no or an expired flow cookie: start again),
+        `state_mismatch`, `provider_error` (the provider refused or
+        failed), `oidc_unavailable`, `invalid_token` (the ID token failed
+        verification: signature, issuer, audience or azp, expiry or nonce),
+        `nonce_reused`, `not_allowed` (not in an allowed group),
+        `not_linked` (no Panelarr account is linked to this login),
+        `account_disabled` or `rate_limited`. Answers `404` when single
+        sign-on isn't configured.
+      security: []
+      x-panelarr-access: public
+      parameters:
+        - name: code
+          in: query
+          schema:
+            type: string
+            maxLength: 4096
+        - name: state
+          in: query
+          schema:
+            type: string
+            maxLength: 512
+        - name: error
+          in: query
+          schema:
+            type: string
+            maxLength: 256
+        - name: error_description
+          in: query
+          schema:
+            type: string
+            maxLength: 2048
+      responses:
+        "302":
+          description: To `return_to`, or to the login page with an error code.
+          headers:
+            Location:
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Problem"
+
   /me:
     get:
       operationId: getMe
@@ -8796,6 +8898,24 @@ components:
         csrf_token:
           type: string
           description: Send it as `X-CSRF-Token` with changing requests. Also in the `panelarr_csrf` cookie.
+    AuthMethods:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          enum: [all, admins]
+          description: Who may sign in with a password. `admins` means everyone else signs in with single sign-on.
+        oidc:
+          $ref: "#/components/schemas/OidcMethod"
+    OidcMethod:
+      type: object
+      required: [label]
+      description: Single sign-on; start it by navigating to `GET /auth/oidc/start`.
+      properties:
+        label:
+          type: string
+          description: The sign-in button's label.
 
     Session:
       type: object

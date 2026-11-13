@@ -38,7 +38,21 @@ const (
 	responseWriterKey
 	userAgentKey
 	acceptLanguageKey
+	requestHeaderKey
 )
+
+// requestCookie returns the value of the request's cookie name, or "".
+func requestCookie(ctx context.Context, name string) string {
+	h, _ := ctx.Value(requestHeaderKey).(http.Header)
+	if h == nil {
+		return ""
+	}
+	c, err := (&http.Request{Header: h}).Cookie(name)
+	if err != nil {
+		return ""
+	}
+	return c.Value
+}
 
 // ClientIP returns the request's client address.
 func ClientIP(ctx context.Context) string {
@@ -132,6 +146,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, responseWriterKey, w)
 		ctx = context.WithValue(ctx, userAgentKey, r.UserAgent())
 		ctx = context.WithValue(ctx, acceptLanguageKey, r.Header.Get("Accept-Language"))
+		ctx = context.WithValue(ctx, requestHeaderKey, r.Header)
 		if r.Body != nil {
 			r.Body = &limitedBody{ReadCloser: http.MaxBytesReader(w, r.Body, maxBodyBytes), raw: r.Body, w: w}
 		}

@@ -21,6 +21,8 @@ Panelarr follows the *arr* convention: only what the server needs before it can 
 
 Flags win over environment variables.
 
+Single sign-on has its own settings: see [Single sign-on (OIDC)](#single-sign-on-oidc).
+
 ## The web app
 
 The server serves the Panelarr web app at its root, built into the binary (`make web` embeds a pinned web release, `make web-local` a local build; without either, a placeholder page says so and the API works as usual). Any path that isn't the API (`/api/`), a feed (`/opds/`), an asset (`/assets/`), a probe or `/metrics` gets the app's page, which routes in the browser. Content-hashed assets are cached for a year; everything else is revalidated. The app is sent with a strict Content-Security-Policy (same-origin scripts only), `nosniff`, `no-referrer` and no framing; API responses carry `nosniff`, a `default-src 'none'` policy and no framing too.
@@ -91,7 +93,34 @@ Live changes reach clients over `GET /api/v1/events` (server-sent events), filte
 
 ## Accounts
 
-The first account created (through the first-run wizard) is the admin. Admins add users with a password or send invite links, and set each user's role and grants. Passwords are hashed with argon2id. Failed logins are limited per username (5 per 15 minutes) and per client address (30 per 15 minutes).
+The first account created (through the first-run wizard) is the admin. Admins add users with a password or send invite links, and set each user's role and grants. Passwords are hashed with argon2id. Failed logins are limited per username (5 per 15 minutes) and per client address (30 per 15 minutes); failed single sign-ons have their own limit per address and don't count here. Users with a linked identity can also sign in with [single sign-on](#single-sign-on-oidc) when it is configured.
+
+## Single sign-on (OIDC)
+
+Users can sign in with an OpenID Connect identity provider (Authelia, Authentik, Keycloak, Dex and the like) next to their password. It is **off unless `PANELARR_OIDC_ISSUER` is set**: without it there is no "Sign in with SSO" button, `/api/v1/auth/oidc/*` answers `404`, and setup and password login work as always. Password login keeps working while single sign-on is on and while the provider is down, so an admin can always get in.
+
+| Environment | Default | Meaning |
+|---|---|---|
+| `PANELARR_OIDC_ISSUER` | (empty: off) | The provider's issuer URL, e.g. `https://id.example.com/realms/home`. Use it exactly as the provider publishes it, including a trailing `/` if it has one (Authentik's per-application issuers do): the discovery document must name the same issuer, character for character. Discovery reads `<issuer>/.well-known/openid-configuration`. Must be `https`, except for `localhost` and loopback addresses. |
+| `PANELARR_OIDC_CLIENT_ID` | (required with the issuer) | Panelarr's client ID at the provider. |
+| `PANELARR_OIDC_CLIENT_SECRET` | (empty) | The client's secret. Empty means a public client (PKCE only). Never logged or shown by the API. |
+| `PANELARR_OIDC_CLIENT_SECRET_FILE` | (empty) | Read the secret from this file instead (a mounted secret). Set one of the two, not both. |
+| `PANELARR_OIDC_SCOPES` | `openid profile email` | Scopes to ask for, separated by spaces or commas; `openid` is always added. Add `groups` if your provider needs it for the groups claim. |
+| `PANELARR_OIDC_BUTTON_LABEL` | `Sign in with SSO` | The login page's button. |
+| `PANELARR_OIDC_GROUPS_CLAIM` | `groups` | The claim that lists the user's groups (read from the ID token, or from userinfo when the token has none). |
+| `PANELARR_OIDC_ALLOWED_GROUPS` | (empty: anyone) | Comma-separated groups: only their members may sign in with single sign-on. |
+
+`PANELARR_BASE_URL` is required with single sign-on: register `<PANELARR_BASE_URL>/api/v1/auth/oidc/callback` as the client's redirect URI at the provider. The server refuses to start with an issuer but no base URL or client ID, or with other `PANELARR_OIDC_*` settings but no issuer.
+
+**Who signs in.** A provider login is linked to a Panelarr user by the provider's issuer and subject (`sub`) only, never by username or email, so a matching name or address at the provider can't take over an account. A login that isn't linked to anyone is refused (`not_linked`), and a disabled user can't sign in this way either. Linking from the account page, accepting invites with single sign-on, creating users on their first login and roles from groups come later.
+
+**The flow.** `GET /api/v1/auth/oidc/start?return_to=/path` sends the browser to the provider with the authorization code flow, PKCE (S256), a `state` and a `nonce`. These secrets and `return_to` travel in a cookie (`panelarr_oidc`, HTTP-only, sent only to `/api/v1/auth/oidc/`, valid 10 minutes) that the server encrypts and authenticates with its secret key (`PANELARR_SECRET_KEY` or the key file), so no table is needed. The callback checks the cookie and `state`, exchanges the code with the PKCE verifier (and the secret), and verifies the ID token: its signature with the provider's keys, its issuer, its audience (and `azp`: a token for several audiences must name Panelarr's client as its authorized party, and an `azp`, when present, must be Panelarr's client), its expiry (allowing 2 minutes of clock skew) and its nonce. A flow can be finished only once. On success the session is the same as after a password login (the session cookie and the CSRF cookie) and is marked as started by single sign-on; the browser goes back to `return_to`, which must be a path on Panelarr itself (anything else answers `400 invalid_return_to`); it is cleaned of `.`/`..` segments and doubled slashes. On failure no session is started and the browser goes to `/login?sso_error=<code>`; the codes are listed with the endpoint in the [API](../api/openapi.yaml). Failed sign-ins are limited per client address (30 per 15 minutes), apart from password logins, so single sign-on can never lock anyone out of password login. Only callbacks that belong to the browser's own flow (its cookie opened and `state` matched) count: a callback without one is refused (`flow_expired`, `state_mismatch`) but not counted, because any website can make a browser load the callback.
+
+**When the provider is down.** It doesn't stop the server: discovery is retried in the background (from 5 seconds up to every 5 minutes) and kept once it works; the signing keys are refreshed when the provider rotates them. Meanwhile the health shows the `oidc` component failing (the server is `degraded`, still ready), and starting a sign-in answers `503 oidc_unavailable`.
+
+**Audit.** Sign-ins with single sign-on are logged like password logins (`component: audit`, `msg: login`, `method: oidc`, with the user and the identity), failed ones as `sso login failed` with a reason code, and callbacks refused before they were a sign-in attempt as `sso callback refused`. Tokens, codes and the secret are never logged.
+
+Sessions last until they expire or the user signs out: removing someone at the provider doesn't end their Panelarr sessions or API keys, so disable the user in Panelarr too.
 
 ## Database migrations
 

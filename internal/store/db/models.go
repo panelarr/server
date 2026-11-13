@@ -278,6 +278,7 @@ type Session struct {
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 	ExpiresAt  time.Time
+	AuthMethod string
 }
 
 type Setting struct {
@@ -400,6 +401,16 @@ type User struct {
 	UpdatedAt            time.Time
 	PasswordChangedAt    time.Time
 	LastLoginAt          *time.Time
+}
+
+type UserIdentity struct {
+	ID          uuid.UUID
+	UserID      uuid.UUID
+	Issuer      string
+	Subject     string
+	Email       string
+	CreatedAt   time.Time
+	LastLoginAt *time.Time
 }
 
 type UserPreference struct {

@@ -38,6 +38,7 @@ import (
 	"github.com/panelarr/server/internal/queue"
 	"github.com/panelarr/server/internal/reader"
 	"github.com/panelarr/server/internal/secret"
+	"github.com/panelarr/server/internal/sso"
 	"github.com/panelarr/server/internal/storage"
 	"github.com/panelarr/server/internal/store"
 	"github.com/panelarr/server/internal/users"
@@ -232,17 +233,32 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		log.Warn("this build has no web app: the API works, the browser gets a placeholder page")
 	}
 
+	checks := []api.Check{
+		{Name: "database", Required: true, Run: st.Pool.Ping},
+		// The library needs the metadata service, but reading what's
+		// downloaded doesn't: without it the server is degraded.
+		{Name: "meta", Run: metaSvc.ReadyCheck},
+		{Name: "plugins", Run: host.ReadyCheck},
+	}
+	var ssoProvider *sso.Provider
+	if o := cfg.OIDC; o.Enabled() {
+		ssoProvider = sso.New(sso.Config{
+			Issuer: o.Issuer, ClientID: o.ClientID, ClientSecret: o.ClientSecret, Scopes: o.Scopes,
+			RedirectURL: cfg.BaseURL + api.BasePath + "/auth/oidc/callback",
+			Label:       o.ButtonLabel, GroupsClaim: o.GroupsClaim, AllowedGroups: o.AllowedGroups,
+		}, box, nil, logging.Component(log, "sso"))
+		log.Info("single sign-on on", "component", "sso", "oidc", o)
+		// A provider that is down doesn't stop the server: discovery is
+		// retried, and health shows single sign-on as degraded meanwhile.
+		go ssoProvider.Run(ctx)
+		checks = append(checks, api.Check{Name: "oidc", Run: ssoProvider.Check})
+	}
+
 	handler, err := api.NewHandler(api.Deps{
-		Log:          logging.Component(log, "api"),
-		Metrics:      m,
-		MetricsOnAPI: cfg.Metrics.Listen == "",
-		Checks: []api.Check{
-			{Name: "database", Required: true, Run: st.Pool.Ping},
-			// The library needs the metadata service, but reading what's
-			// downloaded doesn't: without it the server is degraded.
-			{Name: "meta", Run: metaSvc.ReadyCheck},
-			{Name: "plugins", Run: host.ReadyCheck},
-		},
+		Log:            logging.Component(log, "api"),
+		Metrics:        m,
+		MetricsOnAPI:   cfg.Metrics.Listen == "",
+		Checks:         checks,
 		Auth:           authSvc,
 		Users:          usersSvc,
 		Meta:           metaSvc,
@@ -260,6 +276,7 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		Storages:       storages,
 		Network:        netSvc,
 		Importer:       imp,
+		SSO:            ssoProvider,
 		SecureCookies:  cfg.SecureCookies(),
 		TrustedProxies: cfg.TrustedProxies,
 		Web:            webui.Handler(webFiles),

@@ -5,6 +5,8 @@ package api
 import (
 	"context"
 	"net/http"
+	"slices"
+	"strings"
 	"testing"
 
 	sourcev1 "github.com/panelarr/source-api/gen/panelarr/source/v1"
@@ -23,7 +25,15 @@ func TestListSourcesFilters(t *testing.T) {
 		}
 		return ids
 	}
-	call[apigen.SourceInfo](admin, http.MethodPatch, "/api/v1/sources/fake:1001", map[string]any{"enabled": false}, 200)
+	off := call[apigen.SourceInfo](admin, http.MethodPatch, "/api/v1/sources/fake:1001", map[string]any{"enabled": false}, 200)
+	if off.CompatIds == nil || !slices.Equal(*off.CompatIds, []string{"example-app:1001"}) {
+		t.Fatalf("compat IDs %v", off.CompatIds)
+	}
+	for _, s := range call[apigen.SourceList](admin, http.MethodGet, "/api/v1/sources?all=true", nil, 200).Sources {
+		if s.CompatIds == nil || !slices.Equal(*s.CompatIds, []string{"example-app:" + strings.TrimPrefix(s.Id, "fake:")}) {
+			t.Fatalf("compat IDs of %s: %v", s.Id, s.CompatIds)
+		}
+	}
 	if got := list(""); len(got) != 1 || got[0] != "fake:2001" {
 		t.Fatalf("usable %v", got)
 	}

@@ -83,6 +83,15 @@ func (s *Server) toSourceInfo(src plugins.Source) apigen.SourceInfo {
 	return out
 }
 
+// adminSourceInfo is a source as the admin calls show it: with what only
+// admins see (its compat IDs).
+func (s *Server) adminSourceInfo(src plugins.Source) apigen.SourceInfo {
+	out := s.toSourceInfo(src)
+	ids := nonNil(src.CompatIds)
+	out.CompatIds = &ids
+	return out
+}
+
 // ListSources lists the sources (admins), filtered.
 func (s *Server) ListSources(ctx context.Context, req apigen.ListSourcesRequestObject) (apigen.ListSourcesResponseObject, error) {
 	rows, err := s.deps.Plugins.Sources(ctx, s.sourceViewer(ctx), deref(req.Params.All))
@@ -99,7 +108,7 @@ func (s *Server) ListSources(ctx context.Context, req apigen.ListSourcesRequestO
 			(pr.Present != nil && src.Present != *pr.Present) {
 			continue
 		}
-		out.Sources = append(out.Sources, s.toSourceInfo(src))
+		out.Sources = append(out.Sources, s.adminSourceInfo(src))
 	}
 	return out, nil
 }
@@ -110,7 +119,7 @@ func (s *Server) UpdateSource(ctx context.Context, req apigen.UpdateSourceReques
 	if err != nil {
 		return nil, pluginError(ctx, err)
 	}
-	return apigen.UpdateSource200JSONResponse(s.toSourceInfo(src)), nil
+	return apigen.UpdateSource200JSONResponse(s.adminSourceInfo(src)), nil
 }
 
 func (s *Server) toSeries(sourceID string, se *sourcev1.Series) apigen.SourceSeries {
@@ -351,5 +360,5 @@ func (s *Server) SetSourceHealthCheck(ctx context.Context, req apigen.SetSourceH
 	if err != nil {
 		return nil, pluginError(ctx, err)
 	}
-	return apigen.SetSourceHealthCheck200JSONResponse(s.toSourceInfo(src)), nil
+	return apigen.SetSourceHealthCheck200JSONResponse(s.adminSourceInfo(src)), nil
 }

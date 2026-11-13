@@ -170,6 +170,9 @@ type Querier interface {
 	ListSourceChaptersBySeries(ctx context.Context, sourceSeriesID uuid.UUID) ([]SourceChapter, error)
 	ListSourceSeries(ctx context.Context, workID uuid.UUID) ([]SourceSeries, error)
 	ListSources(ctx context.Context) ([]ListSourcesRow, error)
+	// Every source known by this compat ID ("<scheme>:<id>"), present or not,
+	// oldest plugin first.
+	ListSourcesByCompatID(ctx context.Context, compatID string) ([]ListSourcesByCompatIDRow, error)
 	ListStorages(ctx context.Context) ([]Storage, error)
 	ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)

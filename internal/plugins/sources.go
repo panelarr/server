@@ -123,6 +123,36 @@ func (h *Host) Source(ctx context.Context, id string, v Viewer) (Source, error) 
 	return s, nil
 }
 
+// SourcesByCompatID lists every source known by a compat ID
+// ("<scheme>:<id>", see the source's compat_ids), best first: sources v
+// may use, then the rest; within each, the oldest plugin first. More than
+// one plugin may claim the same ID. The list includes sources v may not
+// use and ones their plugin no longer lists, so callers can tell "not
+// allowed" or "missing" from "unknown" (an empty list); check
+// [Viewer.Visible] before using one.
+func (h *Host) SourcesByCompatID(ctx context.Context, v Viewer, compatID string) ([]Source, error) {
+	rows, err := h.st.ListSourcesByCompatID(ctx, compatID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Source, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Source{Source: r.Source, PluginEnabled: r.PluginEnabled})
+	}
+	// Stable: the query's oldest-plugin order holds within each group.
+	slices.SortStableFunc(out, func(a, b Source) int {
+		switch va, vb := v.Visible(a), v.Visible(b); {
+		case va == vb:
+			return 0
+		case va:
+			return -1
+		default:
+			return 1
+		}
+	})
+	return out, nil
+}
+
 // SetSourcesChanged sets what runs when sources become usable or stop
 // being usable (turned on or off, listed again or no longer, their plugin
 // turned on or off), with their IDs; chapters choose their copies again.

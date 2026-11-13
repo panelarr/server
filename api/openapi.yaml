@@ -6037,6 +6037,15 @@ components:
           description: The package (e.g. extension) that provides it, on plugins with the `packages` capability.
         package_name:
           type: string
+        compat_ids:
+          type: array
+          description: |
+            IDs the source is known by in other apps' ecosystems, as its
+            plugin reports them ("<scheme>:<id>", e.g. `mihon:123`). Imports
+            from those apps use them to find the source. Admins only: set
+            on the admin source calls, left out elsewhere.
+          items:
+            type: string
     SourceList:
       type: object
       required: [sources]

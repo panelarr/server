@@ -55,6 +55,11 @@ func (s *scriptedDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	return nil, nil
 }
 
+func (s *scriptedDB) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
+	s.t.Fatal("unexpected CopyFrom")
+	return 0, nil
+}
+
 type scriptedRow scripted
 
 func (r scriptedRow) Scan(dest ...any) error {

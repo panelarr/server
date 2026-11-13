@@ -77,6 +77,43 @@ type ImageRetrySetting struct {
 	UpdatedAt  time.Time
 }
 
+type Import struct {
+	ID         uuid.UUID
+	UserID     uuid.UUID
+	Format     string
+	FileSha256 string
+	State      string
+	TaskID     uuid.NullUUID
+	Summary    []byte
+	Message    string
+	CreatedAt  time.Time
+	FinishedAt *time.Time
+}
+
+type ImportItem struct {
+	ImportID       uuid.UUID
+	Idx            int32
+	Title          string
+	Author         string
+	Artist         string
+	SourceCompatID string
+	SourceName     string
+	SeriesKey      string
+	AddedAt        *time.Time
+	Categories     []string
+	Outcome        string
+	WorkID         uuid.NullUUID
+	EntryID        string
+	SourceID       string
+	SourceState    string
+	Candidates     []byte
+	Chapters       []byte
+	ChaptersRead   int32
+	Bookmarks      int32
+	Pending        int32
+	Message        string
+}
+
 type Invite struct {
 	ID        uuid.UUID
 	TokenHash []byte

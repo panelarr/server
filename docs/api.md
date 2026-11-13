@@ -41,6 +41,18 @@ Each user keeps named views of their own library under `/me/library-views`: a na
 - Views are private: another user's view answers `404` on every call, like a missing one, and there is no admin API for them. Deleting a user deletes their views.
 - Changes publish `library_views.changed` on the owner's event streams only; other devices refetch the list.
 
+## Imports
+
+Each user imports their own library and reading state from a Suwayomi or Mihon backup under `/me/imports` (tag `imports`); see [import.md](import.md) for how series are matched.
+
+- `POST /me/imports` takes the backup as the multipart field `file`. This one operation accepts bodies up to 64 MiB (`413 too_large` above); every other operation keeps the 1 MiB limit. The server parses the file during the request and keeps only the parsed series, never the file. A file that isn't a usable backup answers `422 bad_backup` and creates nothing.
+- The answer is `202` with an import in state `previewing`. The preview (task `import.preview`) matches each series in the background; the import then moves to `preview`, or `failed` with a `message`. Nothing in the library changes until the import is applied (a later slice).
+- Uploading the same file again (same SHA-256) answers `200` with the earlier import, unless that one failed or was cancelled. While another import of the user is running, `409 import_running`.
+- The server reads one backup at a time, because a read may take a few hundred MiB. When another read is in progress, the upload waits a few seconds and then answers `429 busy` with `Retry-After`.
+- `GET /me/imports` lists the caller's imports, newest first. `GET /me/imports/{id}` returns one, with the backup's totals (series, chapters read, bookmarks, categories, tracker links), progress (series matched out of the total), series per outcome and package hints. `GET /me/imports/{id}/items?outcome=` pages through its series in file order. `DELETE /me/imports/{id}` deletes the record (stopping a preview that is still running) but not what the import added.
+- Outcomes per series: `pending`, `ready`, `in_library`, `needs_choice` (with candidates), `not_found`, `source_missing`, `not_allowed` (with a `message`).
+- Imports are private: another user's import answers `404` on every call. `import.progress` and `import.finished` go only to the owner's event streams.
+
 ## Changes within v1
 
 Endpoints and fields are only added within v1, with one deliberate exception:
@@ -51,4 +63,4 @@ Endpoints and fields are only added within v1, with one deliberate exception:
 
 Requests are checked against the spec before they reach a handler: wrong types, missing fields, unknown enum values, lengths and patterns answer `400 invalid_request` with one `errors` entry per field.
 
-Text can't contain the NUL character (U+0000): PostgreSQL can't store it. A NUL in a path or query parameter, or in any string or key of a JSON body (`\u0000`), answers `400 invalid_request` naming the field (e.g. `definition.types.0`), for every operation, before the spec check.
+Text can't contain the NUL character (U+0000): PostgreSQL can't store it. A NUL in a path or query parameter, or in any string or key of a JSON body (`\u0000`), answers `400 invalid_request` naming the field (e.g. `definition.types.0`), for every operation, before the spec check. Uploads (operations with `x-panelarr-max-body`, such as `POST /me/imports`) stream to their handler: their body is neither buffered for this check nor validated against the spec, and the handler checks it.

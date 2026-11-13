@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -210,16 +211,48 @@ func (s *Service) AddFromSource(ctx context.Context, v Viewer, ref SourceRef) (F
 		return FromSource{}, err
 	}
 	names := append([]string{se.GetTitle()}, se.GetAltTitles()...)
-	people := textmatch.RealNames(append(slices.Clone(se.GetAuthors()), se.GetArtists()...))
+	m, err := s.MatchEntry(ctx, v, names, append(slices.Clone(se.GetAuthors()), se.GetArtists()...))
+	if err != nil {
+		return FromSource{}, err
+	}
+	if m.Strong != nil {
+		added, err := s.Add(ctx, v, m.Strong.Entry.GetId(), &ref)
+		if err != nil {
+			return FromSource{}, err
+		}
+		return FromSource{Added: &added}, nil
+	}
+	return FromSource{Candidates: m.Candidates}, nil
+}
+
+// EntryMatch is what the catalogue has for a series.
+type EntryMatch struct {
+	// Strong is the one entry with the exact title and a shared author,
+	// when there is exactly one such entry.
+	Strong *EntryCandidate
+	// Candidates are the entries whose titles are close enough, best
+	// first, at most five.
+	Candidates []EntryCandidate
+}
+
+// MatchEntry searches the catalogue, as v, for a series known by names
+// (its title first, then alternatives; the first three are searched) and
+// people (its authors and artists). Nothing is guessed: Strong is set only
+// for a single entry with the exact title and a shared author.
+func (s *Service) MatchEntry(ctx context.Context, v Viewer, names, people []string) (EntryMatch, error) {
+	people = textmatch.RealNames(people)
 	seen := map[string]*EntryCandidate{}
 	var order []string
 	for i, q := range names {
 		if i >= 3 {
 			break
 		}
+		if strings.TrimSpace(q) == "" {
+			continue
+		}
 		res, err := s.meta.Search(ctx, meta.Query{Text: q, PageSize: 10}, v.meta())
 		if err != nil {
-			return FromSource{}, err
+			return EntryMatch{}, err
 		}
 		for _, h := range res.GetHits() {
 			id := h.GetEntry().GetId()
@@ -264,14 +297,10 @@ func (s *Service) AddFromSource(ctx context.Context, v Viewer, ref SourceRef) (F
 			strong = append(strong, c)
 		}
 	}
+	out := EntryMatch{}
 	if len(strong) == 1 {
-		added, err := s.Add(ctx, v, strong[0].Entry.GetId(), &ref)
-		if err != nil {
-			return FromSource{}, err
-		}
-		return FromSource{Added: &added}, nil
+		out.Strong = strong[0]
 	}
-	out := FromSource{}
 	for i, c := range cands {
 		if i >= 5 {
 			break

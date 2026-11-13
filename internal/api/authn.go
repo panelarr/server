@@ -5,6 +5,7 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -93,6 +94,23 @@ func clientIP(r *http.Request, trusted []netip.Prefix) string {
 	return addr.String()
 }
 
+// limitedBody is a request body under the default limit that remembers
+// the body underneath, so an upload operation can raise the limit before
+// anything is read.
+type limitedBody struct {
+	io.ReadCloser
+	raw io.ReadCloser
+	w   http.ResponseWriter
+}
+
+// raiseBodyLimit replaces the default body limit with n. Call it before
+// the body is read.
+func raiseBodyLimit(r *http.Request, n int64) {
+	if lb, ok := r.Body.(*limitedBody); ok {
+		r.Body = http.MaxBytesReader(lb.w, lb.raw, n)
+	}
+}
+
 // apiKeyFrom returns the API key a request sends, if any.
 func apiKeyFrom(r *http.Request) string {
 	if k := r.Header.Get(APIKeyHeader); k != "" {
@@ -115,7 +133,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, userAgentKey, r.UserAgent())
 		ctx = context.WithValue(ctx, acceptLanguageKey, r.Header.Get("Accept-Language"))
 		if r.Body != nil {
-			r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+			r.Body = &limitedBody{ReadCloser: http.MaxBytesReader(w, r.Body, maxBodyBytes), raw: r.Body, w: w}
 		}
 		r = r.WithContext(ctx)
 		if s.deps.Auth == nil {
@@ -167,7 +185,11 @@ func (s *Server) authorize(routes chi.Routes) func(http.Handler) http.Handler {
 				writeProblem(w, r, prob)
 				return
 			}
-			if prob := rejectNUL(r, rc); prob != nil {
+			if pol.MaxBody > 0 {
+				// Only now, for a caller allowed to call it.
+				raiseBodyLimit(r, pol.MaxBody)
+			}
+			if prob := rejectNUL(r, rc, pol.MaxBody == 0); prob != nil {
 				writeProblem(w, r, prob)
 				return
 			}
@@ -229,6 +251,13 @@ func validateRequest(r *http.Request, pol *policy, rc *chi.Context) error {
 	for i, k := range rc.URLParams.Keys {
 		params[k] = rc.URLParams.Values[i]
 	}
+	if pol.MaxBody > 0 {
+		// An upload streams to its handler: the validator must not read
+		// it (its security check buffers the whole body).
+		shallow := *r
+		shallow.Body = http.NoBody
+		r = &shallow
+	}
 	return openapi3filter.ValidateRequest(r.Context(), &openapi3filter.RequestValidationInput{
 		Request:    r,
 		PathParams: params,
@@ -236,6 +265,8 @@ func validateRequest(r *http.Request, pol *policy, rc *chi.Context) error {
 		Options: &openapi3filter.Options{
 			AuthenticationFunc: openapi3filter.NoopAuthenticationFunc, // checked by checkAccess
 			MultiError:         true,
+			// Uploads stream to their handler, which checks them.
+			ExcludeRequestBody: pol.MaxBody > 0,
 		},
 	})
 }

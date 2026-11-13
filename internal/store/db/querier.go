@@ -17,6 +17,9 @@ type Querier interface {
 	AddBookmarks(ctx context.Context, arg AddBookmarksParams) error
 	AddLibraryEntry(ctx context.Context, arg AddLibraryEntryParams) (LibraryEntry, error)
 	AssignVariants(ctx context.Context, arg AssignVariantsParams) error
+	// A work that has the series (by key) attached on one of the sources,
+	// preferring the sources in the order given.
+	AttachedSeriesByKey(ctx context.Context, arg AttachedSeriesByKeyParams) (AttachedSeriesByKeyRow, error)
 	// Attached series of works someone follows: what scheduled update checks
 	// look at.
 	AttachedSeriesOfFollowedWorks(ctx context.Context) ([]SourceSeries, error)
@@ -42,6 +45,7 @@ type Querier interface {
 	CountSourcesByPlugin(ctx context.Context) ([]CountSourcesByPluginRow, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
+	CreateImport(ctx context.Context, arg CreateImportParams) (Import, error)
 	CreateInvite(ctx context.Context, arg CreateInviteParams) (Invite, error)
 	CreateJobRun(ctx context.Context, arg CreateJobRunParams) (JobRun, error)
 	CreateLibraryView(ctx context.Context, arg CreateLibraryViewParams) (LibraryView, error)
@@ -63,6 +67,7 @@ type Querier interface {
 	// rebuilds the deleted ones.
 	DeleteGhostChapters(ctx context.Context, arg DeleteGhostChaptersParams) ([]uuid.UUID, error)
 	DeleteImageRetrySetting(ctx context.Context, arg DeleteImageRetrySettingParams) (int64, error)
+	DeleteImport(ctx context.Context, arg DeleteImportParams) (Import, error)
 	DeleteInvite(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteLibraryView(ctx context.Context, arg DeleteLibraryViewParams) (LibraryView, error)
 	DeletePlugin(ctx context.Context, id string) (int64, error)
@@ -86,7 +91,15 @@ type Querier interface {
 	DropCandidates(ctx context.Context, arg DropCandidatesParams) error
 	ExtendTaskLease(ctx context.Context, arg ExtendTaskLeaseParams) error
 	FailInterruptedJobRuns(ctx context.Context) (int64, error)
+	// Imports whose task ended without finishing them (an admin cancelled it,
+	// or it ran out of attempts) stop counting as running.
+	FailStaleImports(ctx context.Context, userID uuid.UUID) (int64, error)
 	FilesOnStorage(ctx context.Context, arg FilesOnStorageParams) ([]ChapterFile, error)
+	// The user's latest import of the same file that didn't fail or get
+	// cancelled: a re-upload offers it instead of starting another.
+	FindImportByFile(ctx context.Context, arg FindImportByFileParams) (Import, error)
+	// Ends a preview, unless the import was deleted or moved on meanwhile.
+	FinishImportPreview(ctx context.Context, arg FinishImportPreviewParams) (Import, error)
 	FinishJobRun(ctx context.Context, arg FinishJobRunParams) (JobRun, error)
 	FinishTask(ctx context.Context, arg FinishTaskParams) (Task, error)
 	// Works someone follows, least recently refreshed first.
@@ -96,6 +109,9 @@ type Querier interface {
 	GetChapterFile(ctx context.Context, chapterID uuid.UUID) (ChapterFile, error)
 	GetDefaultStorage(ctx context.Context) (Storage, error)
 	GetImageRetrySetting(ctx context.Context, arg GetImageRetrySettingParams) (ImageRetrySetting, error)
+	GetImport(ctx context.Context, arg GetImportParams) (Import, error)
+	// For the import's own tasks, which act for its user.
+	GetImportByID(ctx context.Context, id uuid.UUID) (Import, error)
 	GetJobRun(ctx context.Context, id uuid.UUID) (JobRun, error)
 	GetLibraryEntry(ctx context.Context, arg GetLibraryEntryParams) (LibraryEntry, error)
 	GetLibraryView(ctx context.Context, arg GetLibraryViewParams) (LibraryView, error)
@@ -129,8 +145,12 @@ type Querier interface {
 	HurryTask(ctx context.Context, arg HurryTaskParams) (Task, error)
 	// A source's own setting and its package's.
 	ImageRetrySettingsFor(ctx context.Context, arg ImageRetrySettingsForParams) ([]ImageRetrySetting, error)
+	// Series per source the preview found missing in Panelarr, for package hints.
+	ImportMissingSources(ctx context.Context, importID uuid.UUID) ([]ImportMissingSourcesRow, error)
+	ImportOutcomeCounts(ctx context.Context, importID uuid.UUID) ([]ImportOutcomeCountsRow, error)
 	InsertChapter(ctx context.Context, arg InsertChapterParams) (Chapter, error)
 	InsertChapterFile(ctx context.Context, arg InsertChapterFileParams) (ChapterFile, error)
+	InsertImportItems(ctx context.Context, arg []InsertImportItemsParams) (int64, error)
 	InsertProfile(ctx context.Context, arg InsertProfileParams) (NetworkProfile, error)
 	InsertProxy(ctx context.Context, arg InsertProxyParams) (NetworkProxy, error)
 	InsertSolver(ctx context.Context, arg InsertSolverParams) (NetworkSolver, error)
@@ -153,6 +173,8 @@ type Querier interface {
 	// Download tasks with their chapter and work, newest first; users see the
 	// ones they asked for, admins all.
 	ListDownloadTasks(ctx context.Context, arg ListDownloadTasksParams) ([]ListDownloadTasksRow, error)
+	ListImportItems(ctx context.Context, arg ListImportItemsParams) ([]ListImportItemsRow, error)
+	ListImports(ctx context.Context, arg ListImportsParams) ([]Import, error)
 	ListJobRuns(ctx context.Context, arg ListJobRunsParams) ([]JobRun, error)
 	// A user's library by title, after a (sort_title, id) cursor. Content
 	// filters run in Go (they depend on the user's grants).
@@ -199,6 +221,8 @@ type Querier interface {
 	// Chapters found after each library entry was last seen.
 	NewChaptersForUser(ctx context.Context, arg NewChaptersForUserParams) ([]NewChaptersForUserRow, error)
 	OrderLibraryViews(ctx context.Context, arg OrderLibraryViewsParams) error
+	// The next series the preview hasn't matched yet.
+	PendingImportItems(ctx context.Context, arg PendingImportItemsParams) ([]PendingImportItemsRow, error)
 	PruneFinishedTasks(ctx context.Context, before *time.Time) (int64, error)
 	PruneJobRuns(ctx context.Context, arg PruneJobRunsParams) (int64, error)
 	PutImageRetrySetting(ctx context.Context, arg PutImageRetrySettingParams) (ImageRetrySetting, error)
@@ -212,9 +236,12 @@ type Querier interface {
 	// Retry by hand: a failed or cancelled task runs again with fresh attempts.
 	RequeueTask(ctx context.Context, id uuid.UUID) (Task, error)
 	RetryTaskLater(ctx context.Context, arg RetryTaskLaterParams) (Task, error)
+	RunningImport(ctx context.Context, userID uuid.UUID) (Import, error)
 	SetAutoDownload(ctx context.Context, arg SetAutoDownloadParams) (int64, error)
 	SetChapterPin(ctx context.Context, arg SetChapterPinParams) error
 	SetDefaultStorage(ctx context.Context, id string) (int64, error)
+	SetImportItemMatch(ctx context.Context, arg SetImportItemMatchParams) error
+	SetImportTask(ctx context.Context, arg SetImportTaskParams) error
 	SetJobRunProgress(ctx context.Context, arg SetJobRunProgressParams) error
 	SetLibraryViewDefault(ctx context.Context, arg SetLibraryViewDefaultParams) error
 	SetPluginConfig(ctx context.Context, arg SetPluginConfigParams) error

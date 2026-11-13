@@ -1,7 +1,7 @@
 # Importing a library
 
 Panelarr can import a library and its reading state from a Suwayomi or Mihon backup. This page describes the
-backup reader; the import itself (preview, apply, the API) builds on it.
+backup reader and the preview; applying an import comes later. The API is in [api.md](api.md#imports).
 
 ## Why the backup file
 
@@ -124,4 +124,66 @@ and time `Read` takes against these figures.
 ### One read at a time
 
 These figures are for one `Read`. Each call holds its own buffers and model, so concurrent reads add up: a caller
-must allow only one `Read` at a time (the import endpoint holds a lock for it) or budget the memory of each.
+must allow only one `Read` at a time or budget the memory of each. The importer does the first: one gate per process
+(`importer.ProcessGate`) allows one read at a time, held from the read until the parsed series are stored and the
+model can be collected. An upload that can't get the gate within a few seconds is refused (`429` with `Retry-After`)
+instead of queueing in memory.
+
+## The preview (`internal/importer`)
+
+`POST /me/imports` copies the upload to a private temporary file, hashing it on the way, and checks two things first,
+without the gate:
+
+- **The same file again?** If the user already has an import of a file with the same SHA-256 that didn't fail or get
+  cancelled, they get that import back.
+- **Another import running?** If one of the user's imports is still running, the upload is refused. A partial unique
+  index on `imports` enforces this.
+
+Then it takes the gate, reads the backup and deletes the file. It stores the import (`imports`, state `previewing`)
+and one row per series in the backup's library (`import_items`), and queues the task `import.preview`. A file that
+isn't a usable backup creates nothing.
+
+A row keeps what later steps need, so nothing is uploaded twice:
+
+- the title, author, artist, source (`mihon:<id>` and the backup's name for it), series key, date added and
+  categories;
+- the chapters with something to import (read, a page, a bookmark), as compact JSON. Each chapter's time is its
+  last-read time; failing that, the chapter's fetch date; failing that, the series' date added. This way undated marks
+  sort below real reading.
+
+The task matches each series that is still `pending`, in file order, so a preview interrupted by a restart picks up
+where it stopped. It finds the work in this order:
+
+1. **The same series.** A work that already has this series (by key) attached on one of the Panelarr sources known
+   by the backup's source ID: a re-import, or a series another user already has.
+2. **The source's own details.** When the user may use that source, the source's title, alternative titles and
+   people for the series, matched against the catalogue (`library.MatchEntry`, the same matching as adding a series
+   found on a source).
+3. **The backup's own title and people**, when the source isn't usable or doesn't answer.
+
+Matching never guesses. A work counts as clear only with exactly one catalogue entry that has the exact title and a
+shared author; anything else is a set of candidates. The catalogue is searched past the user's content rating limit,
+so a series above the limit is reported as such instead of "not found". Entries above the limit are never offered as
+candidates.
+
+The outcome follows from the work found and the user's grants, the first that applies:
+
+| Outcome | When |
+|---|---|
+| `not_allowed` | The work is above the user's content rating limit or only on sources they may not use |
+| `in_library` | The work is in the user's library already. This works without `may_add` too: their reading can still be imported |
+| `not_allowed` | The user may not add works (`may_add`), or the source exists in Panelarr but they may not use it |
+| `ready` | The work is clear and the source is usable: it will be attached |
+| `source_missing` | The work is clear but no plugin provides the source: it imports without it |
+| `needs_choice` | Several catalogue entries could be it |
+| `not_found` | Nothing in the catalogue |
+
+**Package hints.** For sources no plugin provides, the preview asks each enabled plugin with packages which
+packages it offers but hasn't installed, and matches their sources' `compat_ids` against the missing ones. The
+import's summary then says, for example, "Multi Comics would let Panelarr attach 2 series". A plugin that doesn't
+answer is skipped.
+
+Progress (series matched out of the total) is computed from the rows, so it survives reloads and restarts.
+`import.progress` and `import.finished` go to the importing user only. If the task ends without finishing an import,
+for example because an admin cancelled it or it ran out of attempts, the import is marked `failed` the next time the
+user's imports are read, so a dead import never blocks a new one.

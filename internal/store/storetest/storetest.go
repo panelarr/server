@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"net/url"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +28,12 @@ import (
 
 // Image is the PostgreSQL image used when no server is configured.
 const Image = "postgres:18-alpine"
+
+// PoolMaxConns caps the pool of each test database. pgx's default is one
+// connection per CPU, and as many tests run in parallel as there are
+// CPUs, so on a large machine the tests together would need more
+// connections than the server allows.
+const PoolMaxConns = 8
 
 var (
 	once     sync.Once
@@ -45,7 +52,15 @@ func serverURL(t testing.TB) string {
 			adminURL = u
 			return
 		}
-		adminURL, onceErr = startContainer()
+		// Starting can fail when the host port Docker picked is taken
+		// meanwhile (packages start their containers in parallel): try
+		// again a few times.
+		for range 3 {
+			if adminURL, onceErr = startContainer(); onceErr == nil {
+				break
+			}
+			time.Sleep(time.Second)
+		}
 	})
 	if onceErr != nil {
 		t.Fatalf("storetest: %v (set PANELARR_TEST_DATABASE_URL to use a running server)", onceErr)
@@ -60,9 +75,15 @@ func startContainer() (string, error) {
 		tcpostgres.WithUsername("postgres"),
 		tcpostgres.WithPassword("postgres"),
 		tcpostgres.BasicWaitStrategies(),
+		// Parallel tests each open their own pools: the default 100
+		// connections run out on machines with many CPUs (see PoolMaxConns).
+		testcontainers.WithCmdArgs("-c", "max_connections=500"),
 		testcontainers.WithLogger(nopLogger{}),
 	)
 	if err != nil {
+		if c != nil {
+			_ = c.Terminate(ctx) // a container created but not started
+		}
 		return "", err
 	}
 	super, err := c.ConnectionString(ctx, "sslmode=disable")
@@ -126,6 +147,9 @@ func URL(t testing.TB) string {
 		t.Fatalf("storetest: %v", err)
 	}
 	u.Path = "/" + name
+	q := u.Query()
+	q.Set("pool_max_conns", strconv.Itoa(PoolMaxConns))
+	u.RawQuery = q.Encode()
 	return u.String()
 }
 

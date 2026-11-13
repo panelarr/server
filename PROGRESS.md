@@ -51,6 +51,14 @@ Each user keeps named views of their own library (filters, sort, display). The s
 - [x] **S1. Recently updated:** library entries carry `last_updated_at`, when a later check last found one of the work's available chapters (the updates feed's "appeared"), for a "Recently updated" sort and an "updated within" filter.
 - [x] **S2. Views storage and API:** `/me/library-views` (list, create, read, change, delete, order) with a validated definition, one default and an order per user, limits, and a `library_views.changed` event to the owner.
 
+## Import from Suwayomi and Mihon
+
+Users import their library and reading state from a Suwayomi or Mihon backup file into their own account: a preview first, then apply. See [docs/import.md](docs/import.md).
+
+- [x] **S2. Backup reader:** `internal/importer/mihonbackup` reads `.tachibk` backups (gzip or plain protobuf, Mihon's field numbers, other fields skipped) into series, chapters with read marks, bookmarks and last pages, history times, categories joined by order, source names and tracker links; streaming, with a limit on the file, the decompressed data, one message, every collection the model keeps and its text, so memory stays bounded for any input; clear errors for files that aren't backups, legacy JSON backups and backups with nothing in the library.
+- [ ] **S3. Preview:** import records, series matching, `/me/imports`; one backup read at a time (the reader's memory bound is per read).
+- [ ] **S4. Apply and resolve.**
+
 ## Working assumptions
 
 Settled for now, cheap to change:

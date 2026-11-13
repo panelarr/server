@@ -24,6 +24,7 @@ internal/chapters/       unified chapters, chosen copies, update checks
 internal/reader/         pages, progress, history, reader settings and preferences
 internal/storage/        storage backends (local, S3) and their configuration
 internal/cbz/            CBZ archives with ComicInfo.xml
+internal/importer/mihonbackup/  reading Suwayomi and Mihon backups (.tachibk)
 internal/downloads/      the download task, naming, auto-download, moving files
 internal/webui/          the embedded web app and its routing and headers
 internal/textmatch/      title and name normalization and similarity

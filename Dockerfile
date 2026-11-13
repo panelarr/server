@@ -9,7 +9,7 @@
 # points at until they are published. The web context is optional: without
 # it the image serves a placeholder page instead of the web app.
 
-ARG GO_VERSION=1.27.3
+ARG GO_VERSION=1.27.4
 
 # Overridden by --build-context; empty otherwise.
 FROM scratch AS meta

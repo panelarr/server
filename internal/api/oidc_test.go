@@ -26,7 +26,7 @@ func withSSO(m *mockOP, allowedGroups ...string) harnessOpt {
 	return func(d *Deps) {
 		box := secret.NewBox(base64.StdEncoding.EncodeToString(make([]byte, 32)), "")
 		d.SSO = sso.New(sso.Config{
-			Issuer: m.srv.URL, ClientID: mockClientID, ClientSecret: mockClientSecret,
+			Issuer: m.issuer, ClientID: mockClientID, ClientSecret: mockClientSecret,
 			Scopes: []string{"openid", "profile", "email"}, RedirectURL: mockRedirectURI,
 			Label: "Sign in with Example ID", AllowedGroups: allowedGroups,
 		}, box, m.srv.Client(), nil)
@@ -45,7 +45,7 @@ func (h *harness) browser() *client {
 func (h *harness) link(m *mockOP, userID uuid.UUID, subject string) {
 	h.t.Helper()
 	if _, err := h.st.CreateUserIdentity(context.Background(), db.CreateUserIdentityParams{
-		UserID: userID, Issuer: m.srv.URL, Subject: subject,
+		UserID: userID, Issuer: m.issuer, Subject: subject,
 	}); err != nil {
 		h.t.Fatal(err)
 	}
@@ -252,6 +252,14 @@ func TestOIDCCallbackRefusals(t *testing.T) {
 		{"another issuer", func(c mockClaims) mockClaims { c.Issuer = "https://evil.example.com"; return c }, "invalid_token"},
 		{"another nonce", func(c mockClaims) mockClaims { c.Nonce = "not-the-flows-nonce"; return c }, "invalid_token"},
 		{"another key", func(c mockClaims) mockClaims { c.SignWith = otherKey; return c }, "invalid_token"},
+		// Several audiences need azp naming us (OpenID Connect Core
+		// 3.1.3.7); an azp naming someone else is refused.
+		{"several audiences, azp another client", func(c mockClaims) mockClaims {
+			c.Audiences, c.AZP = []string{"other-client", mockClientID}, "other-client"
+			return c
+		}, "invalid_token"},
+		{"several audiences, no azp", func(c mockClaims) mockClaims { c.Audiences = []string{"other-client", mockClientID}; return c }, "invalid_token"},
+		{"azp another client", func(c mockClaims) mockClaims { c.AZP = "other-client"; return c }, "invalid_token"},
 		{"not linked", func(c mockClaims) mockClaims { c.Subject = "subject-stranger"; return c }, "not_linked"},
 		// The same email as a linked user doesn't make a stranger that
 		// user: only issuer and subject count.
@@ -271,6 +279,17 @@ func TestOIDCCallbackRefusals(t *testing.T) {
 			t.Fatalf("callback: %d %q", res.status, res.header.Get("Location"))
 		}
 	})
+
+	for name, c := range map[string]mockClaims{
+		"several audiences, azp us": {Subject: "subject-reader", Audiences: []string{"other-client", mockClientID}, AZP: mockClientID},
+		"azp us":                    {Subject: "subject-reader", AZP: mockClientID},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if res := h.browser().ssoLogin(m, c, "/ok"); res.header.Get("Location") != "/ok" {
+				t.Fatalf("callback: %d %q", res.status, res.header.Get("Location"))
+			}
+		})
+	}
 
 	t.Run("state mismatch", func(t *testing.T) {
 		b := h.browser()
@@ -329,8 +348,15 @@ func TestOIDCCallbackRefusals(t *testing.T) {
 
 	t.Run("provider error", func(t *testing.T) {
 		b := h.browser()
+		state := mustURL(t, b.startSSO("")).Query().Get("state")
+		b.expectSSOError(b.do(http.MethodGet, "/api/v1/auth/oidc/callback?error=access_denied&error_description=no&state="+url.QueryEscape(state), nil), "provider_error")
+	})
+
+	t.Run("provider error without its flow", func(t *testing.T) {
+		b := h.browser()
+		b.expectSSOError(b.do(http.MethodGet, "/api/v1/auth/oidc/callback?error=access_denied", nil), "flow_expired")
 		b.startSSO("")
-		b.expectSSOError(b.do(http.MethodGet, "/api/v1/auth/oidc/callback?error=access_denied&error_description=no", nil), "provider_error")
+		b.expectSSOError(b.do(http.MethodGet, "/api/v1/auth/oidc/callback?error=access_denied&state=attacker-state", nil), "state_mismatch")
 	})
 
 	t.Run("code replayed", func(t *testing.T) {
@@ -395,6 +421,17 @@ func TestOIDCReturnTo(t *testing.T) {
 			t.Fatalf("return_to %q: %s", good, loc)
 		}
 	}
+	// The browser is sent back to the cleaned path.
+	for in, want := range map[string]string{
+		"/library/./series/../": "/library/", "/a/../../b?x=/../y": "/b?x=/../y", "/works/abc#../..": "/works/abc#../..",
+		// Dot segments and doubled slashes can't make it scheme-relative.
+		"/.//evil.example.com": "/evil.example.com", "/a/..//evil.example.com": "/evil.example.com",
+	} {
+		got, ok := localPath(in)
+		if !ok || got != want {
+			t.Fatalf("localPath(%q) = %q, %v; want %q", in, got, ok, want)
+		}
+	}
 }
 
 // Rule 2: with allowed groups, only members sign in; groups come from
@@ -421,7 +458,8 @@ func TestOIDCAllowedGroups(t *testing.T) {
 	}
 }
 
-// Login rate limits apply to the callback too.
+// Failed sign-ins are rate limited per address, on their own: they never
+// lock anyone out of password login.
 func TestOIDCRateLimited(t *testing.T) {
 	t.Parallel()
 	m := newMockOP(t)
@@ -431,12 +469,50 @@ func TestOIDCRateLimited(t *testing.T) {
 	h.link(m, reader.Id, "subject-reader")
 	b := h.browser()
 	for range 30 {
-		b.do(http.MethodGet, "/api/v1/auth/oidc/callback?code=x&state=y", nil)
+		b.expectSSOError(b.do(http.MethodGet, "/api/v1/auth/oidc/callback?code=x&state=y", nil), "flow_expired")
+		b.expectSSOError(b.do(http.MethodGet, "/api/v1/auth/oidc/callback?error=access_denied", nil), "flow_expired")
+		b.startSSO("")
+		b.expectSSOError(b.do(http.MethodGet, "/api/v1/auth/oidc/callback?code=x&state=y", nil), "state_mismatch")
+	}
+	// None of those were sign-in attempts.
+	if res := b.ssoLogin(m, mockClaims{Subject: "subject-reader"}, "/ok"); res.header.Get("Location") != "/ok" {
+		t.Fatalf("sign-in after refused callbacks: %d %q", res.status, res.header.Get("Location"))
+	}
+	h.login("Admin", adminPassword)
+
+	// Real failed sign-ins count, and block single sign-on only.
+	for range 30 {
+		h.browser().expectSSOError(h.browser().ssoLogin(m, mockClaims{Subject: "subject-stranger"}, ""), "not_linked")
 	}
 	calls := m.calls()
+	b = h.browser()
 	b.expectSSOError(b.ssoLogin(m, mockClaims{Subject: "subject-reader"}, ""), "rate_limited")
 	if m.calls() != calls {
 		t.Fatal("a rate-limited callback reached the token endpoint")
+	}
+	h.login("Admin", adminPassword)
+}
+
+// Some providers' issuers end in a slash. It is kept exactly, because
+// discovery must name the same issuer, and stored with the link as is.
+func TestOIDCIssuerWithTrailingSlash(t *testing.T) {
+	t.Parallel()
+	m := newMockOPAt(t, "/application/o/panelarr/")
+	h := newHarness(t, withSSO(m), func(d *Deps) { d.Checks = append(d.Checks, Check{Name: "oidc", Run: d.SSO.Check}) })
+	admin, _ := h.setupAdmin()
+	_, reader := h.createUser(admin, "reader", nil)
+	h.link(m, reader.Id, "subject-reader")
+	if !strings.HasSuffix(m.issuer, "/") {
+		t.Fatalf("issuer %q", m.issuer)
+	}
+	if res := h.browser().ssoLogin(m, mockClaims{Subject: "subject-reader"}, "/ok"); res.header.Get("Location") != "/ok" {
+		t.Fatalf("callback: %d %q", res.status, res.header.Get("Location"))
+	}
+	health := call[apigen.SystemHealth](admin, http.MethodGet, "/api/v1/system/health", nil, http.StatusOK)
+	for _, c := range health.Components {
+		if c.Name == "oidc" && c.Status != apigen.ComponentHealthStatusOk {
+			t.Fatalf("oidc health: %+v", c)
+		}
 	}
 }
 

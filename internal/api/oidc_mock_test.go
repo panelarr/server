@@ -24,8 +24,11 @@ import (
 // authorization step the test drives directly, a token endpoint that
 // checks PKCE and the client secret, and userinfo.
 type mockOP struct {
-	t      *testing.T
-	srv    *httptest.Server
+	t   *testing.T
+	srv *httptest.Server
+	// issuer is srv's URL plus the issuer path: exactly what discovery
+	// and the tokens say.
+	issuer string
 	key    *rsa.PrivateKey
 	client string
 	secret string
@@ -49,8 +52,12 @@ type mockClaims struct {
 	// Overrides of what a correct token says.
 	Issuer   string
 	Audience string
-	Nonce    string
-	Expiry   time.Duration // from now; 0 means an hour
+	// Audiences, when set, makes aud a list.
+	Audiences []string
+	// AZP sets the azp claim.
+	AZP    string
+	Nonce  string
+	Expiry time.Duration // from now; 0 means an hour
 	// SignWith signs the token with another key.
 	SignWith *rsa.PrivateKey
 }
@@ -71,7 +78,12 @@ const (
 	mockRedirectURI = "https://panelarr.example.com/api/v1/auth/oidc/callback"
 )
 
-func newMockOP(t *testing.T) *mockOP {
+func newMockOP(t *testing.T) *mockOP { return newMockOPAt(t, "") }
+
+// newMockOPAt is a mock provider whose issuer is its URL plus issuerPath,
+// like "/application/o/panelarr/" (some providers' issuers end in a
+// slash).
+func newMockOPAt(t *testing.T, issuerPath string) *mockOP {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -79,9 +91,10 @@ func newMockOP(t *testing.T) *mockOP {
 	}
 	m := &mockOP{t: t, key: key, client: mockClientID, secret: mockClientSecret, codes: map[string]*mockGrant{}}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+	// Discovery lives under the issuer without its trailing slash.
+	mux.HandleFunc("GET "+strings.TrimSuffix(issuerPath, "/")+"/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"issuer":                                m.srv.URL,
+			"issuer":                                m.issuer,
 			"authorization_endpoint":                m.srv.URL + "/authorize",
 			"token_endpoint":                        m.srv.URL + "/token",
 			"jwks_uri":                              m.srv.URL + "/keys",
@@ -101,6 +114,7 @@ func newMockOP(t *testing.T) *mockOP {
 	mux.HandleFunc("POST /token", m.token)
 	mux.HandleFunc("GET /userinfo", m.userinfo)
 	m.srv = httptest.NewServer(mux)
+	m.issuer = m.srv.URL + issuerPath
 	t.Cleanup(m.srv.Close)
 	return m
 }
@@ -145,7 +159,7 @@ func (m *mockOP) authorize(authURL string) string {
 		m.t.Fatal(err)
 	}
 	// Providers may add parameters of their own.
-	return cb.Path + "?" + url.Values{"code": {code}, "state": {q.Get("state")}, "iss": {m.srv.URL}}.Encode()
+	return cb.Path + "?" + url.Values{"code": {code}, "state": {q.Get("state")}, "iss": {m.issuer}}.Encode()
 }
 
 func randomBytes(t *testing.T) []byte {
@@ -188,7 +202,7 @@ func (m *mockOP) token(w http.ResponseWriter, r *http.Request) {
 	}
 	c := g.claims
 	claims := map[string]any{
-		"iss": m.srv.URL, "aud": m.client, "sub": c.Subject, "nonce": g.nonce,
+		"iss": m.issuer, "aud": m.client, "sub": c.Subject, "nonce": g.nonce,
 		"iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix(),
 	}
 	if c.Email != "" {
@@ -202,6 +216,12 @@ func (m *mockOP) token(w http.ResponseWriter, r *http.Request) {
 	}
 	if c.Audience != "" {
 		claims["aud"] = c.Audience
+	}
+	if c.Audiences != nil {
+		claims["aud"] = c.Audiences
+	}
+	if c.AZP != "" {
+		claims["azp"] = c.AZP
 	}
 	if c.Nonce != "" {
 		claims["nonce"] = c.Nonce

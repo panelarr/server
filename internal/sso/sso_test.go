@@ -158,3 +158,35 @@ func TestListClaim(t *testing.T) {
 		}
 	}
 }
+
+// A provider that hangs holds up no one: callers waiting on discovery
+// share one fetch and can give up on their own deadline, and the provider
+// is never fetched twice at once.
+func TestDiscoveryDoesNotBlockOnAHangingProvider(t *testing.T) {
+	release := make(chan struct{})
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		http.Error(w, "down", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+	now := time.Now()
+	p := newTestProvider(srv, &now)
+	for range 3 {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		start := time.Now()
+		err := p.Check(ctx)
+		cancel()
+		if !errors.Is(err, ErrUnavailable) || time.Since(start) > 2*time.Second {
+			t.Fatalf("check: %v after %s", err, time.Since(start))
+		}
+	}
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("%d fetches in flight, want 1", n)
+	}
+}

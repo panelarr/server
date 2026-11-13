@@ -101,6 +101,40 @@ func (o OIDC) String() string { return o.LogValue().String() }
 // GoString keeps the client secret out of %#v.
 func (o OIDC) GoString() string { return o.String() }
 
+// LogValue keeps secrets out of logs: the database URL's password, the
+// secret key, the metadata service's API key and the OIDC client secret.
+func (c Config) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("listen", c.Listen), slog.String("database_url", redactURL(c.DatabaseURL)),
+		slog.String("config_dir", c.ConfigDir), slog.String("data_dir", c.DataDir),
+		slog.String("base_url", c.BaseURL), slog.Bool("secret_key_set", c.SecretKey != ""),
+		slog.Any("trusted_proxies", c.TrustedProxies), slog.String("meta_url", c.MetaURL),
+		slog.Bool("meta_api_key_set", c.MetaAPIKey != ""), slog.String("web_dir", c.WebDir),
+		slog.String("log_format", c.Log.Format), slog.String("log_level", c.Log.Level),
+		slog.Bool("metrics_enabled", c.Metrics.Enabled), slog.String("metrics_listen", c.Metrics.Listen),
+		slog.Any("oidc", c.OIDC),
+	)
+}
+
+// String keeps secrets out of formatted output.
+func (c Config) String() string { return c.LogValue().String() }
+
+// GoString keeps secrets out of %#v.
+func (c Config) GoString() string { return c.String() }
+
+// redactURL hides a database URL's password. A key=value DSN, which
+// can't be parsed as a URL, is hidden whole.
+func redactURL(s string) string {
+	if s == "" {
+		return ""
+	}
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme == "" {
+		return "[redacted]"
+	}
+	return u.Redacted()
+}
+
 // Log configures structured logging.
 type Log struct {
 	// Format is "json" (the default) or "text".
@@ -282,7 +316,10 @@ func (c Config) Validate() error {
 func loadOIDC(getenv func(string) string) (OIDC, error) {
 	env := func(name string) string { return strings.TrimSpace(getenv(name)) }
 	o := OIDC{
-		Issuer:      strings.TrimRight(env(EnvOIDCIssuer), "/"),
+		// Exactly as configured: the provider's discovery document must
+		// name the same issuer, character for character, and some
+		// providers' issuers end in a slash.
+		Issuer:      env(EnvOIDCIssuer),
 		ClientID:    env(EnvOIDCClientID),
 		ButtonLabel: env(EnvOIDCButtonLabel),
 		GroupsClaim: env(EnvOIDCGroupsClaim),
@@ -305,6 +342,10 @@ func loadOIDC(getenv func(string) string) (OIDC, error) {
 		o.ClientSecret = secret
 	}
 	scopes := env(EnvOIDCScopes)
+	// Settings that mean nothing without an issuer: set alone, they are
+	// half a configuration.
+	partial := o.ClientID != "" || o.ClientSecret != "" || scopes != "" || o.ButtonLabel != "" ||
+		o.GroupsClaim != "" || env(EnvOIDCAllowedGroups) != ""
 	if scopes == "" {
 		scopes = DefaultOIDCScopes
 	}
@@ -319,7 +360,7 @@ func loadOIDC(getenv func(string) string) (OIDC, error) {
 		o.GroupsClaim = DefaultOIDCGroupsClaim
 	}
 	o.AllowedGroups = splitList(env(EnvOIDCAllowedGroups), ",")
-	if o.Issuer == "" && (o.ClientID != "" || o.ClientSecret != "" || len(o.AllowedGroups) > 0) {
+	if o.Issuer == "" && partial {
 		// Half a configuration is a mistake, not "off".
 		return o, fmt.Errorf("%s is required to sign in with OIDC (other %s settings are set)", EnvOIDCIssuer, "PANELARR_OIDC_*")
 	}

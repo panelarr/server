@@ -69,6 +69,10 @@ type Service struct {
 	sessionTTL time.Duration
 	userFails  *FailureLimiter
 	ipFails    *FailureLimiter
+	// ssoFails counts failed single sign-ons per client address, apart
+	// from password logins: the callback is a GET any website can make a
+	// browser send, so it must never lock anyone out of password login.
+	ssoFails *FailureLimiter
 }
 
 // NewService returns the auth service.
@@ -80,6 +84,7 @@ func NewService(st *store.Store, hasher *Hasher, log *slog.Logger) *Service {
 		st: st, hasher: hasher, log: log, now: time.Now, sessionTTL: DefaultSessionTTL,
 		userFails: NewFailureLimiter(userFailures, failWindow),
 		ipFails:   NewFailureLimiter(ipFailures, failWindow),
+		ssoFails:  NewFailureLimiter(ipFailures, failWindow),
 	}
 }
 
@@ -161,21 +166,32 @@ type Identity struct {
 }
 
 // SSOBlocked reports a rate-limit error while the client address has too
-// many failed logins, of any kind.
+// many failed single sign-ons. Failed password logins don't count here,
+// and failed single sign-ons don't count against password login.
 func (s *Service) SSOBlocked(ctx context.Context, ci ClientInfo) error {
-	k := "ip:" + ci.IP
-	if blocked, wait := s.ipFails.Blocked(k); blocked {
+	k := "sso:" + ci.IP
+	if blocked, wait := s.ssoFails.Blocked(k); blocked {
 		s.audit(ctx, "sso login refused: rate limited", "ip", ci.IP)
 		return &RateLimitedError{RetryAfter: wait}
 	}
 	return nil
 }
 
-// SSOFailed records a failed single sign-on: it counts against the client
-// address like a wrong password. reason is a short code, never a token.
+// SSOFailed records a failed single sign-on that got past the flow's own
+// checks (its cookie opened and the state matched), so the browser really
+// went through a sign-in: it counts against the client address's single
+// sign-on limit. reason is a short code, never a token.
 func (s *Service) SSOFailed(ctx context.Context, ci ClientInfo, reason string, args ...any) {
-	s.ipFails.Fail("ip:" + ci.IP)
+	s.ssoFails.Fail("sso:" + ci.IP)
 	s.log.WarnContext(ctx, "sso login failed", append([]any{"component", "audit", "reason", reason, "ip", ci.IP}, args...)...)
+}
+
+// SSORefused records a callback refused before it could be a sign-in
+// attempt: no flow cookie, one that doesn't open, a state that doesn't
+// match, or a provider that can't be reached. Any website can make a
+// browser send such a request, so it is logged but never counted.
+func (s *Service) SSORefused(ctx context.Context, ci ClientInfo, reason string, args ...any) {
+	s.log.InfoContext(ctx, "sso callback refused", append([]any{"component", "audit", "reason", reason, "ip", ci.IP}, args...)...)
 }
 
 // LoginIdentity starts a session for the user linked to a provider login,

@@ -26,6 +26,7 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
+	"golang.org/x/sync/singleflight"
 )
 
 // Errors of a flow. Each maps to a code the login page explains.
@@ -96,6 +97,8 @@ type Provider struct {
 	log    *slog.Logger
 	now    func() time.Time
 
+	fetches singleflight.Group
+
 	mu        sync.Mutex
 	disc      *discovered
 	lastErr   error
@@ -163,21 +166,54 @@ func (p *Provider) Check(ctx context.Context) error {
 // Fetching again after a failure waits for the backoff, unless force, so
 // sign-in attempts and health checks can't hammer a provider that's down.
 // A successful result is kept: go-oidc refreshes the signing keys itself
-// when it meets an unknown key.
+// when it meets an unknown key. The fetch runs outside p.mu, and callers
+// arriving during it share it.
 func (p *Provider) discover(ctx context.Context, force bool) (*discovered, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.disc != nil {
-		return p.disc, nil
+		d := p.disc
+		p.mu.Unlock()
+		return d, nil
 	}
-	now := p.now()
-	if !force && p.lastErr != nil && now.Sub(p.lastTry) < p.retryWait {
-		return nil, p.lastErr
+	if !force && p.lastErr != nil && p.now().Sub(p.lastTry) < p.retryWait {
+		err := p.lastErr
+		p.mu.Unlock()
+		return nil, err
 	}
-	p.lastTry = now
+	p.mu.Unlock()
+	// The shared fetch must outlive a caller that gives up, so it gets
+	// its own deadline instead of the caller's context.
+	ch := p.fetches.DoChan("discover", func() (any, error) {
+		return p.fetch(context.WithoutCancel(ctx))
+	})
+	select {
+	case r := <-ch:
+		if r.Err != nil {
+			return nil, r.Err
+		}
+		return r.Val.(*discovered), nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, ctx.Err())
+	}
+}
+
+// fetch reads the discovery document and records the outcome.
+func (p *Provider) fetch(ctx context.Context) (*discovered, error) {
+	p.mu.Lock()
+	if p.disc != nil {
+		d := p.disc
+		p.mu.Unlock()
+		return d, nil
+	}
+	p.lastTry = p.now()
+	p.mu.Unlock()
+
 	ctx, cancel := context.WithTimeout(oidc.ClientContext(ctx, p.client), requestTimeout)
 	defer cancel()
 	prov, err := oidc.NewProvider(ctx, p.cfg.Issuer)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if err != nil {
 		if p.lastErr == nil {
 			p.log.WarnContext(ctx, "OIDC discovery failed; retrying", "issuer", p.cfg.Issuer, "err", err)
@@ -259,17 +295,9 @@ type Result struct {
 // Finish completes a sign-in from the callback: cookie is the flow
 // cookie's value, state and code the callback's parameters.
 func (p *Provider) Finish(ctx context.Context, cookie, state, code string) (Result, error) {
-	f, err := p.openFlow(cookie)
+	f, err := p.claim(cookie, state)
 	if err != nil {
 		return Result{}, err
-	}
-	if state == "" || subtle.ConstantTimeCompare([]byte(state), []byte(f.State)) != 1 {
-		return Result{}, ErrStateMismatch
-	}
-	// Used up from here on, whatever happens next: a flow is finished at
-	// most once.
-	if !p.nonces.use(f.Nonce, f.Expires, p.now()) {
-		return Result{}, ErrNonceReused
 	}
 	if code == "" {
 		return Result{}, fmt.Errorf("%w: no code", ErrProvider)
@@ -303,6 +331,9 @@ func (p *Provider) Finish(ctx context.Context, cookie, state, code string) (Resu
 	if err := idt.Claims(&claims); err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
+	if err := p.checkAZP(idt.Audience, claims); err != nil {
+		return Result{}, err
+	}
 	id := Identity{Issuer: p.cfg.Issuer, Subject: idt.Subject, Email: stringClaim(claims, "email")}
 	groups, hasGroups := listClaim(claims, p.cfg.GroupsClaim)
 	if !hasGroups && len(p.cfg.AllowedGroups) > 0 {
@@ -317,6 +348,31 @@ func (p *Provider) Finish(ctx context.Context, cookie, state, code string) (Resu
 		return Result{Identity: id}, ErrNotAllowed
 	}
 	return Result{Identity: id, ReturnTo: f.ReturnTo}, nil
+}
+
+// Cancel ends a flow the provider sent back with an error instead of a
+// code. Like Finish, it checks the flow cookie and state first: it returns
+// ErrFlowExpired or ErrStateMismatch when the callback doesn't belong to
+// the flow, and nil when it does (the flow is then used up).
+func (p *Provider) Cancel(cookie, state string) error {
+	_, err := p.claim(cookie, state)
+	return err
+}
+
+// claim opens the flow cookie, checks state against it and uses the flow
+// up: whatever happens next, a flow is finished at most once.
+func (p *Provider) claim(cookie, state string) (flow, error) {
+	f, err := p.openFlow(cookie)
+	if err != nil {
+		return flow{}, err
+	}
+	if state == "" || subtle.ConstantTimeCompare([]byte(state), []byte(f.State)) != 1 {
+		return flow{}, ErrStateMismatch
+	}
+	if !p.nonces.use(f.Nonce, f.Expires, p.now()) {
+		return flow{}, ErrNonceReused
+	}
+	return f, nil
 }
 
 func (p *Provider) openFlow(cookie string) (flow, error) {
@@ -335,6 +391,23 @@ func (p *Provider) openFlow(cookie string) (flow, error) {
 		return flow{}, ErrFlowExpired
 	}
 	return f, nil
+}
+
+// checkAZP checks the authorized party (OpenID Connect Core 3.1.3.7): a
+// token for several audiences must name us as azp, and an azp, when there
+// is one, must be us. go-oidc checks only that the audience includes us.
+func (p *Provider) checkAZP(aud []string, claims map[string]any) error {
+	azp, has := claims["azp"]
+	if !has {
+		if len(aud) > 1 {
+			return fmt.Errorf("%w: several audiences and no azp", ErrInvalidToken)
+		}
+		return nil
+	}
+	if s, ok := azp.(string); !ok || s != p.cfg.ClientID {
+		return fmt.Errorf("%w: issued to another party (azp)", ErrInvalidToken)
+	}
+	return nil
 }
 
 // userinfoGroups reads the groups claim from the userinfo endpoint. Its

@@ -347,7 +347,7 @@ paths:
         `flow_expired` (no or an expired flow cookie: start again),
         `state_mismatch`, `provider_error` (the provider refused or
         failed), `oidc_unavailable`, `invalid_token` (the ID token failed
-        verification: signature, issuer, audience, expiry or nonce),
+        verification: signature, issuer, audience or azp, expiry or nonce),
         `nonce_reused`, `not_allowed` (not in an allowed group),
         `not_linked` (no Panelarr account is linked to this login),
         `account_disabled` or `rate_limited`. Answers `404` when single

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"unicode"
 
@@ -84,19 +85,31 @@ func (s *Server) FinishOidcLogin(ctx context.Context, req apigen.FinishOidcLogin
 		return redirect(ssoErrorPage + "?sso_error=" + url.QueryEscape(code))
 	}
 	ci := s.clientInfo(ctx)
+	// Only a callback that belongs to its flow (the cookie opened and
+	// the state matched) counts against the address's single sign-on
+	// limit. Anything earlier can come from any website that makes the
+	// browser load the callback, so it is logged and refused, not counted.
 	fail := func(code string, err error) (apigen.FinishOidcLoginResponseObject, error) {
-		s.deps.Auth.SSOFailed(ctx, ci, code, "err", err)
+		if counts(err) {
+			s.deps.Auth.SSOFailed(ctx, ci, code, "err", err)
+		} else {
+			s.deps.Auth.SSORefused(ctx, ci, code, "err", err)
+		}
 		return refuse(code)
 	}
 	if s.deps.Auth.SSOBlocked(ctx, ci) != nil {
 		return refuse("rate_limited")
 	}
 	p := req.Params
+	cookie := requestCookie(ctx, OIDCFlowCookie)
 	if p.Error != nil {
+		if err := s.deps.SSO.Cancel(cookie, deref(p.State)); err != nil {
+			return fail(ssoErrorCode(err), err)
+		}
 		// The provider's error code only: the description is free text.
 		return fail("provider_error", errors.New("provider error: "+printableCode(*p.Error)))
 	}
-	res, err := s.deps.SSO.Finish(ctx, requestCookie(ctx, OIDCFlowCookie), deref(p.State), deref(p.Code))
+	res, err := s.deps.SSO.Finish(ctx, cookie, deref(p.State), deref(p.Code))
 	if err != nil {
 		return fail(ssoErrorCode(err), err)
 	}
@@ -148,6 +161,13 @@ func ssoErrorCode(err error) string {
 	}
 }
 
+// counts reports whether a failed callback counts against the client's
+// single sign-on limit: not when it never matched a flow of this browser,
+// nor when the provider can't be reached.
+func counts(err error) bool {
+	return !errors.Is(err, sso.ErrFlowExpired) && !errors.Is(err, sso.ErrStateMismatch) && !errors.Is(err, sso.ErrUnavailable)
+}
+
 // printableCode keeps a provider's error code short and printable for the
 // log.
 func printableCode(s string) string {
@@ -166,7 +186,11 @@ func printableCode(s string) string {
 // localPath reports whether s is a path on this server, and returns it.
 // Anything a browser could take to another origin is refused: absolute
 // and scheme-relative URLs ("//host", and "/\host", which browsers read
-// as "//host"), backslashes and control characters anywhere.
+// as "//host"), backslashes and control characters anywhere. The path is
+// returned cleaned (path.Clean: no dot segments or doubled slashes, so
+// "/.//host" becomes "/host"), and a cleaned path starting with "//" is
+// refused as well, so what the web app gets back can never turn
+// scheme-relative if it reuses it as a URL.
 func localPath(s string) (string, bool) {
 	if s == "" {
 		return "/", true
@@ -183,5 +207,18 @@ func localPath(s string) (string, bool) {
 	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil || u.Opaque != "" || !strings.HasPrefix(u.Path, "/") {
 		return "", false
 	}
-	return s, true
+	// Clean the path as written (still escaped), keeping the query,
+	// fragment and a trailing slash.
+	p, rest := s, ""
+	if i := strings.IndexAny(s, "?#"); i >= 0 {
+		p, rest = s[:i], s[i:]
+	}
+	clean := path.Clean(p)
+	if strings.HasSuffix(p, "/") && clean != "/" {
+		clean += "/"
+	}
+	if strings.HasPrefix(clean, "//") {
+		return "", false
+	}
+	return clean + rest, true
 }

@@ -246,7 +246,13 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 			Issuer: o.Issuer, ClientID: o.ClientID, ClientSecret: o.ClientSecret, Scopes: o.Scopes,
 			RedirectURL: cfg.BaseURL + api.BasePath + "/auth/oidc/callback",
 			Label:       o.ButtonLabel, GroupsClaim: o.GroupsClaim, AllowedGroups: o.AllowedGroups,
+			UsernameClaim: o.UsernameClaim, AdminGroups: o.AdminGroups, AutoProvision: o.AutoProvision,
+			PasswordAdminsOnly: o.LocalLogin == config.LocalLoginAdmins,
+			ProviderLogout:     o.Logout == config.LogoutProvider, PostLogoutRedirectURL: cfg.BaseURL + "/login",
 		}, box, nil, logging.Component(log, "sso"))
+		// Password login stays for admins at least: the way in when the
+		// provider is down.
+		authSvc.SetPasswordAdminsOnly(o.LocalLogin == config.LocalLoginAdmins)
 		log.Info("single sign-on on", "component", "sso", "oidc", o)
 		// A provider that is down doesn't stop the server: discovery is
 		// retried, and health shows single sign-on as degraded meanwhile.

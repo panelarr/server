@@ -28,3 +28,6 @@ DELETE FROM sessions WHERE user_id = @user_id AND id <> @keep;
 
 -- name: DeleteExpiredSessions :execrows
 DELETE FROM sessions WHERE expires_at <= now();
+
+-- name: DeleteUserSessionsByMethod :execrows
+DELETE FROM sessions WHERE user_id = @user_id AND auth_method = @auth_method;

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 	"strconv"
+	"time"
 
 	"github.com/panelarr/server/internal/api/apigen"
 	"github.com/panelarr/server/internal/auth"
@@ -29,14 +30,29 @@ func (s *Server) Login(ctx context.Context, req apigen.LoginRequestObject) (apig
 	return apigen.Login200JSONResponse{User: toUser(u), CsrfToken: sess.CSRFToken}, nil
 }
 
-// Logout ends the current session.
+// Logout ends the current session. A single sign-on session with
+// provider logout configured also gets the provider's end-session URL.
 func (s *Server) Logout(ctx context.Context, _ apigen.LogoutRequestObject) (apigen.LogoutResponseObject, error) {
-	if err := s.deps.Auth.Logout(ctx, auth.FromContext(ctx)); err != nil {
+	p := auth.FromContext(ctx)
+	if err := s.deps.Auth.Logout(ctx, p); err != nil {
 		return nil, err
 	}
 	s.clearSessionCookies(ctx)
+	if s.deps.SSO != nil && p.SessionAuth == auth.SessionOIDC {
+		// Panelarr's session is over either way; a provider that can't
+		// be reached right now only means no provider logout.
+		lctx, cancel := context.WithTimeout(ctx, logoutDiscoveryWait)
+		defer cancel()
+		if to, ok := s.deps.SSO.LogoutURL(lctx); ok {
+			return apigen.Logout200JSONResponse{RedirectTo: to}, nil
+		}
+	}
 	return apigen.Logout204Response{}, nil
 }
+
+// logoutDiscoveryWait bounds how long logout waits for the provider's
+// discovery document when it isn't cached.
+const logoutDiscoveryWait = 5 * time.Second
 
 // CheckInvite says whether an invite token is valid.
 func (s *Server) CheckInvite(ctx context.Context, req apigen.CheckInviteRequestObject) (apigen.CheckInviteResponseObject, error) {

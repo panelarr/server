@@ -11,6 +11,22 @@ import (
 	"github.com/google/uuid"
 )
 
+const countUserIdentitiesAtIssuer = `-- name: CountUserIdentitiesAtIssuer :one
+SELECT count(*) FROM user_identities WHERE user_id = $1 AND issuer = $2
+`
+
+type CountUserIdentitiesAtIssuerParams struct {
+	UserID uuid.UUID
+	Issuer string
+}
+
+func (q *Queries) CountUserIdentitiesAtIssuer(ctx context.Context, arg CountUserIdentitiesAtIssuerParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countUserIdentitiesAtIssuer, arg.UserID, arg.Issuer)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createUserIdentity = `-- name: CreateUserIdentity :one
 INSERT INTO user_identities (user_id, issuer, subject, email)
 VALUES ($1, $2, $3, $4)
@@ -42,6 +58,23 @@ func (q *Queries) CreateUserIdentity(ctx context.Context, arg CreateUserIdentity
 		&i.LastLoginAt,
 	)
 	return i, err
+}
+
+const deleteUserIdentity = `-- name: DeleteUserIdentity :execrows
+DELETE FROM user_identities WHERE id = $1 AND user_id = $2
+`
+
+type DeleteUserIdentityParams struct {
+	ID     uuid.UUID
+	UserID uuid.UUID
+}
+
+func (q *Queries) DeleteUserIdentity(ctx context.Context, arg DeleteUserIdentityParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteUserIdentity, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getUserByIdentity = `-- name: GetUserByIdentity :one
@@ -92,6 +125,38 @@ func (q *Queries) GetUserByIdentity(ctx context.Context, arg GetUserByIdentityPa
 	return i, err
 }
 
+const listUserIdentities = `-- name: ListUserIdentities :many
+SELECT id, user_id, issuer, subject, email, created_at, last_login_at FROM user_identities WHERE user_id = $1 ORDER BY created_at, id
+`
+
+func (q *Queries) ListUserIdentities(ctx context.Context, userID uuid.UUID) ([]UserIdentity, error) {
+	rows, err := q.db.Query(ctx, listUserIdentities, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UserIdentity{}
+	for rows.Next() {
+		var i UserIdentity
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Issuer,
+			&i.Subject,
+			&i.Email,
+			&i.CreatedAt,
+			&i.LastLoginAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const touchUserIdentity = `-- name: TouchUserIdentity :exec
 UPDATE user_identities SET last_login_at = now(), email = $1 WHERE id = $2
 `
@@ -104,4 +169,29 @@ type TouchUserIdentityParams struct {
 func (q *Queries) TouchUserIdentity(ctx context.Context, arg TouchUserIdentityParams) error {
 	_, err := q.db.Exec(ctx, touchUserIdentity, arg.Email, arg.ID)
 	return err
+}
+
+const usersWithIdentities = `-- name: UsersWithIdentities :many
+SELECT DISTINCT user_id FROM user_identities WHERE user_id = ANY($1::uuid[])
+`
+
+// Which of the given users have a linked login.
+func (q *Queries) UsersWithIdentities(ctx context.Context, userIds []uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, usersWithIdentities, userIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var user_id uuid.UUID
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

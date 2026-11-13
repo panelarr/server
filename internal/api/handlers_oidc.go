@@ -14,6 +14,7 @@ import (
 	"github.com/panelarr/server/internal/api/apigen"
 	"github.com/panelarr/server/internal/auth"
 	"github.com/panelarr/server/internal/sso"
+	"github.com/panelarr/server/internal/users"
 )
 
 // OIDCFlowCookie carries a single sign-on flow's sealed secrets from
@@ -32,6 +33,9 @@ func (s *Server) GetAuthMethods(_ context.Context, _ apigen.GetAuthMethodsReques
 	out := apigen.GetAuthMethods200JSONResponse{Password: apigen.AuthMethodsPasswordAll}
 	if s.deps.SSO != nil {
 		out.Oidc = &apigen.OidcMethod{Label: s.deps.SSO.Label()}
+		if s.deps.Auth.PasswordAdminsOnly() {
+			out.Password = apigen.AuthMethodsPasswordAdmins
+		}
 	}
 	return out, nil
 }
@@ -40,7 +44,8 @@ func (s *Server) GetAuthMethods(_ context.Context, _ apigen.GetAuthMethodsReques
 // as if they didn't exist.
 var errSSOOff = NewProblem(http.StatusNotFound, CodeNotFound, "no such endpoint")
 
-// StartOidcLogin sends the browser to the identity provider.
+// StartOidcLogin sends the browser to the identity provider: to sign in,
+// to link the login to the signed-in user, or to accept an invite.
 func (s *Server) StartOidcLogin(ctx context.Context, req apigen.StartOidcLoginRequestObject) (apigen.StartOidcLoginResponseObject, error) {
 	if s.deps.SSO == nil {
 		return nil, errSSOOff
@@ -52,7 +57,33 @@ func (s *Server) StartOidcLogin(ctx context.Context, req apigen.StartOidcLoginRe
 			return nil, NewProblem(http.StatusBadRequest, "invalid_return_to", "return_to must be a path on this server, like /library")
 		}
 	}
-	authURL, cookie, err := s.deps.SSO.Begin(ctx, returnTo)
+	st := sso.Start{ReturnTo: returnTo, Intent: sso.IntentLogin}
+	invite := deref(req.Params.Invite)
+	if req.Params.Intent != nil && *req.Params.Intent == apigen.StartOidcLoginParamsIntentLink {
+		if invite != "" {
+			return nil, fieldProblem("invite", "can't be combined with intent=link")
+		}
+		p := auth.FromContext(ctx)
+		if p == nil {
+			return nil, NewProblem(http.StatusUnauthorized, "unauthenticated", "sign in first to link a login")
+		}
+		if p.Method != auth.MethodSession {
+			return nil, NewProblem(http.StatusForbidden, "session_required", "linking a login needs a signed-in browser session, not an API key")
+		}
+		// Linking changes the account, and this is a GET: only a
+		// navigation from Panelarr itself may start it, never one
+		// another site makes the browser do.
+		if site := requestHeader(ctx, "Sec-Fetch-Site"); site == "cross-site" || site == "same-site" {
+			return nil, NewProblem(http.StatusForbidden, "cross_site", "start linking from your account page")
+		}
+		st.Intent, st.UserID, st.SessionID = sso.IntentLink, p.User.ID.String(), p.SessionID.String()
+	} else if invite != "" {
+		if _, err := s.deps.Users.CheckInvite(ctx, invite); err != nil {
+			return nil, domainError(err)
+		}
+		st.Intent, st.Invite = sso.IntentInvite, invite
+	}
+	authURL, cookie, err := s.deps.SSO.Begin(ctx, st)
 	if errors.Is(err, sso.ErrUnavailable) {
 		return nil, NewProblem(http.StatusServiceUnavailable, "oidc_unavailable", "the identity provider can't be reached; try again later or sign in with a password")
 	}
@@ -66,22 +97,35 @@ func (s *Server) StartOidcLogin(ctx context.Context, req apigen.StartOidcLoginRe
 	return apigen.StartOidcLogin302Response{Headers: apigen.StartOidcLogin302ResponseHeaders{Location: &authURL}}, nil
 }
 
-// FinishOidcLogin finishes a sign-in at the identity provider: callback
-// rules 1–3 and 8 of the design. Every failure starts no session and sends
-// the browser to the login page with a code.
+// FinishOidcLogin finishes a flow at the identity provider: the design's
+// callback rules (sso checks the flow, the ID token and the allowed
+// groups; users.SignInSSO links, provisions, syncs the role and starts
+// the session). Every failure starts no session and sends the browser to
+// the login page with a code, or a link flow back where it started.
 func (s *Server) FinishOidcLogin(ctx context.Context, req apigen.FinishOidcLoginRequestObject) (apigen.FinishOidcLoginResponseObject, error) {
 	if s.deps.SSO == nil {
 		return nil, errSSOOff
 	}
-	if w := responseWriter(ctx); w != nil {
+	w := responseWriter(ctx)
+	if w != nil {
 		w.Header().Set("Cache-Control", "no-store")
-		// The flow is used up whatever happens.
-		http.SetCookie(w, s.flowCookie("", -1))
+	}
+	// The flow cookie is cleared only once the callback is known to
+	// belong to it (its state matched) or the cookie is useless anyway:
+	// a forged callback must not end a sign-in in progress.
+	usedUp := func(err error) {
+		if w != nil && !errors.Is(err, sso.ErrStateMismatch) {
+			http.SetCookie(w, s.flowCookie("", -1))
+		}
 	}
 	redirect := func(loc string) (apigen.FinishOidcLoginResponseObject, error) {
 		return apigen.FinishOidcLogin302Response{Headers: apigen.FinishOidcLogin302ResponseHeaders{Location: &loc}}, nil
 	}
+	var res sso.Result
 	refuse := func(code string) (apigen.FinishOidcLoginResponseObject, error) {
+		if res.Intent == sso.IntentLink && res.ReturnTo != "" {
+			return redirect(withQuery(res.ReturnTo, "sso_error", code))
+		}
 		return redirect(ssoErrorPage + "?sso_error=" + url.QueryEscape(code))
 	}
 	ci := s.clientInfo(ctx)
@@ -89,11 +133,12 @@ func (s *Server) FinishOidcLogin(ctx context.Context, req apigen.FinishOidcLogin
 	// the state matched) counts against the address's single sign-on
 	// limit. Anything earlier can come from any website that makes the
 	// browser load the callback, so it is logged and refused, not counted.
-	fail := func(code string, err error) (apigen.FinishOidcLoginResponseObject, error) {
+	fail := func(code string, err error, args ...any) (apigen.FinishOidcLoginResponseObject, error) {
+		args = append([]any{"err", err}, args...)
 		if counts(err) {
-			s.deps.Auth.SSOFailed(ctx, ci, code, "err", err)
+			s.deps.Auth.SSOFailed(ctx, ci, code, args...)
 		} else {
-			s.deps.Auth.SSORefused(ctx, ci, code, "err", err)
+			s.deps.Auth.SSORefused(ctx, ci, code, args...)
 		}
 		return refuse(code)
 	}
@@ -103,32 +148,78 @@ func (s *Server) FinishOidcLogin(ctx context.Context, req apigen.FinishOidcLogin
 	p := req.Params
 	cookie := requestCookie(ctx, OIDCFlowCookie)
 	if p.Error != nil {
-		if err := s.deps.SSO.Cancel(cookie, deref(p.State)); err != nil {
+		err := s.deps.SSO.Cancel(cookie, deref(p.State))
+		usedUp(err)
+		if err != nil {
 			return fail(ssoErrorCode(err), err)
 		}
 		// The provider's error code only: the description is free text.
 		return fail("provider_error", errors.New("provider error: "+printableCode(*p.Error)))
 	}
 	res, err := s.deps.SSO.Finish(ctx, cookie, deref(p.State), deref(p.Code))
+	usedUp(err)
 	if err != nil {
 		return fail(ssoErrorCode(err), err)
 	}
-	_, sess, err := s.deps.Auth.LoginIdentity(ctx, auth.Identity{
-		Issuer: res.Identity.Issuer, Subject: res.Identity.Subject, Email: res.Identity.Email,
-	}, ci)
+	id := res.Identity
+	in := users.SSOLogin{
+		Identity: auth.Identity{Issuer: id.Issuer, Subject: id.Subject, Email: id.Email},
+		Name:     id.Name, Usernames: id.Usernames, Groups: id.Groups, GroupsKnown: id.GroupsKnown,
+	}
+	cfg := s.deps.SSO.Settings()
+	in.AutoProvision, in.AdminGroups = cfg.AutoProvision, cfg.AdminGroups
+	switch res.Intent {
+	case sso.IntentLink:
+		// Link to the user who started the flow, and only while that
+		// same session is still signed in.
+		cur := auth.FromContext(ctx)
+		if cur == nil || cur.Method != auth.MethodSession || cur.SessionID.String() != res.SessionID || cur.User.ID.String() != res.UserID {
+			return fail("session_changed", errSessionChanged)
+		}
+		in.LinkTo = cur.User.ID
+	case sso.IntentInvite:
+		in.InviteToken = res.Invite
+	}
+	out, err := s.deps.Users.SignInSSO(ctx, in, ci)
 	var rl *auth.RateLimitedError
 	switch {
 	case errors.As(err, &rl):
 		return refuse("rate_limited")
 	case errors.Is(err, auth.ErrNotLinked):
-		return refuse("not_linked")
+		return fail("not_linked", err, "issuer", id.Issuer, "subject", id.Subject)
 	case errors.Is(err, auth.ErrDisabled):
-		return refuse("account_disabled")
+		return fail("account_disabled", err, "issuer", id.Issuer, "subject", id.Subject)
+	case errors.Is(err, users.ErrAlreadyLinked):
+		return fail("already_linked", err, "issuer", id.Issuer, "subject", id.Subject)
+	case errors.Is(err, users.ErrLinkExists):
+		return fail("link_exists", err)
+	case errors.Is(err, users.ErrInviteInvalid):
+		return fail("invite_invalid", err)
+	case errors.Is(err, users.ErrNotFound):
+		return fail("session_changed", err)
 	case err != nil:
 		return nil, err
 	}
-	s.setSessionCookies(ctx, sess)
+	if out.Session != nil {
+		s.setSessionCookies(ctx, *out.Session)
+	}
 	return redirect(res.ReturnTo)
+}
+
+// errSessionChanged: a link flow came back to a browser that is no longer
+// signed in with the session that started it.
+var errSessionChanged = errors.New("the session that started linking is gone")
+
+// withQuery adds name=value to a local path's query, before its fragment.
+func withQuery(local, name, value string) string {
+	u, err := url.Parse(local)
+	if err != nil {
+		return ssoErrorPage + "?" + name + "=" + url.QueryEscape(value)
+	}
+	q := u.Query()
+	q.Set(name, value)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // flowCookie is the flow cookie with value, or its removal (maxAge < 0).

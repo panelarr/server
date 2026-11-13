@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,7 +30,17 @@ var (
 	ErrExpiryInPast       = errors.New("auth: expiry is in the past")
 	// ErrNotLinked: no user is linked to a provider login.
 	ErrNotLinked = errors.New("auth: no account is linked to this login")
+	// ErrPasswordAdminsOnly: password login is limited to admins and
+	// the user isn't one.
+	ErrPasswordAdminsOnly = errors.New("auth: only admins may sign in with a password")
 )
+
+// NoPassword is the password hash of a user without a password (created
+// by single sign-on). It is no valid hash, so no password matches it.
+const NoPassword = "!none"
+
+// HasPassword reports whether a stored password hash is a real one.
+func HasPassword(hash string) bool { return hash != NoPassword && hash != "" }
 
 // How a session was started (sessions.auth_method).
 const (
@@ -73,6 +84,22 @@ type Service struct {
 	// from password logins: the callback is a GET any website can make a
 	// browser send, so it must never lock anyone out of password login.
 	ssoFails *FailureLimiter
+	// passwordAdminsOnly limits password login to admins.
+	passwordAdminsOnly atomic.Bool
+}
+
+// SetPasswordAdminsOnly limits password login to admins (with single
+// sign-on for everyone else). Admins can always sign in with a password:
+// that is the way in when the identity provider is down.
+func (s *Service) SetPasswordAdminsOnly(on bool) { s.passwordAdminsOnly.Store(on) }
+
+// PasswordAdminsOnly reports whether password login is limited to admins.
+func (s *Service) PasswordAdminsOnly() bool { return s.passwordAdminsOnly.Load() }
+
+// PasswordUsable reports whether u can sign in with a password: they have
+// one, and password login isn't limited to admins unless they are one.
+func (s *Service) PasswordUsable(u db.User) bool {
+	return HasPassword(u.PasswordHash) && (u.Role == RoleAdmin || !s.PasswordAdminsOnly())
 }
 
 // NewService returns the auth service.
@@ -123,7 +150,9 @@ func (s *Service) Login(ctx context.Context, username, password string, ci Clien
 	}
 
 	u, err := s.st.GetUserByUsername(ctx, username)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !HasPassword(u.PasswordHash)) {
+		// Unknown, or without a password (single sign-on only): the
+		// same time and answer as a wrong password.
 		s.hasher.VerifyDummy(ctx, password)
 		return fail()
 	}
@@ -140,6 +169,12 @@ func (s *Service) Login(ctx context.Context, username, password string, ci Clien
 	if u.Disabled {
 		s.audit(ctx, "login refused: account disabled", "user_id", u.ID, "ip", ci.IP)
 		return db.User{}, NewSession{}, ErrDisabled
+	}
+	if u.Role != RoleAdmin && s.PasswordAdminsOnly() {
+		// Checked after the password, so the answer says nothing about
+		// a username's role to someone who doesn't know its password.
+		s.audit(ctx, "login refused: password login is for admins only", "user_id", u.ID, "ip", ci.IP)
+		return db.User{}, NewSession{}, ErrPasswordAdminsOnly
 	}
 	s.userFails.Reset(userKey)
 	if rehash {
@@ -194,40 +229,14 @@ func (s *Service) SSORefused(ctx context.Context, ci ClientInfo, reason string, 
 	s.log.InfoContext(ctx, "sso callback refused", append([]any{"component", "audit", "reason", reason, "ip", ci.IP}, args...)...)
 }
 
-// LoginIdentity starts a session for the user linked to a provider login,
-// found by issuer and subject only.
-func (s *Service) LoginIdentity(ctx context.Context, id Identity, ci ClientInfo) (db.User, NewSession, error) {
-	if err := s.SSOBlocked(ctx, ci); err != nil {
-		return db.User{}, NewSession{}, err
-	}
-	row, err := s.st.GetUserByIdentity(ctx, db.GetUserByIdentityParams{Issuer: id.Issuer, Subject: id.Subject})
-	if errors.Is(err, pgx.ErrNoRows) {
-		s.SSOFailed(ctx, ci, "not_linked", "issuer", id.Issuer, "subject", id.Subject)
-		return db.User{}, NewSession{}, ErrNotLinked
-	}
-	if err != nil {
-		return db.User{}, NewSession{}, err
-	}
-	u := row.User
-	if u.Disabled {
-		s.SSOFailed(ctx, ci, "account_disabled", "user_id", u.ID, "identity_id", row.UserIdentity.ID)
-		return db.User{}, NewSession{}, ErrDisabled
-	}
-	var sess NewSession
-	err = s.st.InTx(ctx, func(q *db.Queries, _ pgx.Tx) error {
-		if err := q.TouchUserIdentity(ctx, db.TouchUserIdentityParams{ID: row.UserIdentity.ID, Email: truncate(id.Email, 320)}); err != nil {
-			return err
-		}
-		var err error
-		sess, err = s.startSession(ctx, q, u, ci, SessionOIDC)
-		return err
-	})
-	if err != nil {
-		return db.User{}, NewSession{}, err
-	}
-	s.audit(ctx, "login", "method", SessionOIDC, "user_id", u.ID, "identity_id", row.UserIdentity.ID, "ip", ci.IP)
-	return u, sess, nil
+// StartSSOSession starts a single sign-on session for u with q (so it
+// joins the caller's transaction) and records the login.
+func (s *Service) StartSSOSession(ctx context.Context, q *db.Queries, u db.User, ci ClientInfo) (NewSession, error) {
+	return s.startSession(ctx, q, u, ci, SessionOIDC)
 }
+
+// Audit writes an audit log entry.
+func (s *Service) Audit(ctx context.Context, msg string, args ...any) { s.audit(ctx, msg, args...) }
 
 func (s *Service) limiterFor(key string) *FailureLimiter {
 	if strings.HasPrefix(key, "ip:") {
@@ -290,7 +299,7 @@ func (s *Service) AuthenticateSession(ctx context.Context, token string) (*Princ
 	}
 	return &Principal{
 		User: row.User, Method: MethodSession,
-		SessionID: row.Session.ID, CSRFToken: row.Session.CsrfToken,
+		SessionID: row.Session.ID, CSRFToken: row.Session.CsrfToken, SessionAuth: row.Session.AuthMethod,
 		Scopes: RoleScopes(row.User.Role),
 	}, nil
 }
@@ -357,18 +366,21 @@ func (s *Service) DeleteSession(ctx context.Context, userID, id uuid.UUID) error
 }
 
 // ChangePassword changes the caller's password after checking the current
-// one, and ends their other sessions.
+// one, and ends their other sessions. A user without a password (created
+// by single sign-on) sets their first one without a current password.
 func (s *Service) ChangePassword(ctx context.Context, p *Principal, current, next string) error {
 	u, err := s.st.GetUser(ctx, p.User.ID)
 	if err != nil {
 		return err
 	}
-	ok, _, err := s.hasher.Verify(ctx, current, u.PasswordHash)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrInvalidCredentials
+	if HasPassword(u.PasswordHash) {
+		ok, _, err := s.hasher.Verify(ctx, current, u.PasswordHash)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrInvalidCredentials
+		}
 	}
 	h, err := s.hasher.Hash(ctx, next)
 	if err != nil {

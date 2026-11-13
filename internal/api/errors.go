@@ -39,6 +39,10 @@ func domainError(err error) error {
 		return NewProblem(http.StatusConflict, "already_set_up", "the first account already exists")
 	case errors.Is(err, users.ErrInviteInvalid):
 		return NewProblem(http.StatusNotFound, "invite_invalid", "the invite is unknown, used or expired")
+	case errors.Is(err, auth.ErrPasswordAdminsOnly):
+		return NewProblem(http.StatusForbidden, "password_login_admins_only", "only admins may sign in with a password; sign in with single sign-on")
+	case errors.Is(err, users.ErrLastLoginMethod):
+		return NewProblem(http.StatusConflict, "last_login_method", "this is the last way to sign in; set a password first")
 	}
 	return err
 }

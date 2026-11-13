@@ -82,6 +82,20 @@ type OIDC struct {
 	GroupsClaim string
 	// AllowedGroups, when set, lets only their members sign in with it.
 	AllowedGroups []string
+	// UsernameClaim names the claim a provisioned user's username comes
+	// from (then the email's local part, then the subject).
+	UsernameClaim string
+	// AutoProvision creates a user on the first sign-in of an unknown
+	// login. Off by default.
+	AutoProvision bool
+	// AdminGroups, when set, makes their members admins and everyone
+	// else users, synced on each sign-in of a linked user.
+	AdminGroups []string
+	// LocalLogin is who may sign in with a password: "all" or "admins".
+	LocalLogin string
+	// Logout is "local" (Panelarr's session only) or "provider" (also at
+	// the identity provider).
+	Logout string
 }
 
 // Enabled reports whether single sign-on is configured.
@@ -92,6 +106,8 @@ func (o OIDC) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("issuer", o.Issuer), slog.String("client_id", o.ClientID),
 		slog.Bool("client_secret_set", o.ClientSecret != ""), slog.Any("scopes", o.Scopes),
+		slog.Bool("auto_provision", o.AutoProvision), slog.Any("allowed_groups", o.AllowedGroups),
+		slog.Any("admin_groups", o.AdminGroups), slog.String("local_login", o.LocalLogin), slog.String("logout", o.Logout),
 	)
 }
 
@@ -178,13 +194,28 @@ const (
 	EnvOIDCButtonLabel      = "PANELARR_OIDC_BUTTON_LABEL"
 	EnvOIDCGroupsClaim      = "PANELARR_OIDC_GROUPS_CLAIM"
 	EnvOIDCAllowedGroups    = "PANELARR_OIDC_ALLOWED_GROUPS"
+	EnvOIDCUsernameClaim    = "PANELARR_OIDC_USERNAME_CLAIM"
+	EnvOIDCAutoProvision    = "PANELARR_OIDC_AUTO_PROVISION"
+	EnvOIDCAdminGroups      = "PANELARR_OIDC_ADMIN_GROUPS"
+	EnvOIDCLocalLogin       = "PANELARR_OIDC_LOCAL_LOGIN"
+	EnvOIDCLogout           = "PANELARR_OIDC_LOGOUT"
 )
 
 // OIDC defaults.
 const (
-	DefaultOIDCScopes      = "openid profile email"
-	DefaultOIDCButtonLabel = "Sign in with SSO"
-	DefaultOIDCGroupsClaim = "groups"
+	DefaultOIDCScopes        = "openid profile email"
+	DefaultOIDCButtonLabel   = "Sign in with SSO"
+	DefaultOIDCGroupsClaim   = "groups"
+	DefaultOIDCUsernameClaim = "preferred_username"
+)
+
+// Who may sign in with a password (PANELARR_OIDC_LOCAL_LOGIN), and where
+// logout ends the session (PANELARR_OIDC_LOGOUT).
+const (
+	LocalLoginAll    = "all"
+	LocalLoginAdmins = "admins"
+	LogoutLocal      = "local"
+	LogoutProvider   = "provider"
 )
 
 // DefaultTrustedProxies are loopback and private networks.
@@ -319,10 +350,13 @@ func loadOIDC(getenv func(string) string) (OIDC, error) {
 		// Exactly as configured: the provider's discovery document must
 		// name the same issuer, character for character, and some
 		// providers' issuers end in a slash.
-		Issuer:      env(EnvOIDCIssuer),
-		ClientID:    env(EnvOIDCClientID),
-		ButtonLabel: env(EnvOIDCButtonLabel),
-		GroupsClaim: env(EnvOIDCGroupsClaim),
+		Issuer:        env(EnvOIDCIssuer),
+		ClientID:      env(EnvOIDCClientID),
+		ButtonLabel:   env(EnvOIDCButtonLabel),
+		GroupsClaim:   env(EnvOIDCGroupsClaim),
+		UsernameClaim: env(EnvOIDCUsernameClaim),
+		LocalLogin:    strings.ToLower(env(EnvOIDCLocalLogin)),
+		Logout:        strings.ToLower(env(EnvOIDCLogout)),
 	}
 	secret, secretFile := env(EnvOIDCClientSecret), env(EnvOIDCClientSecretFile)
 	switch {
@@ -345,7 +379,31 @@ func loadOIDC(getenv func(string) string) (OIDC, error) {
 	// Settings that mean nothing without an issuer: set alone, they are
 	// half a configuration.
 	partial := o.ClientID != "" || o.ClientSecret != "" || scopes != "" || o.ButtonLabel != "" ||
-		o.GroupsClaim != "" || env(EnvOIDCAllowedGroups) != ""
+		o.GroupsClaim != "" || env(EnvOIDCAllowedGroups) != "" || o.UsernameClaim != "" ||
+		env(EnvOIDCAutoProvision) != "" || env(EnvOIDCAdminGroups) != "" || o.LocalLogin != "" || o.Logout != ""
+	switch v := strings.ToLower(env(EnvOIDCAutoProvision)); v {
+	case "", "false", "0", "no":
+	case "true", "1", "yes":
+		o.AutoProvision = true
+	default:
+		return o, fmt.Errorf("%s: %q is not true or false", EnvOIDCAutoProvision, v)
+	}
+	switch o.LocalLogin {
+	case "":
+		o.LocalLogin = LocalLoginAll
+	case LocalLoginAll, LocalLoginAdmins:
+	default:
+		// Password login can be limited to admins, never switched off:
+		// it is the way in when the provider is down.
+		return o, fmt.Errorf("%s: %q is not all or admins", EnvOIDCLocalLogin, o.LocalLogin)
+	}
+	switch o.Logout {
+	case "":
+		o.Logout = LogoutLocal
+	case LogoutLocal, LogoutProvider:
+	default:
+		return o, fmt.Errorf("%s: %q is not local or provider", EnvOIDCLogout, o.Logout)
+	}
 	if scopes == "" {
 		scopes = DefaultOIDCScopes
 	}
@@ -359,7 +417,11 @@ func loadOIDC(getenv func(string) string) (OIDC, error) {
 	if o.GroupsClaim == "" {
 		o.GroupsClaim = DefaultOIDCGroupsClaim
 	}
+	if o.UsernameClaim == "" {
+		o.UsernameClaim = DefaultOIDCUsernameClaim
+	}
 	o.AllowedGroups = splitList(env(EnvOIDCAllowedGroups), ",")
+	o.AdminGroups = splitList(env(EnvOIDCAdminGroups), ",")
 	if o.Issuer == "" && partial {
 		// Half a configuration is a mistake, not "off".
 		return o, fmt.Errorf("%s is required to sign in with OIDC (other %s settings are set)", EnvOIDCIssuer, "PANELARR_OIDC_*")

@@ -134,6 +134,28 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /system/auth:
+    get:
+      operationId: getSystemAuth
+      tags: [system]
+      summary: How sign-in is configured (admins)
+      description: |
+        Read-only: single sign-on is configured by the server's environment,
+        never from the API. Shows whether it is on, the issuer, whether the
+        provider can be reached, and the provisioning, group, password and
+        logout settings. The client secret is never returned, only whether
+        the client is public (has none).
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: The sign-in settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemAuth"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /setup:
     get:
       operationId: getSetup
@@ -202,7 +224,12 @@ paths:
         Sets the session cookie and the CSRF cookie, and returns the CSRF
         token. Wrong credentials answer `401` with code
         `invalid_credentials`; too many failed attempts answer `429` with
-        code `rate_limited` and a `Retry-After` header.
+        code `rate_limited` and a `Retry-After` header. When password login
+        is limited to admins (`GET /auth/methods` says `password: admins`),
+        anyone else answers `403` with code `password_login_admins_only`
+        (checked after the password, so a wrong one is still
+        `invalid_credentials`). Users created by single sign-on have no
+        password until they set one.
       security: []
       x-panelarr-access: public
       requestBody:
@@ -226,10 +253,21 @@ paths:
       operationId: logout
       tags: [auth]
       summary: Sign out (session only)
-      description: Ends the current session and clears the cookies.
+      description: |
+        Ends the current session and clears the cookies. When the session
+        was started with single sign-on and the server is set to log out
+        at the identity provider too, it answers `200` with the provider's
+        end-session URL: send the browser there, and the provider sends it
+        back to the login page. Otherwise `204`.
       x-panelarr-access: user
       x-panelarr-session-only: true
       responses:
+        "200":
+          description: Signed out here; finish at the identity provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoutResult"
         "204":
           description: Signed out.
         default:
@@ -315,6 +353,14 @@ paths:
         `invalid_return_to`. Answers `404` when single sign-on isn't
         configured, and `503` with code `oidc_unavailable` while the
         provider can't be reached.
+
+        `intent=link` links the login to the signed-in user instead (from
+        the account page): it needs a browser session (`401` otherwise)
+        and a navigation from Panelarr itself (`403` with code
+        `cross_site` otherwise). `invite` accepts an invite with single
+        sign-on: the user is created with the invite's role and grants; an
+        unknown, used or expired invite answers `404` with code
+        `invite_invalid`.
       security: []
       x-panelarr-access: public
       parameters:
@@ -324,6 +370,18 @@ paths:
           schema:
             type: string
             maxLength: 2048
+        - name: intent
+          in: query
+          description: "`login` (default) or `link`."
+          schema:
+            type: string
+            enum: [login, link]
+        - name: invite
+          in: query
+          description: An invite token to accept with single sign-on.
+          schema:
+            type: string
+            maxLength: 256
       responses:
         "302":
           description: To the identity provider.
@@ -349,9 +407,25 @@ paths:
         failed), `oidc_unavailable`, `invalid_token` (the ID token failed
         verification: signature, issuer, audience or azp, expiry or nonce),
         `nonce_reused`, `not_allowed` (not in an allowed group),
-        `not_linked` (no Panelarr account is linked to this login),
-        `account_disabled` or `rate_limited`. Answers `404` when single
-        sign-on isn't configured.
+        `not_linked` (no Panelarr account is linked to this login, and
+        users aren't created automatically), `account_disabled`,
+        `invite_invalid` (the invite was used or expired meanwhile) or
+        `rate_limited`.
+
+        A login linked to a user signs that user in. Otherwise, an invite
+        creates its user and links the login, and with automatic
+        provisioning on, a new user is created (username from the
+        provider's claims, default grants, role from groups). When admin
+        groups are configured, a linked user's role follows them on every
+        sign-in, except that the last enabled admin is never demoted.
+
+        A link flow (`intent=link`) starts no session: it links the login
+        and redirects to `return_to`. Its failures redirect to `return_to`
+        with `sso_error` added, with the codes above or
+        `already_linked` (the login is linked to another user),
+        `link_exists` (you have a login at this provider already) or
+        `session_changed` (you signed out or in as someone else meanwhile).
+        Answers `404` when single sign-on isn't configured.
       security: []
       x-panelarr-access: public
       parameters:
@@ -426,7 +500,7 @@ paths:
       operationId: changeMyPassword
       tags: [me]
       summary: Change your own password (session only)
-      description: Needs the current password (`403` with code `invalid_credentials` otherwise). Ends every other session of the user.
+      description: Needs the current password (`403` with code `invalid_credentials` otherwise). A user created by single sign-on without a password sets their first one with an empty `current_password`. Ends every other session of the user.
       x-panelarr-access: user
       x-panelarr-session-only: true
       requestBody:
@@ -527,6 +601,44 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /me/identities:
+    get:
+      operationId: listMyIdentities
+      tags: [me]
+      summary: Your linked single sign-on logins (session only)
+      description: Link one with `GET /auth/oidc/start?intent=link`.
+      x-panelarr-access: user
+      x-panelarr-session-only: true
+      responses:
+        "200":
+          description: Linked logins, oldest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/identities/{id}:
+    delete:
+      operationId: deleteMyIdentity
+      tags: [me]
+      summary: Unlink one of your single sign-on logins (session only)
+      description: |
+        Refused with `409` and code `last_login_method` when you would have
+        no way left to sign in: set a password first (`POST /me/password`).
+        A password counts only if you may sign in with it (see
+        `GET /auth/methods`).
+      x-panelarr-access: user
+      x-panelarr-session-only: true
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204":
+          description: Unlinked.
+        default:
+          $ref: "#/components/responses/Problem"
+
   /users:
     get:
       operationId: listUsers
@@ -619,6 +731,48 @@ paths:
       responses:
         "204":
           description: Deleted.
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /users/{id}/identities:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      operationId: listUserIdentities
+      tags: [users]
+      summary: A user's linked single sign-on logins
+      x-panelarr-access: admin
+      responses:
+        "200":
+          description: Linked logins, oldest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityList"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /users/{id}/identities/{identity_id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+      - name: identity_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      operationId: deleteUserIdentity
+      tags: [users]
+      summary: Unlink a user's single sign-on login
+      description: |
+        Also ends the user's single sign-on sessions. Refused with `409` and
+        code `last_login_method` when the user would have no way left to
+        sign in: set a password for them first, or disable the user.
+      x-panelarr-access: admin
+      responses:
+        "204":
+          description: Unlinked.
         default:
           $ref: "#/components/responses/Problem"
 
@@ -8808,6 +8962,12 @@ components:
         last_login_at:
           type: string
           format: date-time
+        has_password:
+          type: boolean
+          description: The user has a password. Users created by single sign-on have none until they set one.
+        sso:
+          type: boolean
+          description: A single sign-on login is linked to the user. Set on the users endpoints and `GET /me`.
     UserList:
       type: object
       required: [users, next_page_token]
@@ -8908,6 +9068,97 @@ components:
           description: Who may sign in with a password. `admins` means everyone else signs in with single sign-on.
         oidc:
           $ref: "#/components/schemas/OidcMethod"
+    LogoutResult:
+      type: object
+      required: [redirect_to]
+      properties:
+        redirect_to:
+          type: string
+          description: The identity provider's end-session URL; send the browser there.
+    Identity:
+      type: object
+      required: [id, issuer, subject, email, created_at]
+      description: A single sign-on login linked to a user.
+      properties:
+        id:
+          type: string
+          format: uuid
+        issuer:
+          type: string
+          description: The identity provider.
+        subject:
+          type: string
+          description: The provider's ID of the login.
+        email:
+          type: string
+          description: The email the provider reported at the last sign-in; empty when none. For display only.
+        created_at:
+          type: string
+          format: date-time
+        last_login_at:
+          type: string
+          format: date-time
+    IdentityList:
+      type: object
+      required: [identities]
+      properties:
+        identities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Identity"
+    SystemAuth:
+      type: object
+      required: [password, oidc]
+      properties:
+        password:
+          type: string
+          enum: [all, admins]
+          description: Who may sign in with a password. It can't be switched off.
+        oidc:
+          $ref: "#/components/schemas/OidcStatus"
+    OidcStatus:
+      type: object
+      required: [enabled]
+      description: Single sign-on settings. Only `enabled` is set when it is off.
+      properties:
+        enabled:
+          type: boolean
+        issuer:
+          type: string
+        client_id:
+          type: string
+        public_client:
+          type: boolean
+          description: The client has no secret (PKCE only).
+        reachable:
+          type: boolean
+          description: The provider's discovery document could be read.
+        error:
+          type: string
+          description: Why it can't be reached.
+        scopes:
+          type: array
+          items:
+            type: string
+        button_label:
+          type: string
+        username_claim:
+          type: string
+        groups_claim:
+          type: string
+        auto_provision:
+          type: boolean
+        allowed_groups:
+          type: array
+          items:
+            type: string
+        admin_groups:
+          type: array
+          items:
+            type: string
+        logout:
+          type: string
+          enum: [local, provider]
     OidcMethod:
       type: object
       required: [label]

@@ -58,3 +58,6 @@ UPDATE users SET last_login_at = now() WHERE id = $1;
 
 -- name: DeleteUser :execrows
 DELETE FROM users WHERE id = $1;
+
+-- name: SetUserRole :one
+UPDATE users SET role = @role, updated_at = now() WHERE id = @id RETURNING *;

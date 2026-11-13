@@ -40,6 +40,7 @@ func toUser(u db.User) apigen.User {
 	return apigen.User{
 		Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Role: apigen.Role(u.Role),
 		Disabled: u.Disabled, Grants: toGrants(users.GrantsOf(u)), CreatedAt: u.CreatedAt, LastLoginAt: u.LastLoginAt,
+		HasPassword: ptr(auth.HasPassword(u.PasswordHash)),
 	}
 }
 

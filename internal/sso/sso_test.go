@@ -93,7 +93,7 @@ func TestFlowCookie(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := newTestProvider(srv, &now)
 	ctx := context.Background()
-	authURL, cookie, err := p.Begin(ctx, "/library")
+	authURL, cookie, err := p.Begin(ctx, Start{ReturnTo: "/library"})
 	if err != nil {
 		t.Fatal(err)
 	}

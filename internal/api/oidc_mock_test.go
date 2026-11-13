@@ -45,6 +45,9 @@ type mockOP struct {
 type mockClaims struct {
 	Subject string
 	Email   string
+	// Username and Name go in preferred_username and name.
+	Username string
+	Name     string
 	// Groups go in the ID token's groups claim (when not nil).
 	Groups []string
 	// UserinfoGroups go in userinfo's groups claim (when not nil).
@@ -103,6 +106,7 @@ func newMockOPAt(t *testing.T, issuerPath string) *mockOP {
 			"subject_types_supported":               []string{"public"},
 			"id_token_signing_alg_values_supported": []string{"RS256"},
 			"code_challenge_methods_supported":      []string{"S256"},
+			"end_session_endpoint":                  m.srv.URL + "/logout?realm=test",
 		})
 	})
 	mux.HandleFunc("GET /keys", func(w http.ResponseWriter, _ *http.Request) {
@@ -207,6 +211,12 @@ func (m *mockOP) token(w http.ResponseWriter, r *http.Request) {
 	}
 	if c.Email != "" {
 		claims["email"] = c.Email
+	}
+	if c.Username != "" {
+		claims["preferred_username"] = c.Username
+	}
+	if c.Name != "" {
+		claims["name"] = c.Name
 	}
 	if c.Groups != nil {
 		claims["groups"] = c.Groups

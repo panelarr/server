@@ -87,11 +87,10 @@ func (s *Service) handlePreview(ctx context.Context, t *queue.Task) (any, error)
 }
 
 func (s *Service) preview(ctx context.Context, t *queue.Task, imp db.Import) error {
-	u, err := s.st.GetUser(ctx, imp.UserID)
+	v, err := s.viewer(ctx, imp.UserID)
 	if err != nil {
 		return err
 	}
-	v := library.Viewer{UserID: u.ID, Grants: users.Effective(u), Admin: u.Role == auth.RoleAdmin, HideUnknown: s.meta.HideUnknown(ctx)}
 	counts, err := s.st.ImportOutcomeCounts(ctx, imp.ID)
 	if err != nil {
 		return err
@@ -149,6 +148,15 @@ func (s *Service) preview(ctx context.Context, t *queue.Task, imp db.Import) err
 	}
 	s.finish(ctx, imp, StatePreview, hints, "")
 	return nil
+}
+
+// viewer is the importing user with their grants as they are now.
+func (s *Service) viewer(ctx context.Context, userID uuid.UUID) (library.Viewer, error) {
+	u, err := s.st.GetUser(ctx, userID)
+	if err != nil {
+		return library.Viewer{}, err
+	}
+	return library.Viewer{UserID: u.ID, Grants: users.Effective(u), Admin: u.Role == auth.RoleAdmin, HideUnknown: s.meta.HideUnknown(ctx)}, nil
 }
 
 // finish ends a preview and tells the user.

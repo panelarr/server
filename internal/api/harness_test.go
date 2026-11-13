@@ -147,6 +147,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	// A read gate of its own: tests in parallel don't wait on each other.
 	gate := importer.NewReadGate()
 	imp := importer.NewService(st, lib, m, host, q, hub, importer.Options{TempDir: t.TempDir(), Gate: gate, GateWait: 50 * time.Millisecond}, nil)
+	chs.OnUnified(imp.WorkChaptersChanged)
 	jm := jobs.NewManager(st, hub, nil, nil)
 	release := make(chan struct{})
 	jm.Register(jobs.Definition{

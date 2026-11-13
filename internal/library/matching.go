@@ -39,6 +39,8 @@ const (
 	OriginAuto   = "auto"
 	OriginManual = "manual"
 	OriginURL    = "url"
+	// OriginImport: attached by an import of another app's library.
+	OriginImport = "import"
 )
 
 // Match statuses per work and source.

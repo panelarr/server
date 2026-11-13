@@ -48,6 +48,15 @@ type Service struct {
 	hub    *events.Hub
 	log    *slog.Logger
 	onNew  func(ctx context.Context, workID uuid.UUID, chapterIDs []uuid.UUID)
+	// unified run after a work's chapters were rebuilt.
+	unified []func(ctx context.Context, workID uuid.UUID)
+}
+
+// OnUnified adds what happens after a work's chapters were rebuilt (from
+// a chapter check, or after its series changed), e.g. placing imported
+// reading that waited for them. It must be quick: queue work instead.
+func (s *Service) OnUnified(f func(ctx context.Context, workID uuid.UUID)) {
+	s.unified = append(s.unified, f)
 }
 
 // OnNewChapters sets what happens when a work gains chapters (e.g.
@@ -391,6 +400,9 @@ func (s *Service) Unify(ctx context.Context, workID uuid.UUID) (int, error) {
 	s.publish(ctx, workID, len(added))
 	if len(added) > 0 && s.onNew != nil {
 		s.onNew(ctx, workID, added)
+	}
+	for _, f := range s.unified {
+		f(ctx, workID)
 	}
 	return len(added), nil
 }

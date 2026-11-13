@@ -13,6 +13,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addImportClampedTimes = `-- name: AddImportClampedTimes :exec
+UPDATE imports SET summary = jsonb_set(summary, '{clamped_times}',
+    to_jsonb(coalesce((summary->>'clamped_times')::int, 0) + $1::int))
+WHERE id = $2
+`
+
+type AddImportClampedTimesParams struct {
+	Clamped int32
+	ID      uuid.UUID
+}
+
+// Counts read times from the future that apply capped, for the report.
+func (q *Queries) AddImportClampedTimes(ctx context.Context, arg AddImportClampedTimesParams) error {
+	_, err := q.db.Exec(ctx, addImportClampedTimes, arg.Clamped, arg.ID)
+	return err
+}
+
 const attachedSeriesByKey = `-- name: AttachedSeriesByKey :one
 SELECT work_id, source_id FROM source_series
 WHERE source_id = ANY($1::text[]) AND key = $2 AND state = 'attached'
@@ -36,6 +53,120 @@ func (q *Queries) AttachedSeriesByKey(ctx context.Context, arg AttachedSeriesByK
 	var i AttachedSeriesByKeyRow
 	err := row.Scan(&i.WorkID, &i.SourceID)
 	return i, err
+}
+
+const cancelImport = `-- name: CancelImport :one
+UPDATE imports SET state = 'cancelled', message = 'cancelled', finished_at = now()
+WHERE id = $1 AND user_id = $2 AND state IN ('previewing', 'applying')
+RETURNING id, user_id, format, file_sha256, state, task_id, summary, message, created_at, finished_at
+`
+
+type CancelImportParams struct {
+	ID     uuid.UUID
+	UserID uuid.UUID
+}
+
+func (q *Queries) CancelImport(ctx context.Context, arg CancelImportParams) (Import, error) {
+	row := q.db.QueryRow(ctx, cancelImport, arg.ID, arg.UserID)
+	var i Import
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Format,
+		&i.FileSha256,
+		&i.State,
+		&i.TaskID,
+		&i.Summary,
+		&i.Message,
+		&i.CreatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const chapterNumbers = `-- name: ChapterNumbers :many
+SELECT id, number::float8 AS number FROM chapters WHERE work_id = $1 AND number IS NOT NULL
+`
+
+type ChapterNumbersRow struct {
+	ID     uuid.UUID
+	Number float64
+}
+
+func (q *Queries) ChapterNumbers(ctx context.Context, workID uuid.UUID) ([]ChapterNumbersRow, error) {
+	rows, err := q.db.Query(ctx, chapterNumbers, workID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChapterNumbersRow{}
+	for rows.Next() {
+		var i ChapterNumbersRow
+		if err := rows.Scan(&i.ID, &i.Number); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const chaptersBySourceKey = `-- name: ChaptersBySourceKey :many
+SELECT sc.key, sc.chapter_id::uuid AS chapter_id
+FROM source_chapters sc JOIN source_series ss ON ss.id = sc.source_series_id
+WHERE ss.work_id = $1 AND ss.source_id = $2 AND ss.key = $3 AND ss.state = 'attached'
+  AND sc.key = ANY($4::text[]) AND sc.chapter_id IS NOT NULL
+`
+
+type ChaptersBySourceKeyParams struct {
+	WorkID    uuid.UUID
+	SourceID  string
+	SeriesKey string
+	Keys      []string
+}
+
+type ChaptersBySourceKeyRow struct {
+	Key       string
+	ChapterID uuid.UUID
+}
+
+// A work's chapters by the keys of one attached series' chapters.
+func (q *Queries) ChaptersBySourceKey(ctx context.Context, arg ChaptersBySourceKeyParams) ([]ChaptersBySourceKeyRow, error) {
+	rows, err := q.db.Query(ctx, chaptersBySourceKey,
+		arg.WorkID,
+		arg.SourceID,
+		arg.SeriesKey,
+		arg.Keys,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChaptersBySourceKeyRow{}
+	for rows.Next() {
+		var i ChaptersBySourceKeyRow
+		if err := rows.Scan(&i.Key, &i.ChapterID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countImports = `-- name: CountImports :one
+SELECT count(*)::int FROM imports WHERE user_id = $1
+`
+
+func (q *Queries) CountImports(ctx context.Context, userID uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countImports, userID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const createImport = `-- name: CreateImport :one
@@ -148,6 +279,79 @@ func (q *Queries) FindImportByFile(ctx context.Context, arg FindImportByFilePara
 	return i, err
 }
 
+const finishImportApply = `-- name: FinishImportApply :one
+UPDATE imports SET state = $1, message = $2, finished_at = now()
+WHERE id = $3 AND state = 'applying'
+RETURNING id, user_id, format, file_sha256, state, task_id, summary, message, created_at, finished_at
+`
+
+type FinishImportApplyParams struct {
+	State   string
+	Message string
+	ID      uuid.UUID
+}
+
+// Ends an apply, unless the import was cancelled or deleted meanwhile.
+func (q *Queries) FinishImportApply(ctx context.Context, arg FinishImportApplyParams) (Import, error) {
+	row := q.db.QueryRow(ctx, finishImportApply, arg.State, arg.Message, arg.ID)
+	var i Import
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Format,
+		&i.FileSha256,
+		&i.State,
+		&i.TaskID,
+		&i.Summary,
+		&i.Message,
+		&i.CreatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const finishImportItem = `-- name: FinishImportItem :exec
+UPDATE import_items SET outcome = $1, result = $2, work_id = $3, entry_id = $4, source_id = $5,
+    message = $6, placed = $7, unplaced = $8, pending = $9,
+    pending_chapters = $10, pending_until = $11, applied_at = now()
+WHERE import_id = $12 AND idx = $13
+`
+
+type FinishImportItemParams struct {
+	Outcome         string
+	Result          string
+	WorkID          uuid.NullUUID
+	EntryID         string
+	SourceID        string
+	Message         string
+	Placed          int32
+	Unplaced        int32
+	Pending         int32
+	PendingChapters []byte
+	PendingUntil    *time.Time
+	ImportID        uuid.UUID
+	Idx             int32
+}
+
+func (q *Queries) FinishImportItem(ctx context.Context, arg FinishImportItemParams) error {
+	_, err := q.db.Exec(ctx, finishImportItem,
+		arg.Outcome,
+		arg.Result,
+		arg.WorkID,
+		arg.EntryID,
+		arg.SourceID,
+		arg.Message,
+		arg.Placed,
+		arg.Unplaced,
+		arg.Pending,
+		arg.PendingChapters,
+		arg.PendingUntil,
+		arg.ImportID,
+		arg.Idx,
+	)
+	return err
+}
+
 const finishImportPreview = `-- name: FinishImportPreview :one
 UPDATE imports SET state = $1, summary = summary || $2::jsonb, message = $3,
     finished_at = CASE WHEN $1::text IN ('failed', 'cancelled') THEN now() ELSE finished_at END
@@ -236,6 +440,152 @@ func (q *Queries) GetImportByID(ctx context.Context, id uuid.UUID) (Import, erro
 	return i, err
 }
 
+const getImportItem = `-- name: GetImportItem :one
+SELECT import_id, idx, title, author, artist, source_compat_id, source_name, series_key, added_at, categories, outcome, work_id, entry_id, source_id, source_state, candidates, chapters, chapters_read, bookmarks, pending, message, result, applied_at, placed, unplaced, pending_chapters, pending_until FROM import_items WHERE import_id = $1 AND idx = $2
+`
+
+type GetImportItemParams struct {
+	ImportID uuid.UUID
+	Idx      int32
+}
+
+func (q *Queries) GetImportItem(ctx context.Context, arg GetImportItemParams) (ImportItem, error) {
+	row := q.db.QueryRow(ctx, getImportItem, arg.ImportID, arg.Idx)
+	var i ImportItem
+	err := row.Scan(
+		&i.ImportID,
+		&i.Idx,
+		&i.Title,
+		&i.Author,
+		&i.Artist,
+		&i.SourceCompatID,
+		&i.SourceName,
+		&i.SeriesKey,
+		&i.AddedAt,
+		&i.Categories,
+		&i.Outcome,
+		&i.WorkID,
+		&i.EntryID,
+		&i.SourceID,
+		&i.SourceState,
+		&i.Candidates,
+		&i.Chapters,
+		&i.ChaptersRead,
+		&i.Bookmarks,
+		&i.Pending,
+		&i.Message,
+		&i.Result,
+		&i.AppliedAt,
+		&i.Placed,
+		&i.Unplaced,
+		&i.PendingChapters,
+		&i.PendingUntil,
+	)
+	return i, err
+}
+
+const importApplyProgress = `-- name: ImportApplyProgress :one
+SELECT count(*) FILTER (WHERE applied_at IS NOT NULL)::int AS done,
+    count(*) FILTER (WHERE applied_at IS NOT NULL OR (result = '' AND outcome IN ('ready', 'in_library', 'source_missing')))::int AS total
+FROM import_items WHERE import_id = $1
+`
+
+type ImportApplyProgressRow struct {
+	Done  int32
+	Total int32
+}
+
+func (q *Queries) ImportApplyProgress(ctx context.Context, importID uuid.UUID) (ImportApplyProgressRow, error) {
+	row := q.db.QueryRow(ctx, importApplyProgress, importID)
+	var i ImportApplyProgressRow
+	err := row.Scan(&i.Done, &i.Total)
+	return i, err
+}
+
+const importBookmarks = `-- name: ImportBookmarks :execrows
+INSERT INTO bookmarks (user_id, chapter_id, work_id, created_at)
+SELECT $1, c.id, c.work_id, x.created_at
+FROM (SELECT unnest($2::uuid[]) AS chapter_id, unnest($3::timestamptz[]) AS created_at) AS x
+JOIN chapters c ON c.id = x.chapter_id
+ON CONFLICT (user_id, chapter_id) DO NOTHING
+`
+
+type ImportBookmarksParams struct {
+	UserID     uuid.UUID
+	ChapterIds []uuid.UUID
+	CreatedAt  []time.Time
+}
+
+// Bookmarks an import adds; existing ones (and their times) stay.
+func (q *Queries) ImportBookmarks(ctx context.Context, arg ImportBookmarksParams) (int64, error) {
+	result, err := q.db.Exec(ctx, importBookmarks, arg.UserID, arg.ChapterIds, arg.CreatedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const importItemsToApply = `-- name: ImportItemsToApply :many
+SELECT import_id, idx, title, author, artist, source_compat_id, source_name, series_key, added_at, categories, outcome, work_id, entry_id, source_id, source_state, candidates, chapters, chapters_read, bookmarks, pending, message, result, applied_at, placed, unplaced, pending_chapters, pending_until FROM import_items
+WHERE import_id = $1 AND applied_at IS NULL AND result = '' AND outcome IN ('ready', 'in_library', 'source_missing') AND idx > $2
+ORDER BY idx LIMIT $3
+`
+
+type ImportItemsToApplyParams struct {
+	ImportID uuid.UUID
+	After    int32
+	Lim      int32
+}
+
+// The next series apply hasn't gone through yet, in file order.
+func (q *Queries) ImportItemsToApply(ctx context.Context, arg ImportItemsToApplyParams) ([]ImportItem, error) {
+	rows, err := q.db.Query(ctx, importItemsToApply, arg.ImportID, arg.After, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ImportItem{}
+	for rows.Next() {
+		var i ImportItem
+		if err := rows.Scan(
+			&i.ImportID,
+			&i.Idx,
+			&i.Title,
+			&i.Author,
+			&i.Artist,
+			&i.SourceCompatID,
+			&i.SourceName,
+			&i.SeriesKey,
+			&i.AddedAt,
+			&i.Categories,
+			&i.Outcome,
+			&i.WorkID,
+			&i.EntryID,
+			&i.SourceID,
+			&i.SourceState,
+			&i.Candidates,
+			&i.Chapters,
+			&i.ChaptersRead,
+			&i.Bookmarks,
+			&i.Pending,
+			&i.Message,
+			&i.Result,
+			&i.AppliedAt,
+			&i.Placed,
+			&i.Unplaced,
+			&i.PendingChapters,
+			&i.PendingUntil,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const importMissingSources = `-- name: ImportMissingSources :many
 SELECT source_compat_id, count(*)::int AS series FROM import_items
 WHERE import_id = $1 AND source_state = 'missing'
@@ -306,6 +656,76 @@ func (q *Queries) ImportOutcomeCounts(ctx context.Context, importID uuid.UUID) (
 	return items, nil
 }
 
+const importProgress = `-- name: ImportProgress :execrows
+INSERT INTO progress (user_id, chapter_id, work_id, page, completed, updated_at)
+SELECT $1, c.id, c.work_id, x.page, x.completed, x.read_at
+FROM (SELECT unnest($2::uuid[]) AS chapter_id, unnest($3::int[]) AS page,
+             unnest($4::boolean[]) AS completed, unnest($5::timestamptz[]) AS read_at) AS x
+JOIN chapters c ON c.id = x.chapter_id
+ON CONFLICT (user_id, chapter_id) DO UPDATE SET
+    completed  = progress.completed OR EXCLUDED.completed,
+    page       = CASE WHEN EXCLUDED.updated_at > progress.updated_at AND NOT progress.completed
+                      THEN EXCLUDED.page ELSE progress.page END,
+    updated_at = GREATEST(progress.updated_at, EXCLUDED.updated_at)
+WHERE (EXCLUDED.completed AND NOT progress.completed) OR EXCLUDED.updated_at > progress.updated_at
+`
+
+type ImportProgressParams struct {
+	UserID     uuid.UUID
+	ChapterIds []uuid.UUID
+	Pages      []int32
+	Completed  []bool
+	ReadAt     []time.Time
+}
+
+// Imported reading never loses newer reading: a read chapter stays read,
+// a page or time newer in Panelarr is kept, and the original times are
+// kept (History shows them). A row it doesn't change isn't written.
+func (q *Queries) ImportProgress(ctx context.Context, arg ImportProgressParams) (int64, error) {
+	result, err := q.db.Exec(ctx, importProgress,
+		arg.UserID,
+		arg.ChapterIds,
+		arg.Pages,
+		arg.Completed,
+		arg.ReadAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const importResultCounts = `-- name: ImportResultCounts :many
+SELECT result, count(*)::int AS series FROM import_items
+WHERE import_id = $1 AND result <> '' GROUP BY result ORDER BY result
+`
+
+type ImportResultCountsRow struct {
+	Result string
+	Series int32
+}
+
+// Series per result of apply (those apply went through or skipped).
+func (q *Queries) ImportResultCounts(ctx context.Context, importID uuid.UUID) ([]ImportResultCountsRow, error) {
+	rows, err := q.db.Query(ctx, importResultCounts, importID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ImportResultCountsRow{}
+	for rows.Next() {
+		var i ImportResultCountsRow
+		if err := rows.Scan(&i.Result, &i.Series); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 type InsertImportItemsParams struct {
 	ImportID       uuid.UUID
 	Idx            int32
@@ -325,15 +745,17 @@ type InsertImportItemsParams struct {
 const listImportItems = `-- name: ListImportItems :many
 SELECT import_id, idx, title, author, artist, source_compat_id, source_name, series_key, added_at, categories,
     outcome, work_id, entry_id, source_id, source_state, candidates, chapters_read, bookmarks, pending, message,
-    jsonb_array_length(chapters)::int AS chapters
+    result, applied_at, placed, unplaced, jsonb_array_length(chapters)::int AS chapters
 FROM import_items
-WHERE import_id = $1 AND ($2::text IS NULL OR outcome = $2) AND idx > $3
-ORDER BY idx LIMIT $4
+WHERE import_id = $1 AND ($2::text IS NULL OR outcome = $2)
+  AND ($3::text IS NULL OR result = $3) AND idx > $4
+ORDER BY idx LIMIT $5
 `
 
 type ListImportItemsParams struct {
 	ImportID uuid.UUID
 	Outcome  pgtype.Text
+	Result   pgtype.Text
 	After    int32
 	Lim      int32
 }
@@ -359,6 +781,10 @@ type ListImportItemsRow struct {
 	Bookmarks      int32
 	Pending        int32
 	Message        string
+	Result         string
+	AppliedAt      *time.Time
+	Placed         int32
+	Unplaced       int32
 	Chapters       int32
 }
 
@@ -366,6 +792,7 @@ func (q *Queries) ListImportItems(ctx context.Context, arg ListImportItemsParams
 	rows, err := q.db.Query(ctx, listImportItems,
 		arg.ImportID,
 		arg.Outcome,
+		arg.Result,
 		arg.After,
 		arg.Lim,
 	)
@@ -397,6 +824,10 @@ func (q *Queries) ListImportItems(ctx context.Context, arg ListImportItemsParams
 			&i.Bookmarks,
 			&i.Pending,
 			&i.Message,
+			&i.Result,
+			&i.AppliedAt,
+			&i.Placed,
+			&i.Unplaced,
 			&i.Chapters,
 		); err != nil {
 			return nil, err
@@ -410,16 +841,27 @@ func (q *Queries) ListImportItems(ctx context.Context, arg ListImportItemsParams
 }
 
 const listImports = `-- name: ListImports :many
-SELECT id, user_id, format, file_sha256, state, task_id, summary, message, created_at, finished_at FROM imports WHERE user_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2
+SELECT id, user_id, format, file_sha256, state, task_id, summary, message, created_at, finished_at FROM imports WHERE user_id = $1
+  AND ($2::timestamptz IS NULL
+       OR (created_at, id) < ($2::timestamptz, $3::uuid))
+ORDER BY created_at DESC, id DESC LIMIT $4
 `
 
 type ListImportsParams struct {
-	UserID uuid.UUID
-	Lim    int32
+	UserID        uuid.UUID
+	BeforeCreated *time.Time
+	BeforeID      uuid.NullUUID
+	Lim           int32
 }
 
+// Newest first, after a (created_at, id) cursor.
 func (q *Queries) ListImports(ctx context.Context, arg ListImportsParams) ([]Import, error) {
-	rows, err := q.db.Query(ctx, listImports, arg.UserID, arg.Lim)
+	rows, err := q.db.Query(ctx, listImports,
+		arg.UserID,
+		arg.BeforeCreated,
+		arg.BeforeID,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -447,6 +889,62 @@ func (q *Queries) ListImports(ctx context.Context, arg ListImportsParams) ([]Imp
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockImportItem = `-- name: LockImportItem :one
+SELECT import_items.import_id, import_items.idx, import_items.title, import_items.author, import_items.artist, import_items.source_compat_id, import_items.source_name, import_items.series_key, import_items.added_at, import_items.categories, import_items.outcome, import_items.work_id, import_items.entry_id, import_items.source_id, import_items.source_state, import_items.candidates, import_items.chapters, import_items.chapters_read, import_items.bookmarks, import_items.pending, import_items.message, import_items.result, import_items.applied_at, import_items.placed, import_items.unplaced, import_items.pending_chapters, import_items.pending_until, imports.user_id, imports.created_at AS import_created_at
+FROM import_items JOIN imports ON imports.id = import_items.import_id
+WHERE import_items.import_id = $1 AND import_items.idx = $2
+FOR UPDATE OF import_items
+`
+
+type LockImportItemParams struct {
+	ImportID uuid.UUID
+	Idx      int32
+}
+
+type LockImportItemRow struct {
+	ImportItem      ImportItem
+	UserID          uuid.UUID
+	ImportCreatedAt time.Time
+}
+
+// An import's series with whose it is, locked while its chapters are placed.
+func (q *Queries) LockImportItem(ctx context.Context, arg LockImportItemParams) (LockImportItemRow, error) {
+	row := q.db.QueryRow(ctx, lockImportItem, arg.ImportID, arg.Idx)
+	var i LockImportItemRow
+	err := row.Scan(
+		&i.ImportItem.ImportID,
+		&i.ImportItem.Idx,
+		&i.ImportItem.Title,
+		&i.ImportItem.Author,
+		&i.ImportItem.Artist,
+		&i.ImportItem.SourceCompatID,
+		&i.ImportItem.SourceName,
+		&i.ImportItem.SeriesKey,
+		&i.ImportItem.AddedAt,
+		&i.ImportItem.Categories,
+		&i.ImportItem.Outcome,
+		&i.ImportItem.WorkID,
+		&i.ImportItem.EntryID,
+		&i.ImportItem.SourceID,
+		&i.ImportItem.SourceState,
+		&i.ImportItem.Candidates,
+		&i.ImportItem.Chapters,
+		&i.ImportItem.ChaptersRead,
+		&i.ImportItem.Bookmarks,
+		&i.ImportItem.Pending,
+		&i.ImportItem.Message,
+		&i.ImportItem.Result,
+		&i.ImportItem.AppliedAt,
+		&i.ImportItem.Placed,
+		&i.ImportItem.Unplaced,
+		&i.ImportItem.PendingChapters,
+		&i.ImportItem.PendingUntil,
+		&i.UserID,
+		&i.ImportCreatedAt,
+	)
+	return i, err
 }
 
 const pendingImportItems = `-- name: PendingImportItems :many
@@ -502,6 +1000,64 @@ func (q *Queries) PendingImportItems(ctx context.Context, arg PendingImportItems
 	return items, nil
 }
 
+const pendingImportItemsOfImport = `-- name: PendingImportItemsOfImport :many
+SELECT idx, pending_until FROM import_items WHERE import_id = $1 AND pending > 0 ORDER BY idx
+`
+
+type PendingImportItemsOfImportRow struct {
+	Idx          int32
+	PendingUntil *time.Time
+}
+
+func (q *Queries) PendingImportItemsOfImport(ctx context.Context, importID uuid.UUID) ([]PendingImportItemsOfImportRow, error) {
+	rows, err := q.db.Query(ctx, pendingImportItemsOfImport, importID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PendingImportItemsOfImportRow{}
+	for rows.Next() {
+		var i PendingImportItemsOfImportRow
+		if err := rows.Scan(&i.Idx, &i.PendingUntil); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pendingImportItemsOnWork = `-- name: PendingImportItemsOnWork :many
+SELECT import_id, idx FROM import_items WHERE work_id = $1 AND pending > 0 ORDER BY import_id, idx
+`
+
+type PendingImportItemsOnWorkRow struct {
+	ImportID uuid.UUID
+	Idx      int32
+}
+
+func (q *Queries) PendingImportItemsOnWork(ctx context.Context, workID uuid.NullUUID) ([]PendingImportItemsOnWorkRow, error) {
+	rows, err := q.db.Query(ctx, pendingImportItemsOnWork, workID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PendingImportItemsOnWorkRow{}
+	for rows.Next() {
+		var i PendingImportItemsOnWorkRow
+		if err := rows.Scan(&i.ImportID, &i.Idx); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const runningImport = `-- name: RunningImport :one
 SELECT id, user_id, format, file_sha256, state, task_id, summary, message, created_at, finished_at FROM imports WHERE user_id = $1 AND state IN ('previewing', 'applying') LIMIT 1
 `
@@ -522,6 +1078,45 @@ func (q *Queries) RunningImport(ctx context.Context, userID uuid.UUID) (Import, 
 		&i.FinishedAt,
 	)
 	return i, err
+}
+
+const setImportItemChoice = `-- name: SetImportItemChoice :execrows
+UPDATE import_items SET outcome = $1, result = $2, work_id = $3, entry_id = $4, source_id = $5,
+    source_state = $6, message = $7
+WHERE import_id = $8 AND idx = $9 AND result NOT IN ('applied', 'already_imported')
+  AND EXISTS (SELECT 1 FROM imports WHERE imports.id = import_items.import_id AND imports.state NOT IN ('previewing', 'applying'))
+`
+
+type SetImportItemChoiceParams struct {
+	Outcome     string
+	Result      string
+	WorkID      uuid.NullUUID
+	EntryID     string
+	SourceID    string
+	SourceState string
+	Message     string
+	ImportID    uuid.UUID
+	Idx         int32
+}
+
+// A series resolved by hand, or skipped: not once it was applied, nor
+// while its import runs.
+func (q *Queries) SetImportItemChoice(ctx context.Context, arg SetImportItemChoiceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setImportItemChoice,
+		arg.Outcome,
+		arg.Result,
+		arg.WorkID,
+		arg.EntryID,
+		arg.SourceID,
+		arg.SourceState,
+		arg.Message,
+		arg.ImportID,
+		arg.Idx,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setImportItemMatch = `-- name: SetImportItemMatch :exec
@@ -557,6 +1152,37 @@ func (q *Queries) SetImportItemMatch(ctx context.Context, arg SetImportItemMatch
 	return err
 }
 
+const setImportItemPending = `-- name: SetImportItemPending :exec
+UPDATE import_items SET placed = $1, unplaced = $2, pending = $3,
+    pending_chapters = $4, pending_until = $5, message = $6
+WHERE import_id = $7 AND idx = $8
+`
+
+type SetImportItemPendingParams struct {
+	Placed          int32
+	Unplaced        int32
+	Pending         int32
+	PendingChapters []byte
+	PendingUntil    *time.Time
+	Message         string
+	ImportID        uuid.UUID
+	Idx             int32
+}
+
+func (q *Queries) SetImportItemPending(ctx context.Context, arg SetImportItemPendingParams) error {
+	_, err := q.db.Exec(ctx, setImportItemPending,
+		arg.Placed,
+		arg.Unplaced,
+		arg.Pending,
+		arg.PendingChapters,
+		arg.PendingUntil,
+		arg.Message,
+		arg.ImportID,
+		arg.Idx,
+	)
+	return err
+}
+
 const setImportTask = `-- name: SetImportTask :exec
 UPDATE imports SET task_id = $1 WHERE id = $2
 `
@@ -569,4 +1195,47 @@ type SetImportTaskParams struct {
 func (q *Queries) SetImportTask(ctx context.Context, arg SetImportTaskParams) error {
 	_, err := q.db.Exec(ctx, setImportTask, arg.TaskID, arg.ID)
 	return err
+}
+
+const startImportApply = `-- name: StartImportApply :one
+UPDATE imports SET state = 'applying', message = '', finished_at = NULL
+WHERE id = $1 AND user_id = $2 AND state IN ('preview', 'cancelled', 'failed')
+  AND NOT EXISTS (SELECT 1 FROM import_items WHERE import_id = imports.id AND outcome = 'pending')
+RETURNING id, user_id, format, file_sha256, state, task_id, summary, message, created_at, finished_at
+`
+
+type StartImportApplyParams struct {
+	ID     uuid.UUID
+	UserID uuid.UUID
+}
+
+// From preview, or again after a cancel or a failure (it resumes): once
+// every series was matched.
+func (q *Queries) StartImportApply(ctx context.Context, arg StartImportApplyParams) (Import, error) {
+	row := q.db.QueryRow(ctx, startImportApply, arg.ID, arg.UserID)
+	var i Import
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Format,
+		&i.FileSha256,
+		&i.State,
+		&i.TaskID,
+		&i.Summary,
+		&i.Message,
+		&i.CreatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const workHasPendingImports = `-- name: WorkHasPendingImports :one
+SELECT EXISTS (SELECT 1 FROM import_items WHERE work_id = $1 AND pending > 0)
+`
+
+func (q *Queries) WorkHasPendingImports(ctx context.Context, workID uuid.NullUUID) (bool, error) {
+	row := q.db.QueryRow(ctx, workHasPendingImports, workID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

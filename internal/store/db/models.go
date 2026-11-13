@@ -91,27 +91,33 @@ type Import struct {
 }
 
 type ImportItem struct {
-	ImportID       uuid.UUID
-	Idx            int32
-	Title          string
-	Author         string
-	Artist         string
-	SourceCompatID string
-	SourceName     string
-	SeriesKey      string
-	AddedAt        *time.Time
-	Categories     []string
-	Outcome        string
-	WorkID         uuid.NullUUID
-	EntryID        string
-	SourceID       string
-	SourceState    string
-	Candidates     []byte
-	Chapters       []byte
-	ChaptersRead   int32
-	Bookmarks      int32
-	Pending        int32
-	Message        string
+	ImportID        uuid.UUID
+	Idx             int32
+	Title           string
+	Author          string
+	Artist          string
+	SourceCompatID  string
+	SourceName      string
+	SeriesKey       string
+	AddedAt         *time.Time
+	Categories      []string
+	Outcome         string
+	WorkID          uuid.NullUUID
+	EntryID         string
+	SourceID        string
+	SourceState     string
+	Candidates      []byte
+	Chapters        []byte
+	ChaptersRead    int32
+	Bookmarks       int32
+	Pending         int32
+	Message         string
+	Result          string
+	AppliedAt       *time.Time
+	Placed          int32
+	Unplaced        int32
+	PendingChapters []byte
+	PendingUntil    *time.Time
 }
 
 type Invite struct {

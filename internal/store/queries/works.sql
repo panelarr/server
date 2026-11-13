@@ -14,7 +14,9 @@ SELECT * FROM works WHERE id = $1;
 SELECT * FROM works WHERE meta_entry_id = $1;
 
 -- name: AddLibraryEntry :one
-INSERT INTO library_entries (user_id, work_id) VALUES (@user_id, @work_id)
+-- added_at defaults to now (an import passes the date from its backup).
+INSERT INTO library_entries (user_id, work_id, added_at)
+VALUES (@user_id, @work_id, coalesce(sqlc.narg(added_at)::timestamptz, now()))
 ON CONFLICT DO NOTHING
 RETURNING *;
 
@@ -114,3 +116,9 @@ WHERE library_entries.user_id = @user_id AND works.meta_entry_id = ANY(@entry_id
 -- Every work in a user's library (content filters run in Go).
 SELECT works.* FROM library_entries JOIN works ON works.id = library_entries.work_id
 WHERE library_entries.user_id = $1;
+
+-- name: AttachedOnSource :one
+SELECT * FROM source_series WHERE work_id = @work_id AND source_id = @source_id AND state = 'attached';
+
+-- name: GetSourceSeriesByKey :one
+SELECT * FROM source_series WHERE work_id = @work_id AND source_id = @source_id AND key = @key;

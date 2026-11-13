@@ -4083,8 +4083,11 @@ paths:
       operationId: listMyImports
       tags: [imports]
       summary: Your imports
-      description: Your imports from other apps' backups, newest first (at most 100).
+      description: Your imports from other apps' backups, newest first, in pages. Each user keeps at most 20 imports.
       x-panelarr-access: user
+      parameters:
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/PageToken"
       responses:
         "200":
           description: Your imports.
@@ -4115,6 +4118,8 @@ paths:
         Uploading a file you already imported (the same bytes) answers
         `200` with that import, unless it failed or was cancelled. While
         another import of yours is running, `409`, code `import_running`.
+        Each user keeps at most 20 imports: with 20, `409`, code
+        `too_many_imports` (delete one first).
         The server reads one backup at a time: when it is busy, `429`,
         code `busy`, with `Retry-After`.
       x-panelarr-access: user
@@ -4178,13 +4183,18 @@ paths:
       operationId: listMyImportItems
       tags: [imports]
       summary: The series of one of your imports
-      description: In the backup's order, optionally only those with one outcome. Series the preview hasn't reached yet are `pending`.
+      description: In the backup's order, optionally only those with one outcome or one result. Series the preview hasn't reached yet are `pending`.
       x-panelarr-access: user
       parameters:
         - name: outcome
           in: query
           schema:
             $ref: "#/components/schemas/ImportOutcome"
+        - name: result
+          in: query
+          description: Only series with this result of apply.
+          schema:
+            $ref: "#/components/schemas/ImportResult"
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/PageToken"
       responses:
@@ -4194,6 +4204,120 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ImportItemPage"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/imports/{id}/apply:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      operationId: applyMyImport
+      tags: [imports]
+      summary: Apply one of your imports
+      description: |
+        Starts applying an import in state `preview` (task
+        `import.apply`), and answers `202` with it in state `applying`.
+        An import that was cancelled or failed after its preview finished
+        can be applied again: it resumes, and series already applied stay
+        as they are.
+        Each series that is `ready`, `in_library` or `source_missing` is
+        added to your library (a new entry keeps the backup's added date),
+        gets the backup's series attached where its source is in Panelarr,
+        you may use it and the work has no series on that source yet, and
+        gets its read marks, pages, last-read times and bookmarks. Your
+        grants are checked again as they are now: a series you may no
+        longer add, or whose work is above your content rating limit now,
+        becomes `not_allowed`.
+
+        Imported reading never undoes newer reading in Panelarr: a read
+        chapter stays read, a newer page and time are kept, and nothing is
+        marked unread or unbookmarked. Applying a backup again adds
+        nothing twice (result `already_imported`). Chapters Panelarr doesn't
+        know yet (a newly attached series is checked first) are placed
+        when they appear, for up to 24 hours (`pending`).
+
+        Progress is reported like the preview's (`import.progress`, then
+        `import.finished`). Any other import (still previewing, applying
+        or done, or stopped before its preview finished) answers `409`,
+        code `import_state`; while another import of yours runs, `409`,
+        code `import_running`.
+      x-panelarr-access: user
+      responses:
+        "202":
+          description: The import, applying.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Import"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/imports/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      operationId: cancelMyImport
+      tags: [imports]
+      summary: Cancel one of your imports while it runs
+      description: |
+        Stops a preview or an apply; the import ends `cancelled`. What was
+        applied already stays applied, and its series say so. Applying it
+        again (once its preview finished) resumes with the rest. An import
+        that isn't running answers `409`, code `import_not_running`.
+      x-panelarr-access: user
+      responses:
+        "200":
+          description: The import, cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Import"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /me/imports/{id}/items/{idx}/resolve:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+      - name: idx
+        in: path
+        required: true
+        description: The series' position in the backup.
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+    post:
+      operationId: resolveMyImportItem
+      tags: [imports]
+      summary: Choose the work of a series, or skip it
+      description: |
+        `{"entry_id": …}` sets the catalogue entry of a series that is
+        `needs_choice` or `not_found`, or was skipped (one of its candidates, or
+        any entry found by searching the catalogue). Before the import is
+        applied, the series is then applied with the rest. After (`done`,
+        `failed` or `cancelled`), it is applied right away: the work is
+        added to your library and the series' reading is placed, without
+        uploading the backup again. An entry you may not see answers `400`
+        on `entry_id`; one you may not add, `422`, code `not_allowed`.
+
+        `{"skip": true}` leaves out a series that hasn't been applied.
+
+        While the import runs, `409`, code `import_running`. A series in
+        another state answers `409`, code `import_item_state`.
+      x-panelarr-access: user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportResolve"
+      responses:
+        "200":
+          description: The series, resolved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportItem"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -5466,11 +5590,21 @@ components:
         it), `not_found`, `source_missing` (the work is clear, but the
         backup's source isn't in Panelarr: it imports without it) or
         `not_allowed` (your account may not add works, may not use the
-        source, or the work is above your content rating limit).
+        source, or the work is above your content rating limit). Apply
+        checks the grants again: a series that no longer passes becomes
+        `not_allowed`. What apply did is the series' `result`.
       enum: [pending, ready, in_library, needs_choice, not_found, source_missing, not_allowed]
+    ImportResult:
+      type: string
+      description: |
+        What apply did with a series: `applied` (the work added, the
+        series attached or reading placed), `already_imported` (nothing
+        was left to change: the backup was applied before) or `skipped`
+        (left out by you).
+      enum: [applied, already_imported, skipped]
     Import:
       type: object
-      required: [id, format, state, created_at, progress, summary, outcomes]
+      required: [id, format, state, created_at, progress, summary, outcomes, results]
       properties:
         id:
           type: string
@@ -5499,13 +5633,18 @@ components:
           description: Series per outcome, with their read chapters and bookmarks.
           items:
             $ref: "#/components/schemas/ImportOutcomeCount"
+        results:
+          type: array
+          description: Series per result of apply (empty before apply).
+          items:
+            $ref: "#/components/schemas/ImportResultCount"
     ImportProgress:
       type: object
       required: [done, total]
       properties:
         done:
           type: integer
-          description: Series matched.
+          description: Series matched; while applying, series applied.
         total:
           type: integer
     ImportOutcomeCount:
@@ -5519,6 +5658,14 @@ components:
         chapters_read:
           type: integer
         bookmarks:
+          type: integer
+    ImportResultCount:
+      type: object
+      required: [result, series]
+      properties:
+        result:
+          $ref: "#/components/schemas/ImportResult"
+        series:
           type: integer
     ImportSummary:
       type: object
@@ -5545,6 +5692,9 @@ components:
           description: Last-read times.
         tracker_links:
           type: integer
+        clamped_times:
+          type: integer
+          description: Last-read times in the future (a wrong clock in the other app) that apply capped at the time it ran.
         categories:
           type: array
           items:
@@ -5577,15 +5727,17 @@ components:
           description: Series of the import it would let Panelarr attach.
     ImportList:
       type: object
-      required: [imports]
+      required: [imports, next_page_token]
       properties:
         imports:
           type: array
           items:
             $ref: "#/components/schemas/Import"
+        next_page_token:
+          type: string
     ImportItem:
       type: object
-      required: [idx, title, author, artist, source_name, source_compat_id, series_key, categories, outcome, candidates, chapters, chapters_read, bookmarks]
+      required: [idx, title, author, artist, source_name, source_compat_id, series_key, categories, outcome, candidates, chapters, chapters_read, bookmarks, placed, unplaced, pending]
       properties:
         idx:
           type: integer
@@ -5613,9 +5765,11 @@ components:
             type: string
         outcome:
           $ref: "#/components/schemas/ImportOutcome"
+        result:
+          $ref: "#/components/schemas/ImportResult"
         message:
           type: string
-          description: Why, for `not_allowed`.
+          description: Why, for `not_allowed`; after apply, what it kept (e.g. another series attached on the source).
         work_id:
           type: string
           format: uuid
@@ -5638,6 +5792,28 @@ components:
           type: integer
         bookmarks:
           type: integer
+        applied_at:
+          type: string
+          format: date-time
+          description: When apply (or resolving it) went through the series.
+        placed:
+          type: integer
+          description: Chapters whose reading was placed on a Panelarr chapter, by the source's chapter key, else by number.
+        unplaced:
+          type: integer
+          description: Chapters that couldn't be placed (no number, or no such chapter in Panelarr after 24 hours).
+        pending:
+          type: integer
+          description: Chapters waiting for the work's chapters to be known; placed when they appear, for up to 24 hours.
+    ImportResolve:
+      type: object
+      description: Either a catalogue entry or skip.
+      properties:
+        entry_id:
+          type: string
+          minLength: 1
+        skip:
+          type: boolean
     ImportCandidate:
       type: object
       required: [entry_id, title, score]

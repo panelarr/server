@@ -198,6 +198,14 @@ func serve(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	rdr.SetFiles(dl)
 	chs.OnNewChapters(dl.NewChapters)
 	imp := importer.NewService(st, lib, metaSvc, host, q, hub, importer.Options{TempDir: filepath.Join(cfg.DataDir, ".tmp")}, logging.Component(log, "importer"))
+	// Imported reading that waited for a work's chapters is placed when
+	// they are rebuilt.
+	chs.OnUnified(imp.WorkChaptersChanged)
+	// Uploads a stopped process left behind (the file is otherwise deleted
+	// as soon as it is read).
+	if _, err := imp.SweepTemp(); err != nil {
+		log.Warn("delete leftover import uploads", "component", "importer", "err", err)
+	}
 	jm := jobs.NewManager(st, hub, m, logging.Component(log, "jobs"))
 	registerJobs(jm, st, authSvc, host, lib, chs, netSvc, metaSvc)
 	if err := jm.Start(ctx); err != nil {

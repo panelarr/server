@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.1.1](https://github.com/panelarr/server/compare/v0.1.0...v0.1.1) (2026-11-13)
+
+
+### Features
+
+* **auth:** link, provision and sync roles with OIDC; admins-only password login and provider logout ([66112c4](https://github.com/panelarr/server/commit/66112c4bff67a27cb1c8733271d35f2a7c925caf))
+* **auth:** OIDC linking, provisioning, roles and provider logout ([422bc21](https://github.com/panelarr/server/commit/422bc218587c6634e1612cbe9ca2e2c84dae9dcc))
+* **auth:** sign in with an OIDC provider for linked users ([24d605f](https://github.com/panelarr/server/commit/24d605f038dd7197ab38ac6f41897b11b6a16f54))
+* **auth:** sign in with an OIDC provider for linked users ([84b429e](https://github.com/panelarr/server/commit/84b429ecd58703bbcf096ab9aa13325108689a50))
+* **auth:** start SSO linking with a CSRF-checked POST, refuse return_to into the API ([c6f2c6c](https://github.com/panelarr/server/commit/c6f2c6c5f40ca7b717d73a0eaa75c25b48e6e0ba))
+* **importer:** apply imports, resolve series by hand and cancel ([6f4202e](https://github.com/panelarr/server/commit/6f4202e753d039c7e66016c0188352dd51c8cf42))
+* **importer:** apply imports, resolve series by hand and cancel ([c2e47b8](https://github.com/panelarr/server/commit/c2e47b8e134be3648b8750f69a56459716ac5b24))
+* **importer:** preview imports of Suwayomi and Mihon backups ([c0ae08c](https://github.com/panelarr/server/commit/c0ae08cc34bca00fe3aeedeb274422085e0d50c7))
+* **importer:** preview imports of Suwayomi and Mihon backups ([4458c5e](https://github.com/panelarr/server/commit/4458c5e044d8086a20979b3610c3376f4a388c08))
+* **importer:** read Mihon and Suwayomi backups ([37964c3](https://github.com/panelarr/server/commit/37964c3bb584eb1da89807abadbb853d81308ea6))
+* **importer:** read Mihon and Suwayomi backups ([0f5a018](https://github.com/panelarr/server/commit/0f5a01809f0d6ed0fe36d28d7726c1a56bd57777))
+* **library:** saved library views and last_updated_at ([#10](https://github.com/panelarr/server/issues/10)) ([b094e7d](https://github.com/panelarr/server/commit/b094e7d0b73ec80d7e91dd7c3082542411b1ae2a))
+* **library:** views filter by content rating ([4ea116c](https://github.com/panelarr/server/commit/4ea116c0e6b78ed473ec65218e0b4ec1fd691d4a))
+* **library:** views filter by content rating ([8096aa8](https://github.com/panelarr/server/commit/8096aa8218f627e8d7d89a093128af2d2ea2c573))
+* **plugins:** store sources' compat IDs and look sources up by them ([6986645](https://github.com/panelarr/server/commit/6986645416dd3050f717c9d4fc64b8110229614d))
+* **plugins:** store sources' compat IDs and look sources up by them ([ff81773](https://github.com/panelarr/server/commit/ff817732f592d7ba6079389dcc8ff57cfb0e19da))
+
+
+### Bug Fixes
+
+* **api:** answer NUL in text input with 400 instead of 500 ([#12](https://github.com/panelarr/server/issues/12)) ([61b71af](https://github.com/panelarr/server/commit/61b71af01769ed541a6e0158b85f9ae8a2d2796a))
+* **auth:** answer a non-admin's password login like a wrong password ([10d0461](https://github.com/panelarr/server/commit/10d0461fdca596686399913939ce1115c051aeda))
+* **auth:** bind SSO link start to the CSRF token, refuse return_to into the API ([1811dd2](https://github.com/panelarr/server/commit/1811dd2a41bd9d005ae7138160656ccc9917fb2a))
+* **auth:** keep SSO failures from locking out password login ([55997f8](https://github.com/panelarr/server/commit/55997f8785111f6c19d78a0d2915fa05c0ac3433))
+* **auth:** redirect browsers to the login page when an SSO start is refused ([a5da85e](https://github.com/panelarr/server/commit/a5da85e7d24f19bbc1882d3dea5973cea4e4fbaf))
+* **auth:** redirect browsers to the login page when an SSO start is refused ([f0c0116](https://github.com/panelarr/server/commit/f0c01169665aea854930adb63e904202bd6800be))
+* **deps:** Go 1.27.4 for GO-2026-6859 ([dfcbb6e](https://github.com/panelarr/server/commit/dfcbb6e285aad0f55c20db3512480489ffb3e47a))
+* **importer:** bound every collection a backup reader keeps ([423ae9a](https://github.com/panelarr/server/commit/423ae9ae0cf15aa7049f4b5399bd941324071474))
+* **importer:** join categories on integer indexes, not names ([b2e0460](https://github.com/panelarr/server/commit/b2e046004c904f43b9d07e7e8b516bdcd7e52b7f))
+* **importer:** keep Panelarr's reading from undated marks and gate attaching ([3b26e3e](https://github.com/panelarr/server/commit/3b26e3e7b75a3381c7d7b51fa8a6795c066eb6a7))
+* **library:** lock the work before attaching a series by hand ([cb59239](https://github.com/panelarr/server/commit/cb59239f01c6ef8becf75a6ddfe028d236cb05ca))
+* **library:** lock the work first when matching saves candidates and on attach ([d30de35](https://github.com/panelarr/server/commit/d30de35c9a07abd7f94e4f02a38ff94291689bed))
+* **library:** resolve URLs with every plugin, remove ghost chapters ([#11](https://github.com/panelarr/server/issues/11)) ([1ff659e](https://github.com/panelarr/server/commit/1ff659e4528fac463a1baf9f3de32ecc46b856b9))
+* **queue:** don't drop an enqueue when the live duplicate just ended ([#7](https://github.com/panelarr/server/issues/7)) ([d17c68e](https://github.com/panelarr/server/commit/d17c68e35e1069633dc1ee0c202da5f3f6264484))
+* **reader:** a read chapter stays read when opened again ([#9](https://github.com/panelarr/server/issues/9)) ([6094de0](https://github.com/panelarr/server/commit/6094de0726ac5524d204164ffcb72869d59838fd))
+* **reader:** chapters un-read by reopening them before this fix stay as they are; mark them read again ([6094de0](https://github.com/panelarr/server/commit/6094de0726ac5524d204164ffcb72869d59838fd))
+
 ## 0.1.0 (2026-11-09)
 
 

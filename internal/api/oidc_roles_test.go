@@ -41,12 +41,16 @@ func (c *client) signedIn(res response, want string) apigen.Me {
 // linkSSO runs a link flow from a signed-in browser.
 func (c *client) linkSSO(m *mockOP, claims mockClaims, returnTo string) response {
 	c.h.t.Helper()
-	res := c.do(http.MethodGet, "/api/v1/auth/oidc/start?intent=link&return_to="+url.QueryEscape(returnTo), nil)
-	if res.status != http.StatusFound {
-		c.h.t.Fatalf("start link: %d %s", res.status, res.body)
-	}
+	start := c.startLink(returnTo)
 	m.next = claims
-	return c.do(http.MethodGet, m.authorize(res.header.Get("Location")), nil)
+	return c.do(http.MethodGet, m.authorize(start), nil)
+}
+
+// startLink starts a link flow with POST /auth/oidc/link and returns the
+// provider's URL.
+func (c *client) startLink(returnTo string) string {
+	c.h.t.Helper()
+	return call[apigen.OidcLinkStart](c, http.MethodPost, "/api/v1/auth/oidc/link", map[string]string{"return_to": returnTo}, http.StatusOK).RedirectTo
 }
 
 // noSessionCookie checks a response set no session cookie.
@@ -233,30 +237,30 @@ func TestOIDCLinking(t *testing.T) {
 
 	// A link flow whose session ended meanwhile links nothing.
 	gone := stopAtRedirects(h.login("other", "user password 1"))
-	start := gone.do(http.MethodGet, "/api/v1/auth/oidc/start?intent=link&return_to=/account", nil)
+	start := gone.startLink("/account")
 	gone.do(http.MethodPost, "/api/v1/auth/logout", nil)
 	m.next = mockClaims{Subject: "s-other"}
-	if res := gone.do(http.MethodGet, m.authorize(start.header.Get("Location")), nil); res.header.Get("Location") != "/account?sso_error=session_changed" {
+	if res := gone.do(http.MethodGet, m.authorize(start), nil); res.header.Get("Location") != "/account?sso_error=session_changed" {
 		t.Fatalf("link after logout: %d %q", res.status, res.header.Get("Location"))
 	}
 	h.browser().expectSSOError(h.browser().ssoLogin(m, mockClaims{Subject: "s-other"}, ""), "not_linked")
 	// Nor one whose session was replaced, even by the same user.
 	again := stopAtRedirects(h.login("other", "user password 1"))
-	start = again.do(http.MethodGet, "/api/v1/auth/oidc/start?intent=link&return_to=/account", nil)
+	start = again.startLink("/account")
 	in := call[apigen.LoginResponse](again, http.MethodPost, "/api/v1/auth/login", map[string]string{"username": "other", "password": "user password 1"}, http.StatusOK)
 	again.csrf = in.CsrfToken
 	m.next = mockClaims{Subject: "s-other"}
-	if res := again.do(http.MethodGet, m.authorize(start.header.Get("Location")), nil); res.header.Get("Location") != "/account?sso_error=session_changed" {
+	if res := again.do(http.MethodGet, m.authorize(start), nil); res.header.Get("Location") != "/account?sso_error=session_changed" {
 		t.Fatalf("link after a new session: %d %q", res.status, res.header.Get("Location"))
 	}
 	// Nor one whose browser signed in as someone else meanwhile: the
 	// login must not land on that account.
 	switched := stopAtRedirects(h.login("other", "user password 1"))
-	start = switched.do(http.MethodGet, "/api/v1/auth/oidc/start?intent=link&return_to=/account", nil)
+	start = switched.startLink("/account")
 	in = call[apigen.LoginResponse](switched, http.MethodPost, "/api/v1/auth/login", map[string]string{"username": "reader", "password": "user password 1"}, http.StatusOK)
 	switched.csrf = in.CsrfToken
 	m.next = mockClaims{Subject: "s-other"}
-	if res := switched.do(http.MethodGet, m.authorize(start.header.Get("Location")), nil); res.header.Get("Location") != "/account?sso_error=session_changed" {
+	if res := switched.do(http.MethodGet, m.authorize(start), nil); res.header.Get("Location") != "/account?sso_error=session_changed" {
 		t.Fatalf("link after switching users: %d %q", res.status, res.header.Get("Location"))
 	}
 	h.browser().expectSSOError(h.browser().ssoLogin(m, mockClaims{Subject: "s-other"}, ""), "not_linked")

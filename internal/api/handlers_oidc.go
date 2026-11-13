@@ -50,12 +50,9 @@ func (s *Server) StartOidcLogin(ctx context.Context, req apigen.StartOidcLoginRe
 	if s.deps.SSO == nil {
 		return nil, errSSOOff
 	}
-	returnTo := "/"
-	if req.Params.ReturnTo != nil {
-		var ok bool
-		if returnTo, ok = localPath(*req.Params.ReturnTo); !ok {
-			return nil, NewProblem(http.StatusBadRequest, "invalid_return_to", "return_to must be a path on this server, like /library")
-		}
+	returnTo, err := returnPath(req.Params.ReturnTo)
+	if err != nil {
+		return nil, err
 	}
 	st := sso.Start{ReturnTo: returnTo, Intent: sso.IntentLogin}
 	invite := deref(req.Params.Invite)
@@ -63,18 +60,19 @@ func (s *Server) StartOidcLogin(ctx context.Context, req apigen.StartOidcLoginRe
 		if invite != "" {
 			return nil, fieldProblem("invite", "can't be combined with intent=link")
 		}
-		p := auth.FromContext(ctx)
-		if p == nil {
-			return nil, NewProblem(http.StatusUnauthorized, "unauthenticated", "sign in first to link a login")
+		p, err := linkingPrincipal(ctx)
+		if err != nil {
+			return nil, err
 		}
-		if p.Method != auth.MethodSession {
-			return nil, NewProblem(http.StatusForbidden, "session_required", "linking a login needs a signed-in browser session, not an API key")
-		}
-		// Linking changes the account, and this is a GET: only a
-		// navigation from Panelarr itself may start it, never one
-		// another site makes the browser do.
+		// Linking changes the account, and this is a GET, which any
+		// site can make the browser load, and Fetch Metadata is
+		// missing in older browsers: the session's CSRF token in the
+		// URL proves the start came from Panelarr itself.
 		if site := requestHeader(ctx, "Sec-Fetch-Site"); site == "cross-site" || site == "same-site" {
 			return nil, NewProblem(http.StatusForbidden, "cross_site", "start linking from your account page")
+		}
+		if !p.CheckCSRF(deref(req.Params.CsrfToken)) {
+			return nil, NewProblem(http.StatusForbidden, "csrf_failed", "start linking with POST /auth/oidc/link")
 		}
 		st.Intent, st.UserID, st.SessionID = sso.IntentLink, p.User.ID.String(), p.SessionID.String()
 	} else if invite != "" {
@@ -83,18 +81,105 @@ func (s *Server) StartOidcLogin(ctx context.Context, req apigen.StartOidcLoginRe
 		}
 		st.Intent, st.Invite = sso.IntentInvite, invite
 	}
-	authURL, cookie, err := s.deps.SSO.Begin(ctx, st)
-	if errors.Is(err, sso.ErrUnavailable) {
-		return nil, NewProblem(http.StatusServiceUnavailable, "oidc_unavailable", "the identity provider can't be reached; try again later or sign in with a password")
-	}
+	authURL, err := s.beginSSO(ctx, st)
 	if err != nil {
 		return nil, err
+	}
+	return apigen.StartOidcLogin302Response{Headers: apigen.StartOidcLogin302ResponseHeaders{Location: &authURL}}, nil
+}
+
+// StartOidcLink starts a flow that links a login to the signed-in user.
+// Unlike the GET start it is a changing request, so the authorization
+// middleware has checked the session's CSRF token in its header.
+func (s *Server) StartOidcLink(ctx context.Context, req apigen.StartOidcLinkRequestObject) (apigen.StartOidcLinkResponseObject, error) {
+	if s.deps.SSO == nil {
+		return nil, errSSOOff
+	}
+	var rt *string
+	if req.Body != nil {
+		rt = req.Body.ReturnTo
+	}
+	returnTo, err := returnPath(rt)
+	if err != nil {
+		return nil, err
+	}
+	p, err := linkingPrincipal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	authURL, err := s.beginSSO(ctx, sso.Start{
+		ReturnTo: returnTo, Intent: sso.IntentLink, UserID: p.User.ID.String(), SessionID: p.SessionID.String(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return apigen.StartOidcLink200JSONResponse{RedirectTo: authURL}, nil
+}
+
+// linkingPrincipal is the caller who may link a login: signed in with a
+// browser session.
+func linkingPrincipal(ctx context.Context) (*auth.Principal, error) {
+	p := auth.FromContext(ctx)
+	if p == nil {
+		return nil, NewProblem(http.StatusUnauthorized, "unauthenticated", "sign in first to link a login")
+	}
+	if p.Method != auth.MethodSession {
+		return nil, NewProblem(http.StatusForbidden, "session_required", "linking a login needs a signed-in browser session, not an API key")
+	}
+	return p, nil
+}
+
+// beginSSO starts a flow and sets its cookie, returning the provider's
+// URL.
+func (s *Server) beginSSO(ctx context.Context, st sso.Start) (string, error) {
+	authURL, cookie, err := s.deps.SSO.Begin(ctx, st)
+	if errors.Is(err, sso.ErrUnavailable) {
+		return "", NewProblem(http.StatusServiceUnavailable, "oidc_unavailable", "the identity provider can't be reached; try again later or sign in with a password")
+	}
+	if err != nil {
+		return "", err
 	}
 	if w := responseWriter(ctx); w != nil {
 		w.Header().Set("Cache-Control", "no-store")
 		http.SetCookie(w, s.flowCookie(cookie, int(sso.FlowTTL.Seconds())))
 	}
-	return apigen.StartOidcLogin302Response{Headers: apigen.StartOidcLogin302ResponseHeaders{Location: &authURL}}, nil
+	return authURL, nil
+}
+
+// returnPath checks a flow's return_to: a page on this server (localPath),
+// never the API. The browser lands there signed in, so a return_to such as
+// another flow's start would make it do something the user didn't ask.
+func returnPath(s *string) (string, error) {
+	if s == nil {
+		return "/", nil
+	}
+	p, ok := localPath(*s)
+	if ok && !underAPI(p) {
+		return p, nil
+	}
+	return "", NewProblem(http.StatusBadRequest, "invalid_return_to", "return_to must be a page on this server, like /library")
+}
+
+// underAPI reports whether the local path p is in the API: /api or below,
+// in any case and however it is escaped.
+func underAPI(p string) bool {
+	if i := strings.IndexAny(p, "?#"); i >= 0 {
+		p = p[:i]
+	}
+	// Decode until stable: "%2561pi" must not hide "/api" from a client
+	// that decodes once more.
+	for i := 0; ; i++ {
+		d, err := url.PathUnescape(p)
+		if err != nil || i == 4 {
+			return true
+		}
+		if d == p {
+			break
+		}
+		p = d
+	}
+	p = strings.ToLower(path.Clean(strings.ReplaceAll(p, "\\", "/")))
+	return p == "/api" || strings.HasPrefix(p, "/api/")
 }
 
 // FinishOidcLogin finishes a flow at the identity provider: the design's

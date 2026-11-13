@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/panelarr/server/internal/api/apigen"
+	"github.com/panelarr/server/internal/sso"
 )
 
 // Browser headers: a navigation in a browser with Fetch Metadata, one
@@ -126,4 +127,41 @@ func TestOIDCStartRefusedNavigation(t *testing.T) {
 			t.Fatalf("off: %d %s", res.status, res.body)
 		}
 	})
+}
+
+// With admin groups configured, the groups decide the role of a user an
+// invite creates, as they do on every later sign-in: an admin invite
+// accepted from outside the groups makes a user, and one accepted from
+// inside them an admin (a user invite too).
+func TestOIDCInviteAdminGroups(t *testing.T) {
+	t.Parallel()
+	m := newMockOP(t)
+	h := newHarness(t, withSSOConfig(m, func(c *sso.Config) { c.AdminGroups = []string{"admins"} }))
+	admin, _ := h.setupAdmin()
+	accept := func(role, subject string, groups []string) apigen.User {
+		t.Helper()
+		token := call[apigen.InviteCreated](admin, http.MethodPost, "/api/v1/invites", map[string]any{"role": role}, http.StatusCreated).Token
+		b := h.browser()
+		res := b.do(http.MethodGet, "/api/v1/auth/oidc/start?return_to=/welcome&invite="+url.QueryEscape(token), nil)
+		if res.status != http.StatusFound {
+			t.Fatalf("start: %d %s", res.status, res.body)
+		}
+		m.next = mockClaims{Subject: subject, Username: subject, Groups: groups}
+		u := b.signedIn(b.do(http.MethodGet, m.authorize(res.header.Get("Location")), nil), "/welcome").User
+		// The role sticks: the user list says the same.
+		if got := call[apigen.User](admin, http.MethodGet, "/api/v1/users/"+u.Id.String(), nil, http.StatusOK); got.Role != u.Role {
+			t.Fatalf("%s: signed in as %s, stored as %s", subject, u.Role, got.Role)
+		}
+		return u
+	}
+
+	if u := accept("admin", "outsider", []string{"readers"}); u.Role != apigen.RoleUser {
+		t.Fatalf("admin invite outside the admin groups: %s", u.Role)
+	}
+	if u := accept("admin", "member", []string{"readers", "admins"}); u.Role != apigen.RoleAdmin {
+		t.Fatalf("admin invite inside the admin groups: %s", u.Role)
+	}
+	if u := accept("user", "promoted", []string{"admins"}); u.Role != apigen.RoleAdmin {
+		t.Fatalf("user invite inside the admin groups: %s", u.Role)
+	}
 }

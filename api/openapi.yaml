@@ -9214,6 +9214,12 @@ components:
             type: string
         admin_groups:
           type: array
+          description: |
+            The provider's groups whose members are admins. Empty when none
+            are configured. When set, they decide every single sign-on
+            user's role at each sign-in (admin for members, user for
+            everyone else), overriding the role an admin or an invite gave;
+            the last enabled admin is never demoted.
           items:
             type: string
         logout:

@@ -224,9 +224,20 @@ func TestOIDCWithDex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	raw, err := io.ReadAll(res.Body)
 	_ = res.Body.Close()
-	if res.StatusCode == http.StatusOK {
-		t.Fatal("Dex exchanged a PKCE code without the verifier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// RFC 7636 4.6: a missing verifier is an invalid_grant, so the
+	// refusal is PKCE's and not, say, a client authentication failure.
+	var tokenErr struct {
+		Error       string `json:"error"`
+		Description string `json:"error_description"`
+	}
+	if err := json.Unmarshal(raw, &tokenErr); err != nil || res.StatusCode != http.StatusBadRequest ||
+		tokenErr.Error != "invalid_grant" || !strings.Contains(tokenErr.Description, "code_verifier") {
+		t.Fatalf("token exchange without the verifier: %d %s", res.StatusCode, raw)
 	}
 
 	// The admin's status page sees Dex.

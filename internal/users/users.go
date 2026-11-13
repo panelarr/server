@@ -129,6 +129,10 @@ type Service struct {
 	log    *slog.Logger
 	now    func() time.Time
 	hasAny atomic.Bool // once true, stays true: the last admin can't be deleted
+
+	// adminsCounted, when set, runs after a role sync counted the
+	// enabled admins and before it acts on the count (tests only).
+	adminsCounted func()
 }
 
 // NewService returns the users service.

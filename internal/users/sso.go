@@ -257,6 +257,9 @@ func (s *Service) syncRole(ctx context.Context, q *db.Queries, u db.User, in SSO
 		if err != nil {
 			return u, "", err
 		}
+		if s.adminsCounted != nil {
+			s.adminsCounted()
+		}
 		if n <= 1 {
 			s.log.WarnContext(ctx, "role not synced: the last enabled admin is never demoted", "component", "audit", "user_id", u.ID)
 			return u, "", nil

@@ -8,11 +8,14 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/google/uuid"
+	metav1 "github.com/panelarr/meta/gen/panelarr/meta/v1"
+	metadatav1 "github.com/panelarr/meta/gen/panelarr/metadata/v1"
 
 	"github.com/panelarr/server/internal/api/apigen"
 	"github.com/panelarr/server/internal/events"
@@ -375,5 +378,129 @@ func TestLibraryViewsConcurrently(t *testing.T) {
 		t.Fatalf("%d views", len(vs))
 	} else {
 		viewOrder(t, vs) // one default, positions 0..n
+	}
+}
+
+// A view's content-rating filter round-trips, refuses what isn't a rating
+// list, and stores an empty list as absent.
+func TestLibraryViewContentRatings(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	admin, _ := h.setupAdmin()
+	user, _ := h.createUser(admin, "reader", nil)
+
+	ratings := func(v apigen.LibraryView) string {
+		if v.Definition.ContentRatings == nil {
+			return "absent"
+		}
+		out := make([]string, len(*v.Definition.ContentRatings))
+		for i, r := range *v.Definition.ContentRatings {
+			out[i] = string(r)
+		}
+		return strings.Join(out, ",")
+	}
+
+	// Saved before the filter existed: no key, any rating.
+	plain := createView(user, "Library", map[string]any{"sort": "title"})
+	if r := ratings(plain); r != "absent" {
+		t.Fatalf("without the key: %s", r)
+	}
+
+	hide := createView(user, "Hide 18+", map[string]any{"content_ratings": []string{"safe", "suggestive", "unknown"}, "sort": "added"})
+	if r := ratings(hide); r != "safe,suggestive,unknown" {
+		t.Fatalf("create: %s", r)
+	}
+	if r := ratings(call[apigen.LibraryView](user, http.MethodGet, viewPath(hide.Id), nil, 200)); r != "safe,suggestive,unknown" {
+		t.Fatalf("get: %s", r)
+	}
+	for _, v := range listViews(user) {
+		want := map[uuid.UUID]string{plain.Id: "absent", hide.Id: "safe,suggestive,unknown"}[v.Id]
+		if r := ratings(v); r != want {
+			t.Fatalf("list %s: %s, want %s", v.Name, r, want)
+		}
+	}
+	only := call[apigen.LibraryView](user, http.MethodPatch, viewPath(plain.Id), map[string]any{"definition": map[string]any{"content_ratings": []string{"erotic", "pornographic"}}}, 200)
+	if r := ratings(only); r != "erotic,pornographic" {
+		t.Fatalf("patch: %s", r)
+	}
+	if r := ratings(call[apigen.LibraryView](user, http.MethodGet, viewPath(plain.Id), nil, 200)); r != "erotic,pornographic" {
+		t.Fatalf("get after patch: %s", r)
+	}
+	// Renaming leaves the filter alone.
+	if r := ratings(call[apigen.LibraryView](user, http.MethodPatch, viewPath(plain.Id), map[string]any{"name": "Only 18+"}, 200)); r != "erotic,pornographic" {
+		t.Fatalf("after a rename: %s", r)
+	}
+	// An empty list means any rating and is stored as absent.
+	cleared := call[apigen.LibraryView](user, http.MethodPatch, viewPath(plain.Id), map[string]any{"definition": map[string]any{"content_ratings": []string{}, "sort": "title"}}, 200)
+	if r := ratings(cleared); r != "absent" {
+		t.Fatalf("empty list: %s", r)
+	}
+	var stored string
+	if err := h.st.Pool.QueryRow(context.Background(), "SELECT definition::text FROM library_views WHERE id = $1", plain.Id).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stored, "content_ratings") {
+		t.Fatalf("stored %s", stored)
+	}
+
+	refused := func(name string, value any) {
+		t.Helper()
+		def := map[string]any{"content_ratings": value}
+		for _, r := range []response{
+			user.do(http.MethodPost, viewsPath, map[string]any{"name": "Refused", "definition": def}),
+			user.do(http.MethodPatch, viewPath(hide.Id), map[string]any{"definition": def}),
+		} {
+			p := r.problem(t)
+			if r.status != 400 || p.Code != CodeInvalidRequest || p.Errors == nil || len(*p.Errors) == 0 ||
+				!strings.HasPrefix((*p.Errors)[0].Field, "definition.content_ratings") {
+				t.Fatalf("%s: %d %s", name, r.status, r.body)
+			}
+		}
+	}
+	refused("unknown value", []string{"nsfw"})
+	refused("empty value", []string{""})
+	refused("source rating", []string{"mixed"})
+	refused("duplicate", []string{"safe", "safe"})
+	refused("six values", []string{"safe", "suggestive", "erotic", "pornographic", "unknown", "safe"})
+	refused("not an array", "safe")
+	refused("object", map[string]any{"safe": true})
+	if r := ratings(call[apigen.LibraryView](user, http.MethodGet, viewPath(hide.Id), nil, 200)); r != "safe,suggestive,unknown" {
+		t.Fatalf("after refusals: %s", r)
+	}
+}
+
+// A view can't widen what a user sees: views run on the client over
+// GET /library, which never lists works above the user's ceiling, whatever
+// the user's views say.
+func TestLibraryViewContentRatingsDontWiden(t *testing.T) {
+	t.Parallel()
+	f := newCatalogFixture(t) // e1 safe, e2 erotic, e3 suggestive
+	f.fake.AddEntry(&metav1.Entry{Id: "e4", Title: "Explicit Story", ContentRating: metadatav1.ContentRating_CONTENT_RATING_PORNOGRAPHIC})
+	user, u := f.h.createUser(f.admin, "grown", map[string]any{"content_rating_ceiling": "pornographic"})
+	for _, id := range []string{"e1", "e2", "e3", "e4"} {
+		call[apigen.LibraryEntry](user, http.MethodPost, "/api/v1/library", map[string]string{"entry_id": id}, 201)
+	}
+	listed := func() string {
+		var out []string
+		for _, e := range call[apigen.LibraryPage](user, http.MethodGet, "/api/v1/library", nil, 200).Entries {
+			out = append(out, string(e.Work.ContentRating))
+		}
+		slices.Sort(out)
+		return strings.Join(out, ",")
+	}
+	if got := listed(); got != "erotic,pornographic,safe,suggestive" {
+		t.Fatalf("at the pornographic ceiling: %s", got)
+	}
+
+	// The admin lowers the ceiling; the user saves an "Only 18+" view anyway.
+	call[apigen.User](f.admin, http.MethodPatch, "/api/v1/users/"+u.Id.String(), map[string]any{"grants": map[string]any{"content_rating_ceiling": "suggestive"}}, 200)
+	v := call[apigen.LibraryView](user, http.MethodPost, viewsPath, map[string]any{
+		"name": "Only 18+", "definition": map[string]any{"content_ratings": []string{"erotic", "pornographic"}}, "default": true,
+	}, 201)
+	if !v.Default || v.Definition.ContentRatings == nil || len(*v.Definition.ContentRatings) != 2 {
+		t.Fatalf("view %+v", v)
+	}
+	if got := listed(); got != "safe,suggestive" {
+		t.Fatalf("with an 18+ view below a suggestive ceiling: %s", got)
 	}
 }

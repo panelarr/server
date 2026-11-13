@@ -5793,6 +5793,18 @@ components:
             type: string
             minLength: 1
             maxLength: 40
+        content_ratings:
+          type: array
+          description: |
+            Only works with these content ratings (`work.content_rating`);
+            empty or absent means any. A view only narrows what you may
+            already see: works above your content-rating ceiling are never in
+            your library listing, whatever a view says. Values above your
+            ceiling are accepted and simply match nothing.
+          maxItems: 5
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/EntryContentRating"
         updated_within_days:
           type: integer
           minimum: 1

@@ -76,6 +76,7 @@ const (
 	whyKeptOther    = "kept the series already attached on this source; chapters are placed by number"
 	whyRejected     = "the series was detached from this work before, so it isn't attached again; chapters are placed by number"
 	whyUnavailable  = "the source didn't answer, so the series isn't attached; chapters are placed by number"
+	whyMayNotAttach = "reading imported; the series isn't attached: your account may not add works or fix matches, so chapters are placed by number"
 	whyNotPlacedFmt = "%d chapters couldn't be placed: Panelarr has no such chapters"
 )
 
@@ -102,12 +103,18 @@ func (s *Service) Apply(ctx context.Context, userID, id uuid.UUID) (db.Import, e
 		case err != nil:
 			return err
 		}
-		t, _, err := s.queue.EnqueueWith(ctx, q, queue.NewTask{
+		t, created, err := s.queue.EnqueueWith(ctx, q, queue.NewTask{
 			Kind: KindApply, Payload: payload{ImportID: id}, DedupeKey: "import.apply." + id.String(),
 			Priority: -10, CreatedBy: userID,
 		})
 		if err != nil {
 			return err
+		}
+		if !created {
+			// The previous apply's task is still live: cancelled, it runs
+			// until its handler sees that. Reusing it would end this apply
+			// with it, so the user tries again once it stopped.
+			return ErrRunning
 		}
 		imp.TaskID = uuid.NullUUID{UUID: t.ID, Valid: true}
 		return q.SetImportTask(ctx, db.SetImportTaskParams{ID: id, TaskID: imp.TaskID})
@@ -324,6 +331,23 @@ func (s *Service) prepareItem(ctx context.Context, m *matcher, it db.ImportItem)
 		p.workID = uuid.NullUUID{UUID: added.Work.ID, Valid: true}
 		p.changed = added.New
 	}
+	if si.usable != nil && !mayAttach(m.v) {
+		// Works are shared: attaching changes them for everyone, which
+		// this user may do neither by adding (may_add) nor by fixing
+		// matches (may_manage_matches). Their reading still goes on the
+		// work's chapters: by key when this very series is attached
+		// already, else by number.
+		cur, err := s.st.AttachedOnSource(ctx, db.AttachedOnSourceParams{WorkID: p.workID.UUID, SourceID: si.usable.ID})
+		switch {
+		case err == nil && cur.Key == it.SeriesKey:
+			p.sourceID = si.usable.ID
+		case err == nil || errors.Is(err, pgx.ErrNoRows):
+			p.message = whyMayNotAttach
+		default:
+			return prepared{}, err
+		}
+		return p, nil
+	}
 	if si.usable != nil {
 		state, err := s.lib.AttachImported(ctx, m.v, p.workID.UUID, si.usable.ID, it.SeriesKey)
 		if err != nil {
@@ -343,6 +367,12 @@ func (s *Service) prepareItem(ctx context.Context, m *matcher, it db.ImportItem)
 		}
 	}
 	return p, nil
+}
+
+// mayAttach: v may attach a series to a shared work, as adding it with a
+// source (may_add) or fixing its matches (may_manage_matches) would.
+func mayAttach(v library.Viewer) bool {
+	return v.Grants.MayAdd || v.Grants.MayManageMatches
 }
 
 // applyItem applies one series: its work and source series, then its
@@ -436,8 +466,22 @@ type mark struct {
 	progress, read bool
 	page           int32
 	at             time.Time
-	bookmark       bool
-	markAt         time.Time
+	// dated: at is a time from the backup. An undated mark has only the
+	// upload's time, which says nothing about when it was read: it may
+	// add a row or a read flag, never move Panelarr's page or time.
+	dated               bool
+	bookmark, markDated bool
+	markAt              time.Time
+}
+
+// newer: a time at (from the backup when dated) beats the one a mark
+// has (if it has one, from the backup when haveDated). A dated time beats
+// the upload's time stamped on undated reading; else the later one wins.
+func newer(have bool, haveAt time.Time, haveDated bool, at time.Time, dated bool) bool {
+	if !have || dated != haveDated {
+		return !have || dated
+	}
+	return at.After(haveAt)
 }
 
 // place writes a series' reading on its work's chapters for the user: by
@@ -499,32 +543,38 @@ func (s *Service) place(ctx context.Context, q *db.Queries, userID, workID uuid.
 			marks[id] = mk
 			order = append(order, id)
 		}
-		at := readTime(c.ReadAt, undated, now)
+		at, dated := readTime(c.ReadAt, undated, now)
 		if c.Read || c.Page > 0 {
-			if !mk.progress || at.After(mk.at) {
-				mk.at, mk.page = at, int32(min(c.Page, math.MaxInt32)) //nolint:gosec // clamped
+			if newer(mk.progress, mk.at, mk.dated, at, dated) {
+				mk.at, mk.dated, mk.page = at, dated, int32(min(c.Page, math.MaxInt32)) //nolint:gosec // clamped
 			}
 			mk.progress = true
 			mk.read = mk.read || c.Read
 		}
 		if c.Bookmark {
-			if !mk.bookmark || at.After(mk.markAt) {
-				mk.markAt = at
+			if newer(mk.bookmark, mk.markAt, mk.markDated, at, dated) {
+				mk.markAt, mk.markDated = at, dated
 			}
 			mk.bookmark = true
 		}
 	}
 	slices.SortFunc(order, func(a, b uuid.UUID) int { return slices.Compare(a[:], b[:]) })
-	var pp db.ImportProgressParams
+	pp := db.ImportProgressParams{UserID: userID}
+	up := db.ImportUndatedProgressParams{UserID: userID}
 	bp := db.ImportBookmarksParams{UserID: userID}
-	pp.UserID = userID
 	for _, id := range order {
 		mk := marks[id]
-		if mk.progress {
+		switch {
+		case mk.progress && mk.dated:
 			pp.ChapterIds = append(pp.ChapterIds, id)
 			pp.Pages = append(pp.Pages, mk.page)
 			pp.Completed = append(pp.Completed, mk.read)
 			pp.ReadAt = append(pp.ReadAt, mk.at)
+		case mk.progress:
+			up.ChapterIds = append(up.ChapterIds, id)
+			up.Pages = append(up.Pages, mk.page)
+			up.Completed = append(up.Completed, mk.read)
+			up.ReadAt = append(up.ReadAt, mk.at)
 		}
 		if mk.bookmark {
 			bp.ChapterIds = append(bp.ChapterIds, id)
@@ -533,6 +583,13 @@ func (s *Service) place(ctx context.Context, q *db.Queries, userID, workID uuid.
 	}
 	if len(pp.ChapterIds) > 0 {
 		n, err := q.ImportProgress(ctx, pp)
+		if err != nil {
+			return out, err
+		}
+		out.changed += n
+	}
+	if len(up.ChapterIds) > 0 {
+		n, err := q.ImportUndatedProgress(ctx, up)
 		if err != nil {
 			return out, err
 		}
@@ -558,15 +615,15 @@ func number(f float32) float64 {
 	return n
 }
 
-// readTime is a chapter's last-read time: undated marks get undated (the
-// import's upload), and a time in the future (a wrong clock, or a crafted
-// file) is now, so it can't outrank later reading forever.
-func readTime(ms int64, undated, now time.Time) time.Time {
-	t := undated
-	if ms != 0 {
-		t = time.UnixMilli(ms).UTC()
+// readTime is a chapter's last-read time and whether the backup had one:
+// undated marks get undated (the import's upload), and a time in the
+// future (a wrong clock, or a crafted file) is now, so it can't outrank
+// later reading forever.
+func readTime(ms int64, undated, now time.Time) (time.Time, bool) {
+	if ms == 0 {
+		return earliest(undated, now), false
 	}
-	return earliest(t, now)
+	return earliest(time.UnixMilli(ms).UTC(), now), true
 }
 
 func earliest(a, b time.Time) time.Time {

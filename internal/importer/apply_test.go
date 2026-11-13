@@ -278,10 +278,21 @@ func TestCancelMidway(t *testing.T) {
 	}
 	<-reached
 	out, err := n.imp.Cancel(context.Background(), user, imp.ID)
-	close(release)
 	if err != nil || out.State != StateCancelled || out.FinishedAt == nil {
+		close(release)
 		t.Fatalf("cancel: %+v %v", out, err)
 	}
+	// Applied again at once, while the cancelled task still runs: refused,
+	// rather than handed that dying task (the import would end failed).
+	if _, err := n.imp.Apply(context.Background(), user, imp.ID); !errors.Is(err, ErrRunning) {
+		close(release)
+		t.Fatalf("apply while the cancelled task runs: %v", err)
+	}
+	if cur, _ := n.imp.Get(context.Background(), user, imp.ID); cur.State != StateCancelled || cur.TaskID != out.TaskID {
+		close(release)
+		t.Fatalf("after the refused apply: %+v", cur)
+	}
+	close(release)
 	if _, err := n.imp.Cancel(context.Background(), user, imp.ID); !errors.Is(err, ErrNotRunning) {
 		t.Fatalf("cancel again: %v", err)
 	}
@@ -453,14 +464,14 @@ func TestReadTime(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	undated := now.Add(-time.Hour)
-	if got := readTime(0, undated, now); !got.Equal(undated) {
-		t.Errorf("undated: %v", got)
+	if got, dated := readTime(0, undated, now); !got.Equal(undated) || dated {
+		t.Errorf("undated: %v, %v", got, dated)
 	}
-	if got := readTime(readAt.UnixMilli(), undated, now); !got.Equal(readAt) {
-		t.Errorf("dated: %v", got)
+	if got, dated := readTime(readAt.UnixMilli(), undated, now); !got.Equal(readAt) || !dated {
+		t.Errorf("dated: %v, %v", got, dated)
 	}
-	if got := readTime(now.Add(24*time.Hour).UnixMilli(), undated, now); !got.Equal(now) {
-		t.Errorf("future: %v", got)
+	if got, dated := readTime(now.Add(24*time.Hour).UnixMilli(), undated, now); !got.Equal(now) || !dated {
+		t.Errorf("future: %v, %v", got, dated)
 	}
 }
 

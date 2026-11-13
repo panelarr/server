@@ -421,6 +421,53 @@ func TestImportApplyRechecksGrants(t *testing.T) {
 	if _, ok := entryAddedAt(t, f.h, lu.Id, "e3"); ok {
 		t.Fatal("added a work they can't see")
 	}
+
+	// A user who may neither add works nor fix matches (as attaching by
+	// hand needs one of them): the backup's series aren't attached to the
+	// shared work, nor recorded as candidates, but their reading goes on
+	// the chapters the work has, by number.
+	bare, bu := f.h.createUser(f.admin, "bare", nil)
+	libraryWithLanternKeeper(t, bare)
+	backup := backuptest.Backup{Series: []backuptest.Series{{
+		// No series on this source is attached yet: it would be.
+		SourceID: 2001, URL: "/series/2", Title: "The Lantern Keeper", Author: "A. Author", DateAdded: backupAdded,
+		Chapters: []backuptest.Chapter{{URL: "/series/2/1", Number: 1, Read: true}},
+		History:  []backuptest.History{{URL: "/series/2/1", LastRead: readFirst}},
+	}, {
+		// Another series of the attached source: it would be a candidate.
+		SourceID: 1001, URL: "/series/3", Title: "The Lantern Keeper", Author: "A. Author", DateAdded: backupAdded,
+		Chapters: []backuptest.Chapter{{URL: "/series/3/2", Number: 2, LastPage: 3}},
+		History:  []backuptest.History{{URL: "/series/3/2", LastRead: readSecond}},
+	}}}
+	imp = waitImport(t, bare, bare.uploadImport(backup.File(), 202).Id)
+	if got := outcomes(importItems(t, bare, imp.Id, "")); got != "0:in_library 1:in_library" {
+		t.Fatalf("preview %s", got)
+	}
+	call[apigen.User](f.admin, http.MethodPatch, "/api/v1/users/"+bu.Id.String(),
+		map[string]any{"grants": map[string]any{"may_add": false, "may_manage_matches": false}}, 200)
+	applyAndWait(t, bare, imp.Id)
+	waitQuiet(t, f.h)
+	items = importItems(t, bare, imp.Id, "")
+	if got := outcomes(items); got != "0:applied 1:applied" {
+		t.Fatalf("without may_add and may_manage_matches %s", got)
+	}
+	for i, it := range items {
+		if it.SourceId != nil || !strings.Contains(deref(it.Message), "isn't attached") {
+			t.Fatalf("series %d: %+v", i, it)
+		}
+	}
+	if err := f.h.st.Pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM source_series ss JOIN works w ON w.id = ss.work_id
+		WHERE w.meta_entry_id = 'e1' AND ((ss.source_id = 'fake:2001' AND ss.key = '/series/2') OR (ss.source_id = 'fake:1001' AND ss.key = '/series/3'))`).Scan(&attached); err != nil || attached != 0 {
+		t.Fatalf("%d series attached or recorded (%v)", attached, err)
+	}
+	p := progressOf(t, f.h, bu.Id, "e1")
+	if g := p[1]; !g.completed || !g.at.Equal(readFirst) {
+		t.Fatalf("chapter 1: %+v", g)
+	}
+	if g := p[2]; g.completed || g.page != 3 || !g.at.Equal(readSecond) {
+		t.Fatalf("chapter 2: %+v", g)
+	}
 }
 
 // TestImportResolve covers AC9: a series can be given its work by hand
@@ -595,4 +642,185 @@ func TestImportsCapAndPaging(t *testing.T) {
 		break
 	}
 	f.user.uploadImport(file, 202)
+}
+
+// libraryWithLanternKeeper adds e1 with the fake source's series to c's
+// library and returns the work and its chapters' IDs by number.
+func libraryWithLanternKeeper(t *testing.T, c *client) (string, map[float32]uuid.UUID) {
+	t.Helper()
+	le := call[apigen.LibraryEntry](c, http.MethodPost, "/api/v1/library",
+		map[string]any{"entry_id": "e1", "source": map[string]string{"source_id": "fake:1001", "key": "/series/1"}}, 201)
+	work := le.Work.Id.String()
+	ids := map[float32]uuid.UUID{}
+	for _, ch := range waitChapters(t, c, work, func(c []apigen.UnifiedChapter) bool { return len(c) == 3 }) {
+		ids[*ch.Number] = ch.Id
+	}
+	return work, ids
+}
+
+// ageProgress moves a user's reading a week back, as if done then.
+func ageProgress(t *testing.T, h *harness, user uuid.UUID) {
+	t.Helper()
+	if _, err := h.st.Pool.Exec(context.Background(),
+		`UPDATE progress SET updated_at = date_trunc('second', now()) - interval '7 days' WHERE user_id = $1`, user); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestImportUndatedMarksKeepPanelarrReading: a backup mark with no time at
+// all (no history, fetch or added date) only has the upload's time, which
+// says nothing about when it was read. It may add a missing row and mark
+// a chapter read, but never moves the page or time of older reading done
+// in Panelarr (it would win as "newer" and flood History).
+func TestImportUndatedMarksKeepPanelarrReading(t *testing.T) {
+	t.Parallel()
+	f := newImportFixture(t, true)
+	_, ids := libraryWithLanternKeeper(t, f.user)
+	// A week ago in Panelarr: 1 read, 2 at page 3.
+	call[struct{}](f.user, http.MethodPut, "/api/v1/chapters/"+ids[1].String()+"/progress", map[string]any{"page": 5, "completed": true}, 200)
+	call[struct{}](f.user, http.MethodPut, "/api/v1/chapters/"+ids[2].String()+"/progress", map[string]any{"page": 3}, 200)
+	ageProgress(t, f.h, f.userID)
+	before := progressOf(t, f.h, f.userID, "e1")
+
+	// The backup, without a single date: 1 unread at page 1, 2 read at
+	// page 1, 3 read.
+	backup := backuptest.Backup{Series: []backuptest.Series{{
+		SourceID: 1001, URL: "/series/1", Title: "The Lantern Keeper", Author: "A. Author",
+		Chapters: []backuptest.Chapter{
+			{URL: "/series/1/1", Number: 1, LastPage: 1},
+			{URL: "/series/1/2", Number: 2, Read: true, LastPage: 1},
+			{URL: "/series/1/3", Number: 3, Read: true},
+		},
+	}}}
+	uploaded := time.Now().Add(-time.Second)
+	imp := waitImport(t, f.user, f.user.uploadImport(backup.File(), 202).Id)
+	applyAndWait(t, f.user, imp.Id)
+	waitQuiet(t, f.h)
+	after := progressOf(t, f.h, f.userID, "e1")
+	// 1: untouched.
+	if g := after[1]; g != before[1] {
+		t.Fatalf("chapter 1: %+v, was %+v", g, before[1])
+	}
+	// 2: now read, but its page and time stay Panelarr's.
+	if g := after[2]; !g.completed || g.page != before[2].page || !g.at.Equal(before[2].at) {
+		t.Fatalf("chapter 2: %+v, was %+v", g, before[2])
+	}
+	// 3: added, read, at the upload's time.
+	if g := after[3]; !g.completed || g.at.Before(uploaded) || g.at.After(time.Now()) {
+		t.Fatalf("chapter 3: %+v", g)
+	}
+	if it := importItems(t, f.user, imp.Id, "")[0]; deref(it.Result) != apigen.ImportResultApplied || it.Placed != 3 {
+		t.Fatalf("item %+v", it)
+	}
+}
+
+// TestImportNeverRegresses pins the import's merge rules on reading that
+// is in Panelarr already: a newer unread mark doesn't un-read a chapter,
+// an existing bookmark keeps its time, and two backup copies of a chapter
+// merge (read if either is, the later reading's page and time, bookmarked
+// if either is).
+func TestImportNeverRegresses(t *testing.T) {
+	t.Parallel()
+	f := newImportFixture(t, true)
+	work, ids := libraryWithLanternKeeper(t, f.user)
+	// In Panelarr: 1 read at page 4 a week ago; 3 bookmarked.
+	call[struct{}](f.user, http.MethodPut, "/api/v1/chapters/"+ids[1].String()+"/progress", map[string]any{"page": 4, "completed": true}, 200)
+	ageProgress(t, f.h, f.userID)
+	call[struct{}](f.user, http.MethodPost, "/api/v1/works/"+work+"/bookmarks", map[string]any{"chapter_ids": []string{ids[3].String()}, "bookmarked": true}, 200)
+	marks := bookmarksOf(t, f.h, f.userID, "e1")
+
+	yesterday := time.Now().Add(-24 * time.Hour).Truncate(time.Millisecond).UTC()
+	backup := backuptest.Backup{Series: []backuptest.Series{{
+		SourceID: 1001, URL: "/series/1", Title: "The Lantern Keeper", Author: "A. Author", DateAdded: backupAdded,
+		Chapters: []backuptest.Chapter{
+			// Unread at page 2, yesterday: newer than Panelarr's reading.
+			{URL: "/series/1/1", Number: 1, LastPage: 2},
+			// Two copies of chapter 2 (the second placed by number), both
+			// bookmarked: one read, one unread at page 5 and read later.
+			{URL: "/series/1/2", Number: 2, Read: true, Bookmark: true},
+			{URL: "/elsewhere/2", Number: 2, LastPage: 5, Bookmark: true},
+			// Bookmarked in the backup too, earlier.
+			{URL: "/series/1/3", Number: 3, Bookmark: true},
+		},
+		History: []backuptest.History{
+			{URL: "/series/1/1", LastRead: yesterday}, {URL: "/series/1/2", LastRead: readFirst},
+			{URL: "/elsewhere/2", LastRead: readSecond}, {URL: "/series/1/3", LastRead: readFirst},
+		},
+	}}}
+	imp := waitImport(t, f.user, f.user.uploadImport(backup.File(), 202).Id)
+	applyAndWait(t, f.user, imp.Id)
+	waitQuiet(t, f.h)
+	p := progressOf(t, f.h, f.userID, "e1")
+	// 1: stays read with its page; the newer time is the backup's.
+	if g := p[1]; !g.completed || g.page != 4 || !g.at.Equal(yesterday) {
+		t.Fatalf("chapter 1: %+v", g)
+	}
+	// 2: merged.
+	if g := p[2]; !g.completed || g.page != 5 || !g.at.Equal(readSecond) {
+		t.Fatalf("chapter 2: %+v", g)
+	}
+	b := bookmarksOf(t, f.h, f.userID, "e1")
+	if len(b) != 2 || !b[2].Equal(readSecond) {
+		t.Fatalf("bookmarks %+v", b)
+	}
+	// 3: the existing bookmark keeps its time.
+	if !b[3].Equal(marks[3]) {
+		t.Fatalf("bookmark of 3 at %v, was %v", b[3], marks[3])
+	}
+}
+
+// TestImportPlacesEachChapterOnce: a chapter placed after its work's
+// chapters arrived isn't placed again when they are rebuilt later, while
+// other chapters of its series still wait: marked unread in between, it
+// stays unread.
+func TestImportPlacesEachChapterOnce(t *testing.T) {
+	t.Parallel()
+	f := newImportFixture(t, true)
+	// Paper Cranes on a source Panelarr lacks: placed by number once
+	// matching attached the fake source's series. Chapter 50 never comes.
+	backup := backuptest.Backup{Series: []backuptest.Series{{
+		SourceID: 9999, URL: "/x/3", Title: "Paper Cranes", Author: "A. Author", DateAdded: backupAdded,
+		Chapters: []backuptest.Chapter{{URL: "/p/1", Number: 1, Read: true}, {URL: "/p/50", Number: 50, Read: true}},
+		History:  []backuptest.History{{URL: "/p/1", LastRead: readFirst}},
+	}}}
+	imp := waitImport(t, f.user, f.user.uploadImport(backup.File(), 202).Id)
+	applyAndWait(t, f.user, imp.Id)
+	waitFor := func(what string, ok func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(20 * time.Second)
+		for !ok() {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+			time.Sleep(30 * time.Millisecond)
+		}
+	}
+	waitFor("chapter 1 placed", func() bool { return progressOf(t, f.h, f.userID, "e3")[1].completed })
+	waitQuiet(t, f.h)
+	if it := importItems(t, f.user, imp.Id, "")[0]; it.Placed != 1 || it.Pending != 1 {
+		t.Fatalf("item %+v", it)
+	}
+	work := workOf(t, f.h, "e3")
+	var first uuid.UUID
+	for _, c := range waitChapters(t, f.user, work, func(c []apigen.UnifiedChapter) bool { return len(c) == 3 }) {
+		if *c.Number == 1 {
+			first = c.Id
+		}
+	}
+	call[struct{}](f.user, http.MethodPut, "/api/v1/chapters/"+first.String()+"/progress", map[string]any{"page": 0, "completed": false}, 200)
+
+	places := func() int {
+		var n int
+		if err := f.h.st.Pool.QueryRow(context.Background(), `SELECT count(*) FROM tasks WHERE kind = $1`, importer.KindPlace).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before := places()
+	call[apigen.RefreshQueued](f.user, http.MethodPost, "/api/v1/works/"+work+"/refresh", nil, 202)
+	waitFor("the rebuild to place again", func() bool { return places() > before })
+	waitQuiet(t, f.h)
+	if g := progressOf(t, f.h, f.userID, "e3")[1]; g.completed {
+		t.Fatalf("chapter 1 read again: %+v", g)
+	}
 }

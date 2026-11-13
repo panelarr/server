@@ -232,7 +232,9 @@ stops it first and keeps what it imported.
 A cancelled or failed import can be applied again only if its preview finished. A preview stopped early left series
 unmatched, so that import can't be applied: re-uploading the file makes a new import (an upload offers an earlier
 import of the same file only if it didn't fail or get cancelled). Applying again is safe: series already applied are
-skipped, and the rest go through as on a first apply.
+skipped, and the rest go through as on a first apply. A cancel only signals the running task, which stops at the next
+series: applying again before it has stopped answers `409 import_running` (rather than reusing that task, which would
+end the new apply with it), so the client tries again a moment later.
 
 ## Applying (`import.apply`)
 
@@ -246,7 +248,8 @@ again and checks each series as it is then:
 
 - whether the user can still see the work (content rating limit, sources);
 - `may_add` for a work not in their library;
-- whether the user may still use the backup's source.
+- whether the user may still use the backup's source;
+- `may_add` or `may_manage_matches` to attach the backup's series to a work (see below).
 
 A series that no longer passes becomes `not_allowed` with the reason. What apply did is kept apart from the preview's
 `outcome`, as the series' `result`: `applied`, `already_imported` or `skipped`. A series whose work is already in the library
@@ -264,6 +267,12 @@ existing entry keeps its own. Works are shared, so attaching the backup's series
 | Another series attached | Keeps it. The backup's series is recorded as a candidate, and the chapters are placed by number |
 | The backup's series was rejected (detached by someone) | Doesn't attach it again. Chapters are placed by number |
 | The source doesn't answer for the series | Doesn't attach. Chapters are placed by number |
+| The user has neither `may_add` nor `may_manage_matches` | Doesn't attach, nor record a candidate. Chapters are placed by key when this very series is attached already, else by number |
+
+The last row follows the manual paths: attaching a series by hand (`POST /works/{id}/series`) needs
+`may_manage_matches`, and adding a work with a source (`POST /library`) needs `may_add`. An import never lets a user
+change a shared work in a way neither would allow. Their own reading is still imported, and the series' message says
+the series isn't attached.
 
 **Placing chapters.** Each chapter with something to import goes on one of the work's chapters:
 
@@ -294,7 +303,11 @@ What this means for the user:
 - History hidden or cleared before those times stays hidden.
 
 A read mark has a time from the backup's history, else the chapter's fetch date, else the series' added date (see
-the preview). Without any of them, it takes the time of the upload. A time in the future (a wrong clock, or a crafted
+the preview). Without any of them, it takes the time of the upload, which says nothing about when it was read. Such
+an undated mark goes through a narrower upsert (`ImportUndatedProgress`): it may add a missing row (at the upload's
+time) and mark an existing row read, but never moves the page or time of reading already in Panelarr. Otherwise it
+would win as the newer reading, move pages back and flood History with "read just now". When two copies of a chapter
+merge, a dated copy wins over an undated one. A time in the future (a wrong clock, or a crafted
 file) is capped at the time of the apply, so it can't outrank later reading forever. The import's summary counts the
 capped times (`clamped_times`). Bookmarks are added with the
 mark's time and never removed. A series with nothing left to change gets the result `already_imported`, so applying a

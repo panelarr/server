@@ -4223,15 +4223,18 @@ paths:
         Each series that is `ready`, `in_library` or `source_missing` is
         added to your library (a new entry keeps the backup's added date),
         gets the backup's series attached where its source is in Panelarr,
-        you may use it and the work has no series on that source yet, and
-        gets its read marks, pages, last-read times and bookmarks. Your
+        you may use it, the work has no series on that source yet and you
+        have `may_add` or `may_manage_matches` (as attaching by hand
+        needs), and gets its read marks, pages, last-read times and bookmarks. Your
         grants are checked again as they are now: a series you may no
         longer add, or whose work is above your content rating limit now,
         becomes `not_allowed`.
 
         Imported reading never undoes newer reading in Panelarr: a read
         chapter stays read, a newer page and time are kept, and nothing is
-        marked unread or unbookmarked. Applying a backup again adds
+        marked unread or unbookmarked. A mark the backup has no time for
+        may add reading or a read mark, but never moves a page or time
+        already in Panelarr. Applying a backup again adds
         nothing twice (result `already_imported`). Chapters Panelarr doesn't
         know yet (a newly attached series is checked first) are placed
         when they appear, for up to 24 hours (`pending`).
@@ -4239,8 +4242,9 @@ paths:
         Progress is reported like the preview's (`import.progress`, then
         `import.finished`). Any other import (still previewing, applying
         or done, or stopped before its preview finished) answers `409`,
-        code `import_state`; while another import of yours runs, `409`,
-        code `import_running`.
+        code `import_state`; while another import of yours runs, or the
+        task of this one's cancelled apply is still stopping, `409`, code
+        `import_running` (try again in a moment).
       x-panelarr-access: user
       responses:
         "202":

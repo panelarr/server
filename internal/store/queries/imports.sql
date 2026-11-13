@@ -197,6 +197,18 @@ ON CONFLICT (user_id, chapter_id) DO UPDATE SET
     updated_at = GREATEST(progress.updated_at, EXCLUDED.updated_at)
 WHERE (EXCLUDED.completed AND NOT progress.completed) OR EXCLUDED.updated_at > progress.updated_at;
 
+-- name: ImportUndatedProgress :execrows
+-- Imported reading the backup has no time for (it gets the upload's): it
+-- may add a missing row, and mark an existing one read, but never moves
+-- the page or time of reading done in Panelarr.
+INSERT INTO progress (user_id, chapter_id, work_id, page, completed, updated_at)
+SELECT @user_id, c.id, c.work_id, x.page, x.completed, x.read_at
+FROM (SELECT unnest(@chapter_ids::uuid[]) AS chapter_id, unnest(@pages::int[]) AS page,
+             unnest(@completed::boolean[]) AS completed, unnest(@read_at::timestamptz[]) AS read_at) AS x
+JOIN chapters c ON c.id = x.chapter_id
+ON CONFLICT (user_id, chapter_id) DO UPDATE SET completed = true
+WHERE EXCLUDED.completed AND NOT progress.completed;
+
 -- name: ImportBookmarks :execrows
 -- Bookmarks an import adds; existing ones (and their times) stay.
 INSERT INTO bookmarks (user_id, chapter_id, work_id, created_at)

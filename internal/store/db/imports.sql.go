@@ -726,6 +726,41 @@ func (q *Queries) ImportResultCounts(ctx context.Context, importID uuid.UUID) ([
 	return items, nil
 }
 
+const importUndatedProgress = `-- name: ImportUndatedProgress :execrows
+INSERT INTO progress (user_id, chapter_id, work_id, page, completed, updated_at)
+SELECT $1, c.id, c.work_id, x.page, x.completed, x.read_at
+FROM (SELECT unnest($2::uuid[]) AS chapter_id, unnest($3::int[]) AS page,
+             unnest($4::boolean[]) AS completed, unnest($5::timestamptz[]) AS read_at) AS x
+JOIN chapters c ON c.id = x.chapter_id
+ON CONFLICT (user_id, chapter_id) DO UPDATE SET completed = true
+WHERE EXCLUDED.completed AND NOT progress.completed
+`
+
+type ImportUndatedProgressParams struct {
+	UserID     uuid.UUID
+	ChapterIds []uuid.UUID
+	Pages      []int32
+	Completed  []bool
+	ReadAt     []time.Time
+}
+
+// Imported reading the backup has no time for (it gets the upload's): it
+// may add a missing row, and mark an existing one read, but never moves
+// the page or time of reading done in Panelarr.
+func (q *Queries) ImportUndatedProgress(ctx context.Context, arg ImportUndatedProgressParams) (int64, error) {
+	result, err := q.db.Exec(ctx, importUndatedProgress,
+		arg.UserID,
+		arg.ChapterIds,
+		arg.Pages,
+		arg.Completed,
+		arg.ReadAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 type InsertImportItemsParams struct {
 	ImportID       uuid.UUID
 	Idx            int32

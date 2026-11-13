@@ -173,6 +173,10 @@ type Querier interface {
 	ImportProgress(ctx context.Context, arg ImportProgressParams) (int64, error)
 	// Series per result of apply (those apply went through or skipped).
 	ImportResultCounts(ctx context.Context, importID uuid.UUID) ([]ImportResultCountsRow, error)
+	// Imported reading the backup has no time for (it gets the upload's): it
+	// may add a missing row, and mark an existing one read, but never moves
+	// the page or time of reading done in Panelarr.
+	ImportUndatedProgress(ctx context.Context, arg ImportUndatedProgressParams) (int64, error)
 	InsertChapter(ctx context.Context, arg InsertChapterParams) (Chapter, error)
 	InsertChapterFile(ctx context.Context, arg InsertChapterFileParams) (ChapterFile, error)
 	InsertImportItems(ctx context.Context, arg []InsertImportItemsParams) (int64, error)
